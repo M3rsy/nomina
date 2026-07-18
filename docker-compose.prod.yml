@@ -1,0 +1,131 @@
+services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile.prod
+        container_name: nomina-app-prod
+        env_file:
+            - .env.production
+        restart: unless-stopped
+        depends_on:
+            db:
+                condition: service_healthy
+        volumes:
+            - .:/var/www/html:ro
+            - ./storage:/var/www/html/storage
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache
+            - nomina-backups:/var/www/html/storage/app/nomina-backups
+        networks:
+            - nomina-prod
+        healthcheck:
+            test: ["CMD-SHELL", "su-exec www-data php -r 'echo \"ok\";' || php -r 'echo \"ok\";'"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
+
+    web:
+        image: nginx:alpine
+        container_name: nomina-web-prod
+        restart: unless-stopped
+        depends_on:
+            app:
+                condition: service_healthy
+        ports:
+            - "80:80"
+            - "443:443"
+        volumes:
+            - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+            - ./docker/nginx/entrypoint.sh:/docker-entrypoint.sh:ro
+            - ./public:/var/www/html/public:ro
+            - ./storage/app/public:/var/www/html/storage/app/public:ro
+            - certbot-data:/etc/letsencrypt:ro
+            - certbot-webroot:/var/www/certbot:ro
+        environment:
+            DOMAIN: ${DOMAIN:-example.com}
+        entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+        networks:
+            - nomina-prod
+        healthcheck:
+            test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1/health || wget -qO- http://127.0.0.1/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
+
+    db:
+        image: postgres:15-alpine
+        container_name: nomina-db-prod
+        restart: unless-stopped
+        env_file:
+            - .env.production
+        volumes:
+            - nomina-db-data-prod:/var/lib/postgresql/data
+            - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+        networks:
+            - nomina-prod
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-nomina} -d $${POSTGRES_DB:-nomina}"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+
+    certbot:
+        image: certbot/certbot
+        container_name: nomina-certbot
+        profiles:
+            - ssl
+        restart: "no"
+        volumes:
+            - certbot-data:/etc/letsencrypt
+            - certbot-webroot:/var/www/certbot
+        environment:
+            DOMAIN: ${DOMAIN:-example.com}
+            EMAIL: ${EMAIL:-admin@example.com}
+        command: >
+            certonly
+            --webroot
+            -w /var/www/certbot
+            -d ${DOMAIN:-example.com}
+            -m ${EMAIL:-admin@example.com}
+            --agree-tos
+            --no-eff-email
+            --keep
+        networks:
+            - nomina-prod
+
+    scheduler:
+        build:
+            context: .
+            dockerfile: Dockerfile.prod
+        container_name: nomina-scheduler-prod
+        env_file:
+            - .env.production
+        restart: unless-stopped
+        depends_on:
+            db:
+                condition: service_healthy
+        volumes:
+            - .:/var/www/html:ro
+            - ./storage:/var/www/html/storage
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache
+            - ./docker/cron/nomina:/etc/crontabs/www-data:ro
+        entrypoint: [""]
+        command:
+            - /bin/sh
+            - -c
+            - "crontab /etc/crontabs/www-data && crond -f -l 2"
+        networks:
+            - nomina-prod
+
+volumes:
+    nomina-db-data-prod:
+    nomina-backups:
+    certbot-data:
+    certbot-webroot:
+
+networks:
+    nomina-prod:
+        driver: bridge

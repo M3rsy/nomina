@@ -1,0 +1,51 @@
+# Alternative production override: replace nginx with Caddy for automatic HTTPS.
+# Usage:
+#   DOMAIN=planilla.tu-dominio.com EMAIL=admin@tu-dominio.com \
+#     docker compose -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d
+
+services:
+    web:
+        image: caddy:alpine
+        container_name: nomina-web-prod
+        restart: unless-stopped
+        depends_on:
+            app:
+                condition: service_healthy
+        ports:
+            - "80:80"
+            - "443:443"
+            - "443:443/udp"
+        volumes:
+            - ./public:/var/www/html/public:ro
+            - ./storage/app/public:/var/www/html/storage/app/public:ro
+            - caddy-data:/data
+            - caddy-config:/config
+        environment:
+            DOMAIN: ${DOMAIN:-example.com}
+        command: >
+            sh -c "echo '\
+            ${DOMAIN:-example.com} {\n
+                encode gzip\n
+                reverse_proxy app:9000\n
+                header {\n
+                    X-Frame-Options SAMEORIGIN\n
+                    X-Content-Type-Options nosniff\n
+                    Referrer-Policy strict-origin-when-cross-origin\n
+                    Strict-Transport-Security max-age=63072000;\n
+                }\n
+                handle /health {\n
+                    reverse_proxy app:9000\n
+                }\n
+            }' > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile"
+        networks:
+            - nomina-prod
+        healthcheck:
+            test: ["CMD", "wget", "-qO-", "https://127.0.0.1/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
+
+volumes:
+    caddy-data:
+    caddy-config:

@@ -1,0 +1,8 @@
+# Laravel scheduler and backup cron entries for the nomina production container.
+# This file is mounted into the scheduler service as /etc/crontabs/www-data.
+
+# Run Laravel scheduler every minute.
+* * * * * cd /var/www/html && php artisan schedule:run >> /var/www/html/storage/logs/scheduler.log 2>&1
+
+# Run Spatie Laravel backup once per hour.
+0 * * * * cd /var/www/html && php artisan backup:run >> /var/www/html/storage/logs/backup.log 2>&1
