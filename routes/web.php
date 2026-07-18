@@ -4,8 +4,10 @@ use App\Http\Controllers\EmployeeController;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
 use App\Http\Controllers\UploadedFileReportController;
+use App\Livewire\Auditoria\Index as AuditoriaIndex;
 use App\Livewire\Auth\ResetPassword;
 use App\Livewire\Empleados\Create as EmployeeCreate;
+use App\Livewire\Respaldos\Index as RespaldosIndex;
 use App\Livewire\Empleados\Edit as EmployeeEdit;
 use App\Livewire\Empleados\Index as EmployeesIndex;
 use App\Livewire\Empresas\Create as CompanyCreate;
@@ -20,10 +22,13 @@ use App\Http\Controllers\PayrollExportController;
 use App\Livewire\Nomina\Index as NominaIndex;
 use App\Livewire\Nomina\Procesar as NominaProcesar;
 use App\Livewire\Nomina\Revisar as NominaRevisar;
+use App\Livewire\Dashboard\CompanyAdmin as DashboardCompanyAdmin;
+use App\Livewire\Dashboard\SuperAdmin as DashboardSuperAdmin;
 use App\Livewire\Profile\ChangePassword;
 use App\Livewire\Usuarios\Create as UserCreate;
 use App\Livewire\Usuarios\Edit as UserEdit;
 use App\Livewire\Usuarios\Index as UsersIndex;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -47,15 +52,23 @@ Route::middleware(['auth'])->group(function () {
         $user = auth()->user();
 
         if ($user->hasRole('super_admin')) {
-            return redirect('/empresas');
+            return redirect()->route('dashboard.super');
         }
 
         if ($user->hasRole('company_admin')) {
-            return redirect('/usuarios');
+            return redirect()->route('dashboard.company');
         }
 
-        return view('dashboard.index');
+        return redirect('/login');
     })->name('dashboard');
+
+    Route::get('/dashboard/super', DashboardSuperAdmin::class)
+        ->name('dashboard.super')
+        ->can('companies.view');
+
+    Route::get('/dashboard/company', DashboardCompanyAdmin::class)
+        ->name('dashboard.company')
+        ->can('payroll.view');
 
     Route::get('/perfil/cambiar-contrasena', ChangePassword::class)
         ->name('profile.change-password');
@@ -124,7 +137,28 @@ Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
         Route::get('/{payPeriod}/excel', PayrollExportController::class)
             ->name('nomina.excel')
             ->can('payroll.export');
-        Route::get('/{payPeriod}/empleado/{employee}/comprobante', [PayrollExportController::class, 'stub'])
-            ->name('nomina.comprobante')
-            ->can('payroll.export');
+    Route::get('/{payPeriod}/empleado/{employee}/comprobante', [PayrollExportController::class, 'stub'])
+        ->name('nomina.comprobante')
+        ->can('payroll.export');
+});
+
+Route::middleware(['auth', 'set-active-company', 'can:audit.view'])
+    ->get('/auditoria', AuditoriaIndex::class)
+    ->name('auditoria.index');
+
+Route::middleware(['auth', 'can:backups.run'])
+    ->prefix('respaldos')
+    ->group(function () {
+        Route::get('/', RespaldosIndex::class)->name('respaldos.index');
+        Route::get('/{path}/descargar', function (string $path) {
+            Gate::authorize('backups.run');
+
+            $disk = \Illuminate\Support\Facades\Storage::disk('backups');
+
+            if (! $disk->exists($path)) {
+                abort(404);
+            }
+
+            return $disk->download($path);
+        })->name('respaldos.download')->where('path', '.*');
     });

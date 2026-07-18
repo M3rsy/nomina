@@ -19,6 +19,10 @@
                         <div class="flex items-center space-x-4">
                             <a href="/dashboard" class="font-bold text-lg">{{ config('app.name', 'Nomina') }}</a>
 
+                            @auth
+                                <a href="/dashboard" class="text-gray-700 hover:text-indigo-600">Panel</a>
+                            @endauth
+
                             @can('companies.view')
                                 <a href="/empresas" class="text-gray-700 hover:text-indigo-600">Empresas</a>
                             @endcan
@@ -45,6 +49,14 @@
 
                             @can('pay_periods.view')
                                 <a href="/nomina" class="text-gray-700 hover:text-indigo-600">Nómina</a>
+                            @endcan
+
+                            @can('audit.view')
+                                <a href="/auditoria" class="text-gray-700 hover:text-indigo-600">Auditoría</a>
+                            @endcan
+
+                            @can('backups.run')
+                                <a href="/respaldos" class="text-gray-700 hover:text-indigo-600">Respaldos</a>
                             @endcan
                         </div>
 
