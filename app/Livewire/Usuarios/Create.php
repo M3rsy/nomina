@@ -45,7 +45,7 @@ class Create extends Component
         if ($isSuperAdmin) {
             $rules['company_id'] = ['nullable', 'exists:companies,id'];
         } else {
-            $this->company_id = auth()->user()->company_id;
+            $rules['company_id'] = ['required', 'in:'.auth()->user()->company_id];
         }
 
         $validated = $this->validate($rules, [
