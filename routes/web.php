@@ -16,7 +16,9 @@ use App\Livewire\Archivos\Show as FileShow;
 use App\Livewire\Archivos\Upload as FileUpload;
 use App\Livewire\Feriados\Index as HolidaysIndex;
 use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
+use App\Http\Controllers\PayrollExportController;
 use App\Livewire\Nomina\Index as NominaIndex;
+use App\Livewire\Nomina\Procesar as NominaProcesar;
 use App\Livewire\Nomina\Revisar as NominaRevisar;
 use App\Livewire\Profile\ChangePassword;
 use App\Livewire\Usuarios\Create as UserCreate;
@@ -116,4 +118,13 @@ Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
         Route::get('/{payPeriod}/revisar', NominaRevisar::class)
             ->name('nomina.revisar')
             ->can('marks.manage');
+        Route::get('/{payPeriod}/procesar', NominaProcesar::class)
+            ->name('nomina.procesar')
+            ->can('payroll.process');
+        Route::get('/{payPeriod}/excel', PayrollExportController::class)
+            ->name('nomina.excel')
+            ->can('payroll.export');
+        Route::get('/{payPeriod}/empleado/{employee}/comprobante', [PayrollExportController::class, 'stub'])
+            ->name('nomina.comprobante')
+            ->can('payroll.export');
     });
