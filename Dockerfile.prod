@@ -1,0 +1,55 @@
+FROM php:8.5-fpm-alpine
+
+# Install system dependencies and PHP extensions required for production.
+RUN apk add --no-cache \
+    postgresql-dev \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    libxml2-dev \
+    icu-dev \
+    unzip \
+    curl \
+    su-exec \
+    nodejs \
+    npm \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install \
+    pdo_pgsql \
+    pgsql \
+    zip \
+    gd \
+    opcache \
+    intl \
+    mbstring \
+    bcmath \
+    xml
+
+# Install Composer.
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+# Copy application files.
+COPY . .
+
+# Install PHP dependencies without dev packages and optimize autoloader.
+RUN composer install --no-dev --no-interaction --optimize-autoloader --no-progress
+
+# Install Node dependencies and build production assets.
+RUN npm ci && npm run build
+
+# Apply OPcache production configuration.
+COPY docker/php/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
+
+# Make entrypoint executable.
+RUN chmod +x docker/php/entrypoint.sh
+
+# Set initial ownership/permissions for Laravel writable directories.
+RUN chown -R www-data:www-data /var/www/html \
+    && chmod -R 775 storage bootstrap/cache
+
+EXPOSE 9000
+
+ENTRYPOINT ["docker/php/entrypoint.sh"]
