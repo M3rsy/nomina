@@ -4,7 +4,6 @@ namespace App\Models\Concerns;
 
 use App\Services\CurrentCompany;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model;
 
 trait BelongsToCompany
 {

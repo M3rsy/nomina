@@ -4,7 +4,6 @@ namespace App\Livewire\Empleados;
 
 use App\Models\Company;
 use App\Models\Employee;
-use App\Services\CurrentCompany;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;

@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\Company;
+use App\Livewire\Profile\ChangePassword;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +81,7 @@ test('changing password invalidates other sessions but keeps current', function 
         'last_activity' => now()->timestamp,
     ]);
 
-    Livewire::test(\App\Livewire\Profile\ChangePassword::class)
+    Livewire::test(ChangePassword::class)
         ->set('current_password', 'password')
         ->set('password', 'newpassword')
         ->set('password_confirmation', 'newpassword')

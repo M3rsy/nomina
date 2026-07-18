@@ -3,7 +3,6 @@
 namespace App\Livewire\Empresas;
 
 use App\Models\Company;
-use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 

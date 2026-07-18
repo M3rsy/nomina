@@ -1,9 +1,9 @@
 <?php
 
+use App\Http\Controllers\EmployeeController;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\ResetPassword;
-use App\Http\Controllers\EmployeeController;
 use App\Livewire\Empleados\Create as EmployeeCreate;
 use App\Livewire\Empleados\Edit as EmployeeEdit;
 use App\Livewire\Empleados\Index as EmployeesIndex;

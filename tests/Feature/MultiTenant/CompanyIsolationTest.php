@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Usuarios\Create;
 use App\Models\Company;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
@@ -55,7 +56,7 @@ test('company admin cannot create user in other company', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Usuarios\Create::class)
+    Livewire::test(Create::class)
         ->set('name', 'Nuevo usuario')
         ->set('email', 'nuevo@empresa-b.test')
         ->set('password', 'password123')
@@ -75,7 +76,7 @@ test('company admin cannot assign super admin role', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Usuarios\Create::class)
+    Livewire::test(Create::class)
         ->set('name', 'Nuevo usuario')
         ->set('email', 'nuevo@empresa.test')
         ->set('password', 'password123')

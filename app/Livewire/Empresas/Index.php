@@ -3,7 +3,6 @@
 namespace App\Livewire\Empresas;
 
 use App\Models\Company;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;

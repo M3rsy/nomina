@@ -1,5 +1,7 @@
 <?php
 
+use App\Livewire\Empleados\Create;
+use App\Livewire\Empleados\Edit;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
@@ -104,7 +106,7 @@ test('company admin create employee forces own company', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Empleados\Create::class)
+    Livewire::test(Create::class)
         ->set('external_id', '9999')
         ->set('first_name', 'Juan')
         ->set('last_name', 'Pérez')
@@ -128,7 +130,7 @@ test('super admin can switch company and create employee', function () {
     session(['active_company_id' => $companyB->id]);
     app(CurrentCompany::class)->set($companyB);
 
-    Livewire::test(\App\Livewire\Empleados\Create::class)
+    Livewire::test(Create::class)
         ->set('external_id', '8888')
         ->set('first_name', 'Ana')
         ->set('last_name', 'López')
@@ -158,7 +160,7 @@ test('duplicate external id within same company is rejected', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Empleados\Create::class)
+    Livewire::test(Create::class)
         ->set('external_id', '1111')
         ->set('first_name', 'Pedro')
         ->set('last_name', 'Gómez')
@@ -181,7 +183,7 @@ test('duplicate external id in other company is allowed', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Empleados\Create::class)
+    Livewire::test(Create::class)
         ->set('external_id', '2222')
         ->set('first_name', 'Luis')
         ->set('last_name', 'Martínez')
@@ -212,7 +214,7 @@ test('update employee audits sensitive fields', function () {
 
     $this->actingAs($admin);
 
-    Livewire::test(\App\Livewire\Empleados\Edit::class, ['employee' => $employee])
+    Livewire::test(Edit::class, ['employee' => $employee])
         ->set('dni', '2222222222222')
         ->set('expected_salary', '15000')
         ->set('job_title', 'Supervisor')

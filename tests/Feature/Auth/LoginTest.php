@@ -1,5 +1,7 @@
 <?php
 
+use App\Livewire\Auth\Login;
+use App\Livewire\Auth\Logout;
 use App\Models\Company;
 use App\Models\LoginAttempt;
 use App\Models\User;
@@ -20,7 +22,7 @@ test('login success redirects super admin to empresas', function () {
     ]);
     $user->assignRole('super_admin');
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'admin@nomina.test')
         ->set('password', 'password')
         ->call('login')
@@ -38,7 +40,7 @@ test('login success redirects company admin to usuarios', function () {
     ]);
     $user->assignRole('company_admin');
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'admin@empresa.test')
         ->set('password', 'password')
         ->call('login')
@@ -48,7 +50,7 @@ test('login success redirects company admin to usuarios', function () {
 });
 
 test('login invalid credentials logs attempt and throws', function () {
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'noexiste@nomina.test')
         ->set('password', 'wrong')
         ->call('login')
@@ -68,14 +70,14 @@ test('rate limiter blocks after 5 failed attempts', function () {
     RateLimiter::clear($key);
 
     foreach (range(1, 5) as $i) {
-        Livewire::test(\App\Livewire\Auth\Login::class)
+        Livewire::test(Login::class)
             ->set('email', $email)
             ->set('password', 'wrong')
             ->call('login')
             ->assertHasErrors('email');
     }
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', $email)
         ->set('password', 'wrong')
         ->call('login')
@@ -91,7 +93,7 @@ test('disabled user cannot login and gets error', function () {
     ]);
     $user->assignRole('company_admin');
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'disabled@nomina.test')
         ->set('password', 'password')
         ->call('login')
@@ -107,13 +109,13 @@ test('login attempt recorded on success and failure', function () {
     ]);
     $user->assignRole('company_admin');
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'ok@nomina.test')
         ->set('password', 'wrong')
         ->call('login')
         ->assertHasErrors('email');
 
-    Livewire::test(\App\Livewire\Auth\Login::class)
+    Livewire::test(Login::class)
         ->set('email', 'ok@nomina.test')
         ->set('password', 'password')
         ->call('login')
@@ -131,7 +133,7 @@ test('logout clears session', function () {
 
     $this->actingAs($user);
 
-    Livewire::test(\App\Livewire\Auth\Logout::class)
+    Livewire::test(Logout::class)
         ->call('logout')
         ->assertRedirect('/login');
 

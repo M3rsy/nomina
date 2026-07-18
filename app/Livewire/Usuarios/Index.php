@@ -4,8 +4,6 @@ namespace App\Livewire\Usuarios;
 
 use App\Models\Company;
 use App\Models\User;
-use App\Services\CurrentCompany;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;
