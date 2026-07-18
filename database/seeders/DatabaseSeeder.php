@@ -80,6 +80,7 @@ class DatabaseSeeder extends Seeder
             PayPeriodSeeder::class,
             WorkScheduleSeeder::class,
             HolidaysSeeder::class,
+            AuditSeeder::class,
         ]);
     }
 
