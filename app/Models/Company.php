@@ -57,4 +57,27 @@ class Company extends Model
     {
         return $this->hasMany(LoginAttempt::class);
     }
+
+    public function workSchedules(): HasMany
+    {
+        return $this->hasMany(WorkSchedule::class);
+    }
+
+    public function holidays(): HasMany
+    {
+        return $this->hasMany(Holiday::class);
+    }
+
+    public static function defaultWorkSchedules(): array
+    {
+        return [
+            ['day_of_week' => 1, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
+            ['day_of_week' => 2, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
+            ['day_of_week' => 3, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
+            ['day_of_week' => 4, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
+            ['day_of_week' => 5, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
+            ['day_of_week' => 6, 'is_working_day' => true, 'base_ordinary_hours' => 4.00, 'notes' => null],
+            ['day_of_week' => 0, 'is_working_day' => false, 'base_ordinary_hours' => 0.00, 'notes' => null],
+        ];
+    }
 }
