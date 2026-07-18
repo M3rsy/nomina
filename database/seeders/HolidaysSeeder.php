@@ -13,7 +13,7 @@ class HolidaysSeeder extends Seeder
 
     public function run(): void
     {
-        $companyA = Company::withoutCompanyScope()->firstWhere('slug', 'empresa-a');
+        $companyA = Company::query()->firstWhere('slug', 'empresa-a');
 
         if ($companyA === null) {
             return;
