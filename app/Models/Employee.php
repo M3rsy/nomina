@@ -125,6 +125,11 @@ class Employee extends Model
         return $this->hasMany(EmployeeRevision::class);
     }
 
+    public function justifiedAbsences(): HasMany
+    {
+        return $this->hasMany(JustifiedAbsence::class);
+    }
+
     public function getFullNameAttribute(): string
     {
         return trim($this->first_name.' '.$this->last_name);
