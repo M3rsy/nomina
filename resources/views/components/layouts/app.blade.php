@@ -42,6 +42,10 @@
                             @can('files.view')
                                 <a href="/archivos" class="text-gray-700 hover:text-indigo-600">Archivos</a>
                             @endcan
+
+                            @can('pay_periods.view')
+                                <a href="/nomina" class="text-gray-700 hover:text-indigo-600">Nómina</a>
+                            @endcan
                         </div>
 
                         <div class="flex items-center space-x-4">

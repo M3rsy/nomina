@@ -16,6 +16,8 @@ use App\Livewire\Archivos\Show as FileShow;
 use App\Livewire\Archivos\Upload as FileUpload;
 use App\Livewire\Feriados\Index as HolidaysIndex;
 use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
+use App\Livewire\Nomina\Index as NominaIndex;
+use App\Livewire\Nomina\Revisar as NominaRevisar;
 use App\Livewire\Profile\ChangePassword;
 use App\Livewire\Usuarios\Create as UserCreate;
 use App\Livewire\Usuarios\Edit as UserEdit;
@@ -103,4 +105,13 @@ Route::middleware(['auth', 'set-active-company', 'can:files.view'])
         Route::get('/subir', FileUpload::class)->name('archivos.upload')->can('files.upload');
         Route::get('/{uploadedFile}/reporte', [UploadedFileReportController::class, 'download'])->name('archivos.report');
         Route::get('/{uploadedFile}', FileShow::class)->name('archivos.show');
+    });
+
+Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
+    ->prefix('nomina')
+    ->group(function () {
+        Route::get('/', NominaIndex::class)->name('nomina.index');
+        Route::get('/{payPeriod}/revisar', NominaRevisar::class)
+            ->name('nomina.revisar')
+            ->can('marks.manage');
     });
