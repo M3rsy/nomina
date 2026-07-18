@@ -4,6 +4,7 @@ namespace App\Livewire\Archivos;
 
 use App\Models\UploadedFile;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -12,10 +13,13 @@ class Index extends Component
 {
     use WithPagination;
 
+    #[Url]
     public string $search = '';
 
+    #[Url]
     public string $status = '';
 
+    #[Url]
     public ?int $pay_period_id = null;
 
     public function render()

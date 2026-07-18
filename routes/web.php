@@ -3,6 +3,7 @@
 use App\Http\Controllers\EmployeeController;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
+use App\Http\Controllers\UploadedFileReportController;
 use App\Livewire\Auth\ResetPassword;
 use App\Livewire\Empleados\Create as EmployeeCreate;
 use App\Livewire\Empleados\Edit as EmployeeEdit;
@@ -100,5 +101,6 @@ Route::middleware(['auth', 'set-active-company', 'can:files.view'])
     ->group(function () {
         Route::get('/', FilesIndex::class)->name('archivos.index');
         Route::get('/subir', FileUpload::class)->name('archivos.upload')->can('files.upload');
+        Route::get('/{uploadedFile}/reporte', [UploadedFileReportController::class, 'download'])->name('archivos.report');
         Route::get('/{uploadedFile}', FileShow::class)->name('archivos.show');
     });

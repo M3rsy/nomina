@@ -26,7 +26,7 @@
 
     <div class="flex justify-between items-center mb-4">
         <h2 class="text-lg font-semibold">Registros</h2>
-        <button class="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300">Descargar reporte</button>
+        <a href="/archivos/{{ $uploadedFile->id }}/reporte" class="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300">Descargar reporte</a>
     </div>
 
     <table class="w-full bg-white rounded-lg shadow">
