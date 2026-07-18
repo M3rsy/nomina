@@ -353,19 +353,30 @@ class Revisar extends Component
             return;
         }
 
-        JustifiedAbsence::withoutCompanyScope()->updateOrCreate(
-            [
+        $absence = JustifiedAbsence::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->where('pay_period_id', $this->payPeriod->id)
+            ->where('employee_id', $employeeId)
+            ->whereDate('date', $date)
+            ->first();
+
+        if ($absence) {
+            $absence->update([
+                'reason' => $reason,
+                'notes' => $notes ?: null,
+                'justified_by' => Auth::id(),
+            ]);
+        } else {
+            JustifiedAbsence::withoutCompanyScope()->create([
                 'company_id' => $this->payPeriod->company_id,
                 'pay_period_id' => $this->payPeriod->id,
                 'employee_id' => $employeeId,
                 'date' => $date,
-            ],
-            [
                 'reason' => $reason,
                 'notes' => $notes ?: null,
                 'justified_by' => Auth::id(),
-            ]
-        );
+            ]);
+        }
 
         $this->closeAbsencesModal();
     }

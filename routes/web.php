@@ -107,6 +107,8 @@ Route::middleware(['auth', 'set-active-company', 'can:files.view'])
         Route::get('/{uploadedFile}', FileShow::class)->name('archivos.show');
     });
 
+Route::bind('payPeriod', fn ($value) => \App\Models\PayPeriod::withoutCompanyScope()->findOrFail($value));
+
 Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
     ->prefix('nomina')
     ->group(function () {
