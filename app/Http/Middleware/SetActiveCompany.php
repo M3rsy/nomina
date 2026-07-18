@@ -19,7 +19,7 @@ class SetActiveCompany
     public function handle(Request $request, Closure $next): Response
     {
         if (! Auth::check() || ! Auth::user()->hasRole('super_admin')) {
-            abort(403);
+            return $next($request);
         }
 
         $slug = $request->query('company') ?? $request->route('company');

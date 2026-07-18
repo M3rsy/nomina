@@ -3,6 +3,10 @@
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\ResetPassword;
+use App\Http\Controllers\EmployeeController;
+use App\Livewire\Empleados\Create as EmployeeCreate;
+use App\Livewire\Empleados\Edit as EmployeeEdit;
+use App\Livewire\Empleados\Index as EmployeesIndex;
 use App\Livewire\Empresas\Create as CompanyCreate;
 use App\Livewire\Empresas\Edit as CompanyEdit;
 use App\Livewire\Empresas\Index as CompaniesIndex;
@@ -61,4 +65,15 @@ Route::middleware(['auth', 'can:users.view'])
         Route::get('/', UsersIndex::class)->name('usuarios.index');
         Route::get('/crear', UserCreate::class)->name('usuarios.create');
         Route::get('/{user}/editar', UserEdit::class)->name('usuarios.edit');
+    });
+
+Route::middleware(['auth', 'set-active-company', 'can:employees.view'])
+    ->prefix('empleados')
+    ->group(function () {
+        Route::get('/', EmployeesIndex::class)->name('empleados.index');
+        Route::get('/crear', EmployeeCreate::class)->name('empleados.create')->can('employees.create');
+        Route::get('/{employee}/editar', EmployeeEdit::class)->name('empleados.edit')->can('employees.update');
+        Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('empleados.destroy')->can('employees.delete');
+        Route::post('/{employee}/activar', [EmployeeController::class, 'activate'])->name('empleados.activate')->can('employees.activate');
+        Route::post('/{employee}/desactivar', [EmployeeController::class, 'deactivate'])->name('empleados.deactivate')->can('employees.activate');
     });

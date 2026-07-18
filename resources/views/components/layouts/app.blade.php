@@ -26,6 +26,10 @@
                             @can('users.view')
                                 <a href="/usuarios" class="text-gray-700 hover:text-indigo-600">Usuarios</a>
                             @endcan
+
+                            @can('employees.view')
+                                <a href="/empleados" class="text-gray-700 hover:text-indigo-600">Empleados</a>
+                            @endcan
                         </div>
 
                         <div class="flex items-center space-x-4">
