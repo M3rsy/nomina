@@ -35,6 +35,9 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/health', \App\Http\Controllers\HealthController::class)
+    ->name('health');
+
 Route::get('/login', Login::class)
     ->name('login')
     ->middleware('guest');
