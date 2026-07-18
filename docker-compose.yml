@@ -1,0 +1,47 @@
+services:
+    app:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: nomina-app
+        ports:
+            - "8000:8000"
+        environment:
+            APP_ENV: local
+            APP_KEY: ${APP_KEY}
+            APP_DEBUG: "true"
+            APP_LOCALE: es
+            APP_TIMEZONE: America/Tegucigalpa
+            DB_CONNECTION: pgsql
+            DB_HOST: nomina-db
+            DB_PORT: 5432
+            DB_DATABASE: nomina
+            DB_USERNAME: nomina
+            DB_PASSWORD: secret
+        depends_on:
+            - db
+        volumes:
+            - .:/var/www/html
+        networks:
+            - nomina
+
+    db:
+        image: postgres:15-alpine
+        container_name: nomina-db
+        environment:
+            POSTGRES_DB: nomina
+            POSTGRES_USER: nomina
+            POSTGRES_PASSWORD: secret
+        ports:
+            - "5432:5432"
+        volumes:
+            - nomina-db-data:/var/lib/postgresql/data
+        networks:
+            - nomina
+
+volumes:
+    nomina-db-data:
+
+networks:
+    nomina:
+        driver: bridge
