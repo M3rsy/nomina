@@ -77,6 +77,7 @@ class DatabaseSeeder extends Seeder
         });
 
         $this->call([
+            PayPeriodSeeder::class,
             WorkScheduleSeeder::class,
             HolidaysSeeder::class,
         ]);

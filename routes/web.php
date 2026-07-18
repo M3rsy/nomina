@@ -10,6 +10,9 @@ use App\Livewire\Empleados\Index as EmployeesIndex;
 use App\Livewire\Empresas\Create as CompanyCreate;
 use App\Livewire\Empresas\Edit as CompanyEdit;
 use App\Livewire\Empresas\Index as CompaniesIndex;
+use App\Livewire\Archivos\Index as FilesIndex;
+use App\Livewire\Archivos\Show as FileShow;
+use App\Livewire\Archivos\Upload as FileUpload;
 use App\Livewire\Feriados\Index as HolidaysIndex;
 use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
 use App\Livewire\Profile\ChangePassword;
@@ -90,4 +93,12 @@ Route::middleware(['auth', 'set-active-company', 'can:holidays.view'])
     ->prefix('feriados')
     ->group(function () {
         Route::get('/', HolidaysIndex::class)->name('feriados.index');
+    });
+
+Route::middleware(['auth', 'set-active-company', 'can:files.view'])
+    ->prefix('archivos')
+    ->group(function () {
+        Route::get('/', FilesIndex::class)->name('archivos.index');
+        Route::get('/subir', FileUpload::class)->name('archivos.upload')->can('files.upload');
+        Route::get('/{uploadedFile}', FileShow::class)->name('archivos.show');
     });

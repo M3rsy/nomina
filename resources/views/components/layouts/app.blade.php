@@ -38,6 +38,10 @@
                             @can('holidays.view')
                                 <a href="/feriados" class="text-gray-700 hover:text-indigo-600">Feriados</a>
                             @endcan
+
+                            @can('files.view')
+                                <a href="/archivos" class="text-gray-700 hover:text-indigo-600">Archivos</a>
+                            @endcan
                         </div>
 
                         <div class="flex items-center space-x-4">
