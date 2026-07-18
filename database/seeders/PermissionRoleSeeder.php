@@ -45,6 +45,10 @@ class PermissionRoleSeeder extends Seeder
         'audit.view',
         'backups.create',
         'backups.restore',
+        'work_schedules.view',
+        'work_schedules.manage',
+        'holidays.view',
+        'holidays.manage',
     ];
 
     public const ROLES = [
@@ -75,6 +79,10 @@ class PermissionRoleSeeder extends Seeder
             'payroll.receipts.download',
             'audit.view',
             'backups.create',
+            'work_schedules.view',
+            'work_schedules.manage',
+            'holidays.view',
+            'holidays.manage',
         ],
     ];
 

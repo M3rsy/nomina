@@ -75,6 +75,11 @@ class DatabaseSeeder extends Seeder
             $this->seedEmployee($companyB, '6419', 'OLVIN', 'CARCAMO');
             $this->seedEmployee($companyB, '9069', 'EMPLEADO', '9069');
         });
+
+        $this->call([
+            WorkScheduleSeeder::class,
+            HolidaysSeeder::class,
+        ]);
     }
 
     private function seedEmployee(Company $company, string $externalId, string $firstName, string $lastName): Employee
