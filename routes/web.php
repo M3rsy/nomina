@@ -10,6 +10,8 @@ use App\Livewire\Empleados\Index as EmployeesIndex;
 use App\Livewire\Empresas\Create as CompanyCreate;
 use App\Livewire\Empresas\Edit as CompanyEdit;
 use App\Livewire\Empresas\Index as CompaniesIndex;
+use App\Livewire\Feriados\Index as HolidaysIndex;
+use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
 use App\Livewire\Profile\ChangePassword;
 use App\Livewire\Usuarios\Create as UserCreate;
 use App\Livewire\Usuarios\Edit as UserEdit;
@@ -76,4 +78,16 @@ Route::middleware(['auth', 'set-active-company', 'can:employees.view'])
         Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('empleados.destroy')->can('employees.delete');
         Route::post('/{employee}/activar', [EmployeeController::class, 'activate'])->name('empleados.activate')->can('employees.activate');
         Route::post('/{employee}/desactivar', [EmployeeController::class, 'deactivate'])->name('empleados.deactivate')->can('employees.activate');
+    });
+
+Route::middleware(['auth', 'set-active-company', 'can:work_schedules.view'])
+    ->prefix('jornadas')
+    ->group(function () {
+        Route::get('/', WorkSchedulesIndex::class)->name('jornadas.index');
+    });
+
+Route::middleware(['auth', 'set-active-company', 'can:holidays.view'])
+    ->prefix('feriados')
+    ->group(function () {
+        Route::get('/', HolidaysIndex::class)->name('feriados.index');
     });

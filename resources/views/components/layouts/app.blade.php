@@ -30,6 +30,14 @@
                             @can('employees.view')
                                 <a href="/empleados" class="text-gray-700 hover:text-indigo-600">Empleados</a>
                             @endcan
+
+                            @can('work_schedules.view')
+                                <a href="/jornadas" class="text-gray-700 hover:text-indigo-600">Jornadas</a>
+                            @endcan
+
+                            @can('holidays.view')
+                                <a href="/feriados" class="text-gray-700 hover:text-indigo-600">Feriados</a>
+                            @endcan
                         </div>
 
                         <div class="flex items-center space-x-4">
