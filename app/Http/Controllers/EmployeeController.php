@@ -5,12 +5,13 @@ namespace App\Http\Controllers;
 use App\Models\Employee;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class EmployeeController extends Controller
 {
     public function destroy(Request $request, Employee $employee): RedirectResponse
     {
-        $this->authorize('delete', $employee);
+        Gate::authorize('delete', $employee);
 
         if ($employee->trashed()) {
             abort(422, 'El empleado ya está desactivado.');
@@ -23,7 +24,7 @@ class EmployeeController extends Controller
 
     public function activate(Request $request, Employee $employee): RedirectResponse
     {
-        $this->authorize('activate', $employee);
+        Gate::authorize('activate', $employee);
 
         $employee->update(['is_active' => true]);
 
@@ -32,7 +33,7 @@ class EmployeeController extends Controller
 
     public function deactivate(Request $request, Employee $employee): RedirectResponse
     {
-        $this->authorize('activate', $employee);
+        Gate::authorize('activate', $employee);
 
         $employee->update(['is_active' => false]);
 

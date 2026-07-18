@@ -22,30 +22,30 @@ class CurrentCompany
         if (auth()->check() && auth()->user()->hasRole('super_admin')) {
             $sessionId = session('active_company_id');
             if ($sessionId) {
-                $this->company = Company::find($sessionId);
+                return $this->company = Company::find($sessionId);
             }
 
-            return $this->company;
+            return null;
         }
 
         if (auth()->check()) {
             $user = auth()->user();
             if ($user->company_id) {
-                $this->company = Company::find($user->company_id);
+                return $this->company = Company::find($user->company_id);
             }
         }
 
-        return $this->company;
+        return null;
     }
 
     public function get(): ?Company
     {
-        return $this->company;
+        return $this->resolve();
     }
 
     public function id(): ?int
     {
-        return $this->company?->id;
+        return $this->get()?->id;
     }
 
     public function set(?Company $company): void

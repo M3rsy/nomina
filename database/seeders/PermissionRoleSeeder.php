@@ -53,6 +53,7 @@ class PermissionRoleSeeder extends Seeder
             'employees.view',
             'employees.create',
             'employees.update',
+            'employees.delete',
             'employees.activate',
             'users.view',
             'users.create',

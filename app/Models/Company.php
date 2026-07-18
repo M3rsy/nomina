@@ -48,6 +48,11 @@ class Company extends Model
         return $this->hasMany(User::class);
     }
 
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class);
+    }
+
     public function loginAttempts(): HasMany
     {
         return $this->hasMany(LoginAttempt::class);
