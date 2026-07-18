@@ -18,6 +18,14 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // In production only the minimal, idempotent ProductionSeeder runs.
+        // Demo data must never be installed on a live tenant.
+        if (app()->environment('production')) {
+            $this->call(ProductionSeeder::class);
+
+            return;
+        }
+
         $this->call(PermissionRoleSeeder::class);
 
         $companyA = Company::firstOrCreate(
