@@ -54,6 +54,11 @@ class PayPeriod extends Model
         return $this->hasMany(JustifiedAbsence::class);
     }
 
+    public function payrollResults(): HasMany
+    {
+        return $this->hasMany(PayrollResult::class);
+    }
+
     public function isActive(): bool
     {
         return ! $this->trashed() && in_array($this->status, ['draft', 'uploaded', 'ready'], true);
