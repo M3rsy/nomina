@@ -68,12 +68,15 @@ class Revisar extends Component
 
     public ?string $readyMessage = null;
 
+    public bool $locked = false;
+
     public function mount(PayPeriod $payPeriod): void
     {
         $this->authorize('view', $payPeriod);
         Gate::authorize('marks.manage');
 
         $this->payPeriod = $payPeriod;
+        $this->locked = $this->isBlocked();
     }
 
     public function render()
@@ -114,6 +117,10 @@ class Revisar extends Component
 
     public function openEditRawMark(int $id): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($id);
 
         if (! $rawMark) {
@@ -139,6 +146,10 @@ class Revisar extends Component
 
     public function saveEditRawMark(): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($this->editRawMarkId);
 
         if (! $rawMark) {
@@ -183,6 +194,10 @@ class Revisar extends Component
 
     public function openDeleteRawMark(int $id): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($id);
 
         if (! $rawMark) {
@@ -203,6 +218,10 @@ class Revisar extends Component
 
     public function deleteRawMark(): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($this->deleteRawMarkId);
 
         if (! $rawMark) {
@@ -230,6 +249,10 @@ class Revisar extends Component
 
     public function openAssignModal(int $id): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($id);
 
         if (! $rawMark) {
@@ -255,6 +278,10 @@ class Revisar extends Component
 
     public function saveAssign(): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($this->assignRawMarkId);
 
         if (! $rawMark) {
@@ -300,6 +327,10 @@ class Revisar extends Component
 
     public function markCorrected(int $id): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         $rawMark = $this->findRawMark($id);
 
         if (! $rawMark) {
@@ -339,6 +370,10 @@ class Revisar extends Component
 
     public function justifyAbsence(int $employeeId, string $date, string $reason, ?string $notes = null): void
     {
+        if ($this->isBlocked()) {
+            return;
+        }
+
         Gate::authorize('marks.manage');
 
         $this->validate([
