@@ -41,34 +41,36 @@
         </div>
 
         <div class="bg-white rounded-lg shadow p-4 mb-6">
-            <h2 class="text-lg font-semibold mb-4">Nóminas por período</h2>
+            <h2 id="payroll-periods-heading" class="text-lg font-semibold mb-4">Nóminas por período</h2>
             @if (count($payPeriods) === 0)
                 <p class="text-gray-500">No hay períodos de nómina.</p>
             @else
-                <table class="w-full">
-                    <thead class="bg-gray-100">
-                        <tr>
-                            <th class="px-4 py-2 text-left">Período</th>
-                            <th class="px-4 py-2 text-left">Estado</th>
-                            <th class="px-4 py-2 text-left">Registros</th>
-                            <th class="px-4 py-2 text-left">Horas ordinarias</th>
-                            <th class="px-4 py-2 text-left">Horas extras</th>
-                            <th class="px-4 py-2 text-left">Horas trabajadas</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($payPeriods as $period)
-                            <tr class="border-t">
-                                <td class="px-4 py-2">{{ $period['name'] }} ({{ $period['start_date']->format('Y-m-d') }} - {{ $period['end_date']->format('Y-m-d') }})</td>
-                                <td class="px-4 py-2">{{ $period['status'] }}</td>
-                                <td class="px-4 py-2">{{ $period['results_count'] }}</td>
-                                <td class="px-4 py-2">{{ number_format($period['ordinary_hours'], 2) }}</td>
-                                <td class="px-4 py-2">{{ number_format($period['extra_hours'], 2) }}</td>
-                                <td class="px-4 py-2">{{ number_format($period['worked_hours'], 2) }}</td>
+                <div role="region" aria-labelledby="payroll-periods-heading" tabindex="0" class="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+                    <table class="w-full">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-4 py-2 text-left">Período</th>
+                                <th class="px-4 py-2 text-left">Estado</th>
+                                <th class="px-4 py-2 text-left">Registros</th>
+                                <th class="px-4 py-2 text-left">Horas ordinarias</th>
+                                <th class="px-4 py-2 text-left">Horas extras</th>
+                                <th class="px-4 py-2 text-left">Horas trabajadas</th>
                             </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach ($payPeriods as $period)
+                                <tr class="border-t">
+                                    <td class="px-4 py-2">{{ $period['name'] }} ({{ $period['start_date']->format('Y-m-d') }} - {{ $period['end_date']->format('Y-m-d') }})</td>
+                                    <td class="px-4 py-2">{{ $period['status'] }}</td>
+                                    <td class="px-4 py-2">{{ $period['results_count'] }}</td>
+                                    <td class="px-4 py-2">{{ number_format($period['ordinary_hours'], 2) }}</td>
+                                    <td class="px-4 py-2">{{ number_format($period['extra_hours'], 2) }}</td>
+                                    <td class="px-4 py-2">{{ number_format($period['worked_hours'], 2) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
             @endif
         </div>
 

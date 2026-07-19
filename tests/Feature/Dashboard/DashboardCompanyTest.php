@@ -122,3 +122,23 @@ test('dashboard redirects company admin to company dashboard', function () {
 
     $this->get('/dashboard')->assertRedirect('/dashboard/company');
 });
+
+test('payroll periods table is contained in a named keyboard scroll region', function () {
+    $company = Company::factory()->create();
+    PayPeriod::factory()->forCompany($company)->create();
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    $response = $this->actingAs($admin)->get(route('dashboard.company'));
+
+    $response->assertOk();
+
+    $document = new DOMDocument;
+    @$document->loadHTML($response->getContent());
+    $tables = (new DOMXPath($document))->query(
+        '//*[@role="region" and @aria-labelledby="payroll-periods-heading" and @tabindex="0"'
+        .' and contains(concat(" ", normalize-space(@class), " "), " overflow-x-auto ")]//table',
+    );
+
+    expect($tables->length)->toBe(1);
+});
