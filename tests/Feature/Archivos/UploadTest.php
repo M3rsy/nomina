@@ -246,16 +246,14 @@ test('company admin can upload glg file and records are parsed', function () {
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
     ]);
-    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '1222']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '12884']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '44']);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-001']);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-002']);
 
     $admin = actingAsCompanyAdmin($company);
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $contents = file_get_contents('/home/m3rsy/GIt/proyecto-planilla/GLG_001 (1).TXT');
+    $contents = file_get_contents(__DIR__.'/../../Fixtures/Attendance/GLG_minimal.txt');
     $file = LaravelUploadedFile::fake()->createWithContent('GLG_001.TXT', $contents);
 
     Livewire::test(Upload::class)
@@ -270,7 +268,7 @@ test('company admin can upload glg file and records are parsed', function () {
     expect($uploadedFile->pay_period_id)->toBe($payPeriod->id);
     expect($uploadedFile->sha256)->toBe(hash('sha256', $contents));
     expect($uploadedFile->extension)->toBe('txt');
-    expect($uploadedFile->rawMarks()->count())->toBe(34);
+    expect($uploadedFile->rawMarks()->count())->toBe(2);
 });
 
 test('company admin can upload attlog file and records are parsed', function () {
@@ -279,16 +277,14 @@ test('company admin can upload attlog file and records are parsed', function () 
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
     ]);
-    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '12884']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '44']);
-    Employee::factory()->forCompany($company)->create(['external_id' => '6419']);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-001']);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-002']);
 
     $admin = actingAsCompanyAdmin($company);
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $contents = file_get_contents('/home/m3rsy/GIt/proyecto-planilla/A8ME233160030_attlog (1) (1).dat');
+    $contents = file_get_contents(__DIR__.'/../../Fixtures/Attendance/ATTLOG_minimal.dat');
     $file = LaravelUploadedFile::fake()->createWithContent('attlog.dat', $contents);
 
     Livewire::test(Upload::class)
@@ -299,7 +295,7 @@ test('company admin can upload attlog file and records are parsed', function () 
 
     $uploadedFile = UploadedFile::first();
     expect($uploadedFile)->not->toBeNull();
-    expect($uploadedFile->rawMarks()->count())->toBe(38);
+    expect($uploadedFile->rawMarks()->count())->toBe(2);
 });
 
 test('duplicate file by sha256 is rejected', function () {
