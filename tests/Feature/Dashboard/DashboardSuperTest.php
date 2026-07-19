@@ -30,7 +30,7 @@ test('company admin cannot access super dashboard', function () {
         ->assertStatus(403);
 });
 
-test('super admin sees global stats', function () {
+test('super admin without an active company sees organization snapshots but no payroll aggregation', function () {
     $companyA = Company::factory()->create(['is_active' => true]);
     $companyB = Company::factory()->create(['is_active' => false]);
 
@@ -57,20 +57,37 @@ test('super admin sees global stats', function () {
         ->assertSet('inactiveCompanies', 1)
         ->assertSet('activeUsers', 4)
         ->assertSet('activeEmployees', 9)
-        ->assertSet('processedPayrolls', 2)
-        ->assertSet('pendingPayrolls', 1)
-        ->assertSet('errorPayrolls', 1);
+        ->assertSet('payrollOverview', [])
+        ->assertSee('Resumen operativo de nómina')
+        ->assertSee('Este resumen nunca combina empresas.')
+        ->assertSee('Usá el selector de empresa de la barra superior.');
 });
 
-test('super admin dashboard uses the global company context', function () {
-    $companyA = Company::factory()->create();
-    $companyB = Company::factory()->create();
+test('active company payroll overview counts every recognized and unknown status without cross-tenant data', function () {
+    $companyA = Company::factory()->create(['name' => 'Empresa Operativa']);
+    $companyB = Company::factory()->create(['name' => 'Empresa Externa']);
 
     Employee::factory()->count(2)->forCompany($companyA)->create(['is_active' => true]);
     Employee::factory()->count(5)->forCompany($companyB)->create(['is_active' => true]);
 
-    PayPeriod::factory()->forCompany($companyA)->create(['status' => 'processed']);
-    PayPeriod::factory()->forCompany($companyB)->create(['status' => 'processed']);
+    $statuses = [
+        'draft',
+        'uploaded',
+        'validating',
+        'ready',
+        'processing',
+        'processed',
+        'approved',
+        'exported',
+        'validation_failed',
+        'cancelled',
+        'legacy_status',
+    ];
+
+    foreach ($statuses as $status) {
+        PayPeriod::factory()->forCompany($companyA)->create(['status' => $status]);
+        PayPeriod::factory()->forCompany($companyB)->create(['status' => $status]);
+    }
 
     $super = User::factory()->create([
         'company_id' => null,
@@ -91,22 +108,52 @@ test('super admin dashboard uses the global company context', function () {
         ->assertSet('activeCompanies', 1)
         ->assertSet('inactiveCompanies', 0)
         ->assertSet('activeEmployees', 2)
-        ->assertSet('processedPayrolls', 1)
-        ->assertSet('pendingPayrolls', 0);
+        ->assertSet('payrollOverview.company_name', 'Empresa Operativa')
+        ->assertSet('payrollOverview.total', 11)
+        ->assertSet('payrollOverview.preparation', 4)
+        ->assertSet('payrollOverview.processing', 1)
+        ->assertSet('payrollOverview.completed', 3)
+        ->assertSet('payrollOverview.validation_failed', 1)
+        ->assertSet('payrollOverview.cancelled', 1)
+        ->assertSet('payrollOverview.unknown', 1)
+        ->assertSee('Empresa Operativa')
+        ->assertSee('Total')
+        ->assertSee('En preparación')
+        ->assertSee('Procesando')
+        ->assertSee('Completadas')
+        ->assertSee('Validación con errores')
+        ->assertSee('Canceladas')
+        ->assertSee('Otros estados registrados');
 });
 
-test('super admin can filter by date range', function () {
+test('payroll overview date range includes only fully contained active-company periods', function () {
     $company = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
 
     PayPeriod::factory()->forCompany($company)->create([
-        'start_date' => now()->subDays(10),
-        'end_date' => now()->subDays(5),
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-20',
+        'status' => 'processing',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2025-12-31',
+        'end_date' => '2026-01-20',
         'status' => 'processed',
     ]);
     PayPeriod::factory()->forCompany($company)->create([
-        'start_date' => now()->subDays(40),
-        'end_date' => now()->subDays(35),
-        'status' => 'processed',
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-02-01',
+        'status' => 'validation_failed',
+    ]);
+    PayPeriod::factory()->forCompany($otherCompany)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'cancelled',
     ]);
 
     $super = User::factory()->create([
@@ -114,12 +161,58 @@ test('super admin can filter by date range', function () {
         'password' => Hash::make('password'),
     ]);
     $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
 
-    Livewire::actingAs($super)
-        ->test(SuperAdmin::class)
-        ->set('from', now()->subDays(15)->format('Y-m-d'))
-        ->set('to', now()->format('Y-m-d'))
-        ->assertSet('processedPayrolls', 1);
+    Livewire::test(SuperAdmin::class)
+        ->set('from', '2026-01-01')
+        ->set('to', '2026-01-31')
+        ->assertSet('payrollOverview.total', 2)
+        ->assertSet('payrollOverview.preparation', 1)
+        ->assertSet('payrollOverview.processing', 1)
+        ->assertSet('payrollOverview.completed', 0)
+        ->assertSet('payrollOverview.validation_failed', 0)
+        ->assertSet('payrollOverview.cancelled', 0)
+        ->assertSet('payrollOverview.unknown', 0)
+        ->assertDontSee('Otros estados registrados');
+});
+
+test('active company with no payroll periods sees an actionable empty state', function () {
+    $company = Company::factory()->create(['name' => 'Empresa sin períodos']);
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->assertSet('payrollOverview.company_name', 'Empresa sin períodos')
+        ->assertSet('payrollOverview.total', 0)
+        ->assertSet('payrollOverview.has_periods', false)
+        ->assertSee('Todavía no hay períodos de nómina para esta empresa.')
+        ->assertSee('Ver períodos de nómina')
+        ->assertSeeHtml('href="'.route('nomina.index').'"');
+});
+
+test('active company with no range matches distinguishes filtered results from no periods', function () {
+    $company = Company::factory()->create();
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-02-01',
+        'end_date' => '2026-02-28',
+        'status' => 'draft',
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->set('from', '2026-01-01')
+        ->set('to', '2026-01-31')
+        ->assertSet('payrollOverview.total', 0)
+        ->assertSet('payrollOverview.has_periods', true)
+        ->assertSee('No hay períodos que coincidan con el rango seleccionado.')
+        ->assertDontSee('Todavía no hay períodos de nómina para esta empresa.');
 });
 
 test('dashboard redirects super admin to super dashboard', function () {
@@ -155,5 +248,7 @@ test('super dashboard hides audit handoff without permission', function () {
     Livewire::actingAs($user)
         ->test(SuperAdmin::class)
         ->assertDontSee('Ver historial en Auditoría')
-        ->assertDontSeeHtml('href="'.route('auditoria.index').'"');
+        ->assertDontSeeHtml('href="'.route('auditoria.index').'"')
+        ->assertDontSee('Ver períodos de nómina')
+        ->assertDontSeeHtml('href="'.route('nomina.index').'"');
 });
