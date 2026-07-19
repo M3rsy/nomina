@@ -29,6 +29,28 @@ class Upload extends Component
     public function mount(): void
     {
         $this->authorize('create', UploadedFile::class);
+
+        $company = $this->resolveCompany(auth()->user());
+        $queryValue = request()->query('pay_period_id');
+
+        if ($company === null || ! is_scalar($queryValue)) {
+            return;
+        }
+
+        $payPeriodId = filter_var($queryValue, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+
+        if ($payPeriodId === false) {
+            return;
+        }
+
+        $payPeriod = PayPeriod::query()
+            ->where('company_id', $company->id)
+            ->uploadable()
+            ->find($payPeriodId);
+
+        $this->pay_period_id = $payPeriod?->id;
     }
 
     public function store(): void
@@ -129,7 +151,7 @@ class Upload extends Component
 
         $payPeriods = $company
             ? PayPeriod::where('company_id', $company->id)
-                ->whereNotIn('status', ['cancelled'])
+                ->uploadable()
                 ->orderBy('start_date', 'desc')
                 ->get()
             : collect();

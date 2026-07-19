@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,6 +14,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class PayPeriod extends Model
 {
     use BelongsToCompany, HasFactory, SoftDeletes;
+
+    public const UPLOADABLE_STATUSES = [
+        'draft',
+        'uploaded',
+        'validation_failed',
+    ];
 
     protected $fillable = [
         'company_id',
@@ -32,6 +40,15 @@ class PayPeriod extends Model
             'metadata' => 'array',
             'deleted_at' => 'datetime',
         ];
+    }
+
+    protected function endDate(): Attribute
+    {
+        return Attribute::make(
+            get: fn (mixed $value) => $value === null
+                ? null
+                : $this->asDateTime($value)->endOfDay(),
+        );
     }
 
     public function company(): BelongsTo
@@ -66,6 +83,11 @@ class PayPeriod extends Model
 
     public function canUploadFiles(): bool
     {
-        return ! $this->trashed() && in_array($this->status, ['draft', 'uploaded', 'validation_failed', 'ready'], true);
+        return ! $this->trashed() && in_array($this->status, self::UPLOADABLE_STATUSES, true);
+    }
+
+    public function scopeUploadable(Builder $query): Builder
+    {
+        return $query->whereIn('status', self::UPLOADABLE_STATUSES);
     }
 }

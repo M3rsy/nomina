@@ -4,9 +4,16 @@ namespace App\Policies;
 
 use App\Models\PayPeriod;
 use App\Models\User;
+use App\Services\CurrentCompany;
 
 class PayPeriodPolicy
 {
+    public function create(User $user): bool
+    {
+        return $user->can('pay_periods.manage')
+            && app(CurrentCompany::class)->get() !== null;
+    }
+
     public function viewAny(User $user): bool
     {
         return $user->can('pay_periods.view');
