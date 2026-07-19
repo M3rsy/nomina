@@ -28,7 +28,7 @@ class ForgotPassword extends Component
         );
 
         if ($status === Password::RESET_LINK_SENT) {
-            $this->status = trans($status);
+            $this->status = 'Le enviamos un enlace para restablecer su contraseña.';
             $this->reset('email');
         } else {
             throw ValidationException::withMessages([
