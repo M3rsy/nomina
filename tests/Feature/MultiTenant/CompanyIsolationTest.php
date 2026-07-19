@@ -85,9 +85,8 @@ test('company admin cannot assign super admin role', function () {
         ->assertHasErrors('role');
 });
 
-test('super admin can view all companies and switch context', function () {
-    $companyA = Company::factory()->create();
-    $companyB = Company::factory()->create();
+test('company query string no longer switches the global context', function () {
+    $company = Company::factory()->create();
 
     $admin = User::factory()->create([
         'company_id' => null,
@@ -97,11 +96,8 @@ test('super admin can view all companies and switch context', function () {
 
     $this->actingAs($admin);
 
-    $response = $this->get('/empresas');
+    $response = $this->get('/empresas?company='.$company->slug);
     $response->assertOk();
 
-    $response = $this->get('/empresas?company='.$companyB->slug);
-    $response->assertOk();
-
-    expect(session('active_company_id'))->toBe($companyB->id);
+    expect(session()->has('active_company_id'))->toBeFalse();
 });

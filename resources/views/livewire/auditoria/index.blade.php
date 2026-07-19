@@ -12,18 +12,6 @@
                 </select>
             </div>
 
-            @if ($isSuper)
-                <div>
-                    <label for="company_id" class="block text-sm font-medium text-gray-700">Empresa</label>
-                    <select id="company_id" wire:model.live="company_id" class="mt-1 block w-56 rounded border-gray-300 shadow-sm">
-                        <option value="">Todas</option>
-                        @foreach ($companies as $company)
-                            <option value="{{ $company->id }}">{{ $company->name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-            @endif
-
             <div>
                 <label for="user" class="block text-sm font-medium text-gray-700">Usuario (correo)</label>
                 <input id="user" type="text" wire:model.live.debounce.300ms="user" class="mt-1 block rounded border-gray-300 shadow-sm" placeholder="correo@ejemplo.com">

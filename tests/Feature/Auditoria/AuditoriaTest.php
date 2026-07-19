@@ -70,7 +70,22 @@ test('company admin sees only own company audit entries', function () {
         });
 });
 
-test('super admin can filter by company', function () {
+test('company admin without a company sees no tenant audit entries', function () {
+    $companyA = Company::factory()->create();
+    $companyB = Company::factory()->create();
+
+    LoginAttempt::factory()->create(['company_id' => $companyA->id]);
+    LoginAttempt::factory()->create(['company_id' => $companyB->id]);
+
+    $admin = User::factory()->create(['company_id' => null]);
+    $admin->assignRole('company_admin');
+
+    Livewire::actingAs($admin)
+        ->test(Index::class)
+        ->assertViewHas('entries', fn ($entries) => $entries->total() === 0);
+});
+
+test('super admin audit feed uses the global company context', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -82,13 +97,20 @@ test('super admin can filter by company', function () {
 
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
+    $csrfToken = 'audit-company-test-token';
 
-    Livewire::actingAs($super)
-        ->test(Index::class)
-        ->set('company_id', $companyA->id)
-        ->assertViewHas('entries', function ($entries) {
-            return $entries->total() === 1;
-        });
+    $this->withSession(['_token' => $csrfToken])
+        ->actingAs($super)
+        ->post(route('current-company.update'), [
+            '_token' => $csrfToken,
+            'company' => $companyA->slug,
+        ])
+        ->assertRedirect(route('dashboard'));
+
+    $this->get(route('auditoria.index'))
+        ->assertOk()
+        ->assertSee($adminA->email)
+        ->assertDontSee($adminB->email);
 });
 
 test('type filter works', function () {

@@ -42,7 +42,7 @@ Un período en estados `approved`, `exported` o `cancelled` está bloqueado para
 ## Seguridad
 
 - `Gate::authorize()` en controladores; el `Controller` base no incluye `AuthorizesRequests`.
-- `set-active-company` middleware asigna contexto de empresa.
+- La acción protegida `POST /empresa-activa` (`current-company.update`) cambia el contexto del `super_admin`; `CurrentCompany` lo aplica globalmente desde sesión.
 - SSL vía Let's Encrypt (certbot) o Caddy como alternativa.
 - Variables sensibles en `.env.production`; nunca en el código.
 

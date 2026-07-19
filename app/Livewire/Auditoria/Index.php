@@ -2,11 +2,11 @@
 
 namespace App\Livewire\Auditoria;
 
-use App\Models\Company;
 use App\Models\EmployeeRevision;
 use App\Models\LoginAttempt;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Layout;
@@ -39,9 +39,6 @@ class Index extends Component
     #[Url]
     public ?string $user = null;
 
-    #[Url]
-    public ?int $company_id = null;
-
     public function mount(): void
     {
         $this->authorize('audit.view');
@@ -49,19 +46,10 @@ class Index extends Component
 
     public function render()
     {
-        $isSuper = auth()->user()->hasRole('super_admin');
         $currentCompanyId = current_company_id();
-
-        if (! $isSuper) {
-            $this->company_id = $currentCompanyId;
-        }
-
-        $companyIds = null;
-        if (! $isSuper) {
-            $companyIds = $currentCompanyId !== null ? [$currentCompanyId] : [];
-        } elseif ($this->company_id) {
-            $companyIds = [$this->company_id];
-        }
+        $companyIds = $currentCompanyId !== null
+            ? [$currentCompanyId]
+            : (auth()->user()->hasRole('super_admin') ? null : []);
 
         $entries = $this->collectEntries($companyIds);
         $entries = $this->applyFilters($entries);
@@ -82,8 +70,6 @@ class Index extends Component
         return view('livewire.auditoria.index', [
             'entries' => $paginator,
             'types' => self::TYPES,
-            'companies' => $isSuper ? Company::query()->orderBy('name')->get() : collect(),
-            'isSuper' => $isSuper,
         ]);
     }
 
@@ -166,7 +152,7 @@ class Index extends Component
                         }
 
                         $userId = $metadata[$action.'_by'] ?? null;
-                        $user = $userId ? \App\Models\User::find($userId) : null;
+                        $user = $userId ? User::find($userId) : null;
 
                         $entries[] = new AuditEntry(
                             'payroll_state',
@@ -206,7 +192,7 @@ class Index extends Component
                         }
 
                         $userId = $rev['user_id'] ?? null;
-                        $user = $userId ? \App\Models\User::find($userId) : null;
+                        $user = $userId ? User::find($userId) : null;
 
                         $entries[] = new AuditEntry(
                             'mark_revision',

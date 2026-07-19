@@ -62,7 +62,7 @@ test('super admin sees global stats', function () {
         ->assertSet('errorPayrolls', 1);
 });
 
-test('super admin can filter by company', function () {
+test('super admin dashboard uses the global company context', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -77,10 +77,19 @@ test('super admin can filter by company', function () {
         'password' => Hash::make('password'),
     ]);
     $super->assignRole('super_admin');
+    $csrfToken = 'dashboard-company-test-token';
 
-    Livewire::actingAs($super)
-        ->test(SuperAdmin::class)
-        ->set('company_id', $companyA->id)
+    $this->withSession(['_token' => $csrfToken])
+        ->actingAs($super)
+        ->post(route('current-company.update'), [
+            '_token' => $csrfToken,
+            'company' => $companyA->slug,
+        ])
+        ->assertRedirect(route('dashboard'));
+
+    Livewire::test(SuperAdmin::class)
+        ->assertSet('activeCompanies', 1)
+        ->assertSet('inactiveCompanies', 0)
         ->assertSet('activeEmployees', 2)
         ->assertSet('processedPayrolls', 1)
         ->assertSet('pendingPayrolls', 0);

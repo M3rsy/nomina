@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Usuarios;
 
-use App\Models\Company;
 use App\Models\User;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -18,10 +17,14 @@ class Index extends Component
     public function render()
     {
         $user = auth()->user();
+        $isSuperAdmin = $user->hasRole('super_admin');
         $companyId = current_company_id();
 
         $users = User::query()
-            ->when(! $user->hasRole('super_admin'), function ($query) use ($user) {
+            ->when($isSuperAdmin && $companyId !== null, function ($query) use ($companyId) {
+                $query->where('company_id', $companyId);
+            })
+            ->when(! $isSuperAdmin, function ($query) use ($user) {
                 $query->where('company_id', $user->company_id);
             })
             ->when($this->search, function ($query) {
@@ -33,9 +36,6 @@ class Index extends Component
             ->orderBy('name')
             ->paginate(10);
 
-        return view('livewire.usuarios.index', [
-            'users' => $users,
-            'companies' => $user->hasRole('super_admin') ? Company::all() : null,
-        ]);
+        return view('livewire.usuarios.index', ['users' => $users]);
     }
 }

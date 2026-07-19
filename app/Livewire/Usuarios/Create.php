@@ -24,9 +24,7 @@ class Create extends Component
 
     public function mount(): void
     {
-        if (! auth()->user()->hasRole('super_admin')) {
-            $this->company_id = auth()->user()->company_id;
-        }
+        $this->company_id = current_company_id();
     }
 
     public function save(): void

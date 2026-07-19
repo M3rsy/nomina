@@ -1,9 +1,11 @@
 <?php
 
+use App\Livewire\Usuarios\Create;
 use App\Models\Company;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Livewire;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -49,4 +51,54 @@ test('super admin can see all users', function () {
     $response->assertOk();
     $response->assertSee($companyA->users()->first()->email);
     $response->assertSee($companyB->users()->first()->email);
+});
+
+test('super admin user index follows and clears the global company context', function () {
+    $companyA = Company::factory()->create();
+    $companyB = Company::factory()->create();
+    $userA = User::factory()->forCompany($companyA)->create(['email' => 'user-a@example.test']);
+    $userB = User::factory()->forCompany($companyB)->create(['email' => 'user-b@example.test']);
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $csrfToken = 'users-company-test-token';
+
+    $this->withSession(['_token' => $csrfToken])
+        ->actingAs($super)
+        ->post(route('current-company.update'), [
+            '_token' => $csrfToken,
+            'company' => $companyA->slug,
+        ])
+        ->assertRedirect(route('dashboard'));
+
+    $this->get(route('usuarios.index'))
+        ->assertOk()
+        ->assertSee($userA->email)
+        ->assertDontSee($userB->email);
+
+    $this->post(route('current-company.update'), [
+        '_token' => $csrfToken,
+        'company' => '',
+    ])->assertRedirect(route('dashboard'));
+
+    $this->get(route('usuarios.index'))
+        ->assertOk()
+        ->assertSee($userA->email)
+        ->assertSee($userB->email);
+});
+
+test('new user defaults to the global company context', function () {
+    $company = Company::factory()->create();
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $csrfToken = 'users-company-test-token';
+
+    $this->withSession(['_token' => $csrfToken])
+        ->actingAs($super)
+        ->post(route('current-company.update'), [
+            '_token' => $csrfToken,
+            'company' => $company->slug,
+        ]);
+
+    Livewire::test(Create::class)
+        ->assertSet('company_id', $company->id);
 });

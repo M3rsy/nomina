@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CurrentCompanyController;
 use App\Http\Controllers\EmployeeController;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
@@ -51,6 +52,9 @@ Route::get('/reset-password/{token}', ResetPassword::class)
     ->middleware('guest');
 
 Route::middleware(['auth'])->group(function () {
+    Route::post('/empresa-activa', CurrentCompanyController::class)
+        ->name('current-company.update');
+
     Route::get('/dashboard', function () {
         $user = auth()->user();
 
@@ -77,7 +81,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('profile.change-password');
 });
 
-Route::middleware(['auth', 'set-active-company', 'can:companies.view'])
+Route::middleware(['auth', 'can:companies.view'])
     ->prefix('empresas')
     ->group(function () {
         Route::get('/', CompaniesIndex::class)->name('empresas.index');
@@ -93,7 +97,7 @@ Route::middleware(['auth', 'can:users.view'])
         Route::get('/{user}/editar', UserEdit::class)->name('usuarios.edit');
     });
 
-Route::middleware(['auth', 'set-active-company', 'can:employees.view'])
+Route::middleware(['auth', 'can:employees.view'])
     ->prefix('empleados')
     ->group(function () {
         Route::get('/', EmployeesIndex::class)->name('empleados.index');
@@ -104,19 +108,19 @@ Route::middleware(['auth', 'set-active-company', 'can:employees.view'])
         Route::post('/{employee}/desactivar', [EmployeeController::class, 'deactivate'])->name('empleados.deactivate')->can('employees.activate');
     });
 
-Route::middleware(['auth', 'set-active-company', 'can:work_schedules.view'])
+Route::middleware(['auth', 'can:work_schedules.view'])
     ->prefix('jornadas')
     ->group(function () {
         Route::get('/', WorkSchedulesIndex::class)->name('jornadas.index');
     });
 
-Route::middleware(['auth', 'set-active-company', 'can:holidays.view'])
+Route::middleware(['auth', 'can:holidays.view'])
     ->prefix('feriados')
     ->group(function () {
         Route::get('/', HolidaysIndex::class)->name('feriados.index');
     });
 
-Route::middleware(['auth', 'set-active-company', 'can:files.view'])
+Route::middleware(['auth', 'can:files.view'])
     ->prefix('archivos')
     ->group(function () {
         Route::get('/', FilesIndex::class)->name('archivos.index');
@@ -127,7 +131,7 @@ Route::middleware(['auth', 'set-active-company', 'can:files.view'])
 
 Route::bind('payPeriod', fn ($value) => \App\Models\PayPeriod::withoutCompanyScope()->findOrFail($value));
 
-Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
+Route::middleware(['auth', 'can:pay_periods.view'])
     ->prefix('nomina')
     ->group(function () {
         Route::get('/', NominaIndex::class)->name('nomina.index');
@@ -145,7 +149,7 @@ Route::middleware(['auth', 'set-active-company', 'can:pay_periods.view'])
         ->can('payroll.export');
 });
 
-Route::middleware(['auth', 'set-active-company', 'can:audit.view'])
+Route::middleware(['auth', 'can:audit.view'])
     ->get('/auditoria', AuditoriaIndex::class)
     ->name('auditoria.index');
 

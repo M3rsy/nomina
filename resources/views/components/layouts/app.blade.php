@@ -67,9 +67,17 @@
                                         Empresa activa: {{ current_company()?->name ?? 'Todas' }}
                                     </button>
                                     <div x-show="open" @click.away="open = false" class="absolute right-0 mt-2 w-48 bg-white rounded shadow z-10">
-                                        <a href="?company=" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Todas</a>
+                                        <form method="POST" action="{{ route('current-company.update') }}">
+                                            @csrf
+                                            <input type="hidden" name="company" value="">
+                                            <button type="submit" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Todas</button>
+                                        </form>
                                         @foreach (App\Models\Company::where('is_active', true)->orderBy('name')->get() as $company)
-                                            <a href="?company={{ $company->slug }}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{{ $company->name }}</a>
+                                            <form method="POST" action="{{ route('current-company.update') }}">
+                                                @csrf
+                                                <input type="hidden" name="company" value="{{ $company->slug }}">
+                                                <button type="submit" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{{ $company->name }}</button>
+                                            </form>
                                         @endforeach
                                     </div>
                                 </div>

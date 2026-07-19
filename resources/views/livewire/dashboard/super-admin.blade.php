@@ -4,16 +4,6 @@
     <div class="bg-white rounded-lg shadow p-4 mb-6">
         <div class="flex flex-wrap gap-4 items-end">
             <div>
-                <label for="company" class="block text-sm font-medium text-gray-700">Empresa</label>
-                <select id="company" wire:model.live="company_id" class="mt-1 block w-48 rounded border-gray-300 shadow-sm">
-                    <option value="">Todas</option>
-                    @foreach ($companies as $company)
-                        <option value="{{ $company->id }}">{{ $company->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div>
                 <label for="from" class="block text-sm font-medium text-gray-700">Desde</label>
                 <input id="from" type="date" wire:model.live="from" class="mt-1 block rounded border-gray-300 shadow-sm">
             </div>

@@ -11,7 +11,6 @@ use App\Models\PayrollResult;
 use App\Models\RawMark;
 use App\Models\User;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -19,9 +18,6 @@ use Livewire\Component;
 #[Layout('components.layouts.app')]
 class SuperAdmin extends Component
 {
-    #[Url]
-    public ?int $company_id = null;
-
     #[Url]
     public ?string $from = null;
 
@@ -49,14 +45,17 @@ class SuperAdmin extends Component
 
     public function render()
     {
-        $selectedCompany = $this->company_id
-            ? Company::query()->find($this->company_id)
-            : null;
+        $companyId = current_company_id();
+        $companyIds = $companyId !== null ? [$companyId] : null;
 
-        $companyIds = $selectedCompany ? [$selectedCompany->id] : null;
-
-        $this->activeCompanies = Company::query()->where('is_active', true)->count();
-        $this->inactiveCompanies = Company::query()->where('is_active', false)->count();
+        $this->activeCompanies = Company::query()
+            ->when($companyId !== null, fn ($query) => $query->whereKey($companyId))
+            ->where('is_active', true)
+            ->count();
+        $this->inactiveCompanies = Company::query()
+            ->when($companyId !== null, fn ($query) => $query->whereKey($companyId))
+            ->where('is_active', false)
+            ->count();
         $this->activeUsers = User::query()
             ->where('is_active', true)
             ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
@@ -75,8 +74,6 @@ class SuperAdmin extends Component
             ->where('status', 'validation_failed')
             ->count();
 
-        $companies = Company::query()->orderBy('name')->get();
-
         return view('livewire.dashboard.super-admin', [
             'activeCompanies' => $this->activeCompanies,
             'inactiveCompanies' => $this->inactiveCompanies,
@@ -85,8 +82,6 @@ class SuperAdmin extends Component
             'processedPayrolls' => $this->processedPayrolls,
             'pendingPayrolls' => $this->pendingPayrolls,
             'errorPayrolls' => $this->errorPayrolls,
-            'companies' => $companies,
-            'selectedCompany' => $selectedCompany,
             'recentActivity' => $this->recentActivity($companyIds),
             'generalStats' => $this->generalStats($companyIds),
         ]);

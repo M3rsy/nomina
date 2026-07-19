@@ -22,7 +22,15 @@ class CurrentCompany
         if (auth()->check() && auth()->user()->hasRole('super_admin')) {
             $sessionId = session('active_company_id');
             if ($sessionId) {
-                return $this->company = Company::find($sessionId);
+                $company = Company::find($sessionId);
+
+                if ($company === null || ! $company->is_active) {
+                    session()->forget('active_company_id');
+
+                    return null;
+                }
+
+                return $this->company = $company;
             }
 
             return null;
