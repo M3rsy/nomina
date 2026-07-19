@@ -1,0 +1,4 @@
+No	Device	Employee ID	Name	Mode	Status	Timestamp
+
+1	DEVICE-01	TEST-001	Synthetic Employee 1	1	1	01/05/2026 08:15:00
+2	DEVICE-01	TEST-002	Synthetic Employee 2	1	1	01/06/2026 17:30:00
