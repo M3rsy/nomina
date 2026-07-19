@@ -3,7 +3,6 @@
 use App\Livewire\Dashboard\SuperAdmin;
 use App\Models\Company;
 use App\Models\Employee;
-use App\Models\LoginAttempt;
 use App\Models\PayPeriod;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
@@ -135,27 +134,26 @@ test('dashboard redirects super admin to super dashboard', function () {
     $this->get('/dashboard')->assertRedirect('/dashboard/super');
 });
 
-test('recent activity table is contained in a named keyboard scroll region', function () {
+test('super dashboard omits recent activity and hands history off to audit', function () {
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
-    LoginAttempt::create([
-        'user_id' => $super->id,
-        'email' => $super->email,
-        'ip' => '127.0.0.1',
-        'user_agent' => 'PHPUnit',
-        'success' => true,
-    ]);
 
-    $response = $this->actingAs($super)->get(route('dashboard.super'));
+    Livewire::actingAs($super)
+        ->test(SuperAdmin::class)
+        ->assertDontSee('Actividad reciente')
+        ->assertDontSee('No hay actividad reciente.')
+        ->assertDontSeeHtml('id="recent-activity-heading"')
+        ->assertSee('Ver historial en Auditoría')
+        ->assertSeeHtml('href="'.route('auditoria.index').'"');
+});
 
-    $response->assertOk();
+test('super dashboard hides audit handoff without permission', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->forCompany($company)->create();
+    $user->givePermissionTo('companies.view');
 
-    $document = new DOMDocument;
-    @$document->loadHTML($response->getContent());
-    $tables = (new DOMXPath($document))->query(
-        '//*[@role="region" and @aria-labelledby="recent-activity-heading" and @tabindex="0"'
-        .' and contains(concat(" ", normalize-space(@class), " "), " overflow-x-auto ")]//table',
-    );
-
-    expect($tables->length)->toBe(1);
+    Livewire::actingAs($user)
+        ->test(SuperAdmin::class)
+        ->assertDontSee('Ver historial en Auditoría')
+        ->assertDontSeeHtml('href="'.route('auditoria.index').'"');
 });
