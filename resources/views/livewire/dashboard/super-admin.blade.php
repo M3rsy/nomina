@@ -47,37 +47,19 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="min-w-0 lg:col-span-2 bg-white rounded-lg shadow p-4">
-            <h2 id="recent-activity-heading" class="text-lg font-semibold mb-4">Actividad reciente</h2>
-            @if (empty($recentActivity))
-                <p class="text-gray-500">No hay actividad reciente.</p>
-            @else
-                <div role="region" aria-labelledby="recent-activity-heading" tabindex="0" class="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
-                    <table class="w-full">
-                        <thead class="bg-gray-100">
-                            <tr>
-                                <th class="px-4 py-2 text-left">Tipo</th>
-                                <th class="px-4 py-2 text-left">Empresa</th>
-                                <th class="px-4 py-2 text-left">Usuario</th>
-                                <th class="px-4 py-2 text-left">Descripción</th>
-                                <th class="px-4 py-2 text-left">Fecha</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach ($recentActivity as $item)
-                                <tr class="border-t">
-                                    <td class="px-4 py-2">{{ $item['type_label'] }}</td>
-                                    <td class="px-4 py-2">{{ $item['company_name'] }}</td>
-                                    <td class="px-4 py-2">{{ $item['user_email'] ?? 'N/A' }}</td>
-                                    <td class="px-4 py-2">{{ $item['description'] }}</td>
-                                    <td class="px-4 py-2">{{ $item['created_at']->format('Y-m-d H:i') }}</td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
+        @can('audit.view')
+            <div class="lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow p-4">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900">Historial de actividad</h2>
+                        <p class="mt-1 text-sm text-slate-600">Consultá los eventos detallados en la sección Auditoría.</p>
+                    </div>
+                    <a href="{{ route('auditoria.index') }}" class="inline-flex min-h-11 shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">
+                        Ver historial en Auditoría
+                    </a>
                 </div>
-            @endif
-        </div>
+            </div>
+        @endcan
 
         <div class="bg-white rounded-lg shadow p-4">
             <h2 class="text-lg font-semibold mb-4">Estadísticas generales</h2>

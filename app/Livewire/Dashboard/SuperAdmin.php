@@ -4,13 +4,9 @@ namespace App\Livewire\Dashboard;
 
 use App\Models\Company;
 use App\Models\Employee;
-use App\Models\EmployeeRevision;
-use App\Models\LoginAttempt;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
-use App\Models\RawMark;
 use App\Models\User;
-use Carbon\Carbon;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -82,7 +78,6 @@ class SuperAdmin extends Component
             'processedPayrolls' => $this->processedPayrolls,
             'pendingPayrolls' => $this->pendingPayrolls,
             'errorPayrolls' => $this->errorPayrolls,
-            'recentActivity' => $this->recentActivity($companyIds),
             'generalStats' => $this->generalStats($companyIds),
         ]);
     }
@@ -93,152 +88,6 @@ class SuperAdmin extends Component
             ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
             ->when($this->from, fn ($q) => $q->whereDate('start_date', '>=', $this->from))
             ->when($this->to, fn ($q) => $q->whereDate('end_date', '<=', $this->to));
-    }
-
-    private function recentActivity(?array $companyIds): array
-    {
-        $items = [];
-
-        $loginAttempts = LoginAttempt::query()
-            ->with('user', 'company')
-            ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
-            ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
-            ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
-            ->latest('created_at')
-            ->limit(20)
-            ->get();
-
-        foreach ($loginAttempts as $attempt) {
-            $items[] = $this->buildActivityItem(
-                'login_attempt',
-                'Inicio de sesión',
-                $attempt->created_at,
-                $attempt->company_id,
-                $attempt->company?->name ?? 'Sistema',
-                $attempt->user_id,
-                $attempt->email,
-                ($attempt->success ? 'Éxito' : 'Fallido').' desde IP '.$attempt->ip
-            );
-        }
-
-        $employeeRevisions = EmployeeRevision::query()
-            ->with(['user', 'employee.company'])
-            ->when($companyIds, fn ($q) => $q->whereHas('employee', fn ($sq) => $sq->withoutGlobalScope('company')->whereIn('company_id', $companyIds)))
-            ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
-            ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
-            ->latest('created_at')
-            ->limit(20)
-            ->get();
-
-        foreach ($employeeRevisions as $revision) {
-            $items[] = $this->buildActivityItem(
-                'employee_revision',
-                'Empleado modificado',
-                $revision->created_at,
-                $revision->employee?->company_id,
-                $revision->employee?->company?->name ?? 'Desconocida',
-                $revision->user_id,
-                $revision->user?->email,
-                "Campo {$revision->field}: '{$revision->old_value}' → '{$revision->new_value}'"
-            );
-        }
-
-        $payPeriods = PayPeriod::withoutCompanyScope()
-            ->with('company')
-            ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
-            ->whereNotNull('metadata')
-            ->limit(100)
-            ->get();
-
-        foreach ($payPeriods as $payPeriod) {
-            $metadata = $payPeriod->metadata ?? [];
-            foreach (['approved', 'exported', 'processed'] as $action) {
-                $at = $metadata[$action.'_at'] ?? null;
-                if (! $at) {
-                    continue;
-                }
-
-                $createdAt = Carbon::parse($at);
-                if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
-                    continue;
-                }
-                if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
-                    continue;
-                }
-
-                $items[] = $this->buildActivityItem(
-                    'payroll_state',
-                    'Nómina '.ucfirst($action),
-                    $createdAt,
-                    $payPeriod->company_id,
-                    $payPeriod->company?->name ?? 'Desconocida',
-                    $metadata[$action.'_by'] ?? null,
-                    null,
-                    "Período {$payPeriod->name} pasó a estado {$action}"
-                );
-            }
-        }
-
-        $rawMarks = RawMark::withoutCompanyScope()
-            ->with('company')
-            ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
-            ->whereNotNull('metadata')
-            ->limit(100)
-            ->get();
-
-        foreach ($rawMarks as $rawMark) {
-            foreach ($rawMark->metadata['revisions'] ?? [] as $rev) {
-                $at = $rev['at'] ?? null;
-                if (! $at) {
-                    continue;
-                }
-
-                $createdAt = Carbon::parse($at);
-                if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
-                    continue;
-                }
-                if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
-                    continue;
-                }
-
-                $items[] = $this->buildActivityItem(
-                    'mark_revision',
-                    'Marca revisada',
-                    $createdAt,
-                    $rawMark->company_id,
-                    $rawMark->company?->name ?? 'Desconocida',
-                    $rev['user_id'] ?? null,
-                    null,
-                    "Acción {$rev['action']} en marca #{$rawMark->id} (empleado {$rawMark->employee_external_id})"
-                );
-            }
-        }
-
-        usort($items, fn ($a, $b) => $b['created_at'] <=> $a['created_at']);
-
-        return array_slice($items, 0, 20);
-    }
-
-    private function buildActivityItem(
-        string $type,
-        string $typeLabel,
-        Carbon $createdAt,
-        ?int $companyId,
-        string $companyName,
-        ?int $userId,
-        ?string $userEmail,
-        string $description
-    ): array {
-        return [
-            'type' => $type,
-            'type_label' => $typeLabel,
-            'created_at' => $createdAt,
-            'company_id' => $companyId,
-            'company_name' => $companyName,
-            'user_id' => $userId,
-            'user_email' => $userEmail,
-            'description' => $description,
-        ];
     }
 
     private function generalStats(?array $companyIds): array
