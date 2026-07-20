@@ -13,7 +13,7 @@
                 <input id="to" type="date" wire:model.live="to" class="mt-1 block rounded border-gray-300 shadow-sm">
             </div>
         </div>
-        <p class="mt-3 text-xs leading-5 text-slate-500">Las tarjetas de organización muestran el estado actual. Los períodos de nómina usan inclusión completa y límites inclusivos. Las estadísticas mensuales conservan su comportamiento actual de fechas.</p>
+        <p class="mt-3 text-xs leading-5 text-slate-500">Las tarjetas de organización muestran el estado actual. Los períodos de nómina usan inclusión completa y límites inclusivos. La tendencia mensual usa la fecha de cada resultado con límites inclusivos.</p>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -120,22 +120,39 @@
             </div>
         @endcan
 
-        <div class="bg-white rounded-lg shadow p-4">
-            <h2 class="text-lg font-semibold mb-4">Estadísticas generales</h2>
-            @if (empty($generalStats))
-                <p class="text-gray-500">No hay datos.</p>
+        <section class="min-w-0 rounded-lg bg-white p-4 shadow" aria-labelledby="payroll-trends-heading">
+            <h2 id="payroll-trends-heading" class="text-lg font-semibold">Tendencia mensual de nómina</h2>
+            <p class="mt-1 text-sm text-slate-600">Muestra registros de resultados y horas de la empresa activa dentro del rango actual de fechas de resultado.</p>
+            @if (is_null($payrollTrends))
+                <p class="mt-4 text-sm font-medium text-slate-700">Seleccioná una empresa activa para consultar su tendencia mensual de nómina.</p>
+            @elseif (empty($payrollTrends))
+                <p class="mt-4 text-sm font-medium text-slate-700" role="status">No hay resultados de nómina para la empresa activa en el rango de fechas actual.</p>
             @else
-                <ul class="space-y-2">
-                    @foreach ($generalStats as $stat)
-                        <li class="border-b pb-2">
-                            <p class="font-medium">{{ $stat['month'] }} — {{ $stat['company_name'] }}</p>
-                            <p class="text-sm text-gray-600">Registros: {{ $stat['entries'] }}</p>
-                            <p class="text-sm text-gray-600">Horas ordinarias: {{ number_format($stat['ordinary_hours'], 2) }}</p>
-                            <p class="text-sm text-gray-600">Horas extras: {{ number_format($stat['extra_hours'], 2) }}</p>
+                <ol class="mt-4 space-y-3">
+                    @foreach ($payrollTrends as $trend)
+                        <li class="min-w-0 rounded-xl border border-slate-200 p-4">
+                            <time datetime="{{ $trend['month'] }}" class="font-semibold text-slate-900">{{ $trend['label'] }}</time>
+                            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+                                <div class="h-full rounded-full bg-indigo-500" style="width: {{ $trend['bar_width'] }}%"></div>
+                            </div>
+                            <dl class="mt-3 grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                                <div class="min-w-0">
+                                    <dt class="text-slate-500">Registros de resultado</dt>
+                                    <dd class="mt-1 break-words font-semibold text-slate-900">{{ $trend['entries'] }}</dd>
+                                </div>
+                                <div class="min-w-0">
+                                    <dt class="text-slate-500">Horas ordinarias</dt>
+                                    <dd class="mt-1 break-words font-semibold text-slate-900">{{ number_format($trend['ordinary_hours'], 2, '.', '') }}</dd>
+                                </div>
+                                <div class="min-w-0">
+                                    <dt class="text-slate-500">Horas extras</dt>
+                                    <dd class="mt-1 break-words font-semibold text-slate-900">{{ number_format($trend['extra_hours'], 2, '.', '') }}</dd>
+                                </div>
+                            </dl>
                         </li>
                     @endforeach
-                </ul>
+                </ol>
             @endif
-        </div>
+        </section>
     </div>
 </div>
