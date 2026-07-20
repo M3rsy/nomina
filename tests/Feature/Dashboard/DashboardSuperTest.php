@@ -4,6 +4,7 @@ use App\Livewire\Dashboard\SuperAdmin;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
+use App\Models\PayrollResult;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
@@ -37,13 +38,18 @@ test('super admin without an active company sees organization snapshots but no p
     User::factory()->count(3)->create(['company_id' => $companyA->id, 'is_active' => true]);
     User::factory()->count(2)->create(['company_id' => $companyB->id, 'is_active' => false]);
 
-    Employee::factory()->count(4)->forCompany($companyA)->create(['is_active' => true]);
+    $companyAEmployees = Employee::factory()->count(4)->forCompany($companyA)->create(['is_active' => true]);
     Employee::factory()->count(5)->forCompany($companyB)->create(['is_active' => true]);
 
-    PayPeriod::factory()->forCompany($companyA)->create(['status' => 'processed']);
+    $companyAPeriod = PayPeriod::factory()->forCompany($companyA)->create(['status' => 'processed']);
     PayPeriod::factory()->forCompany($companyA)->create(['status' => 'approved']);
     PayPeriod::factory()->forCompany($companyB)->create(['status' => 'draft']);
     PayPeriod::factory()->forCompany($companyB)->create(['status' => 'validation_failed']);
+    PayrollResult::factory()
+        ->forCompany($companyA)
+        ->forPayPeriod($companyAPeriod)
+        ->forEmployee($companyAEmployees->first())
+        ->create(['date' => '2026-01-15', 'ordinary_hours' => 987.65]);
 
     $super = User::factory()->create([
         'company_id' => null,
@@ -60,7 +66,177 @@ test('super admin without an active company sees organization snapshots but no p
         ->assertSet('payrollOverview', [])
         ->assertSee('Resumen operativo de nómina')
         ->assertSee('Este resumen nunca combina empresas.')
-        ->assertSee('Usá el selector de empresa de la barra superior.');
+        ->assertSee('Usá el selector de empresa de la barra superior.')
+        ->assertSee('Tendencia mensual de nómina')
+        ->assertSee('Seleccioná una empresa activa para consultar su tendencia mensual de nómina.')
+        ->assertDontSee('987.65');
+});
+
+test('monthly payroll trends aggregate exact active-company values in chronological order', function () {
+    $company = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+
+    PayrollResult::factory()->forCompany($company)->createMany([
+        [
+            'date' => '2026-01-05',
+            'ordinary_hours' => 7.50,
+            'extra_25_hours' => 1,
+            'extra_50_hours' => 2,
+            'extra_75_hours' => 3,
+            'extra_100_hours' => 4,
+        ],
+        [
+            'date' => '2026-01-31',
+            'ordinary_hours' => 8.25,
+            'extra_25_hours' => 2,
+            'extra_75_hours' => 1,
+        ],
+        [
+            'date' => '2026-02-01',
+            'ordinary_hours' => 6.75,
+            'extra_50_hours' => 1,
+            'extra_100_hours' => 2,
+        ],
+    ]);
+    PayrollResult::factory()->forCompany($otherCompany)->create([
+        'date' => '2026-01-10',
+        'ordinary_hours' => 999.99,
+        'extra_100_hours' => 400,
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->assertSeeInOrder([
+            'Enero de 2026',
+            'Registros de resultado',
+            '2',
+            'Horas ordinarias',
+            '15.75',
+            'Horas extras',
+            '13.00',
+            'Febrero de 2026',
+            'Registros de resultado',
+            '1',
+            'Horas ordinarias',
+            '6.75',
+            'Horas extras',
+            '3.00',
+        ])
+        ->assertSeeHtml('aria-hidden="true"')
+        ->assertSeeHtml('style="width: 100%"')
+        ->assertSeeHtml('style="width: 50%"')
+        ->assertDontSee('999.99')
+        ->assertDontSee('400.00');
+});
+
+test('monthly payroll trend date filters include both result-date boundaries', function () {
+    $company = Company::factory()->create();
+    PayrollResult::factory()->forCompany($company)->createMany([
+        [
+            'date' => '2026-03-01',
+            'ordinary_hours' => 1.25,
+            'extra_25_hours' => 1,
+        ],
+        [
+            'date' => '2026-03-31',
+            'ordinary_hours' => 2.50,
+            'extra_50_hours' => 2,
+        ],
+        [
+            'date' => '2026-02-28',
+            'ordinary_hours' => 100,
+            'extra_75_hours' => 100,
+        ],
+        [
+            'date' => '2026-04-01',
+            'ordinary_hours' => 200,
+            'extra_100_hours' => 200,
+        ],
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->set('from', '2026-03-01')
+        ->set('to', '2026-03-31')
+        ->assertSee('La tendencia mensual usa la fecha de cada resultado con límites inclusivos.')
+        ->assertSeeInOrder([
+            'Marzo de 2026',
+            'Registros de resultado',
+            '2',
+            'Horas ordinarias',
+            '3.75',
+            'Horas extras',
+            '3.00',
+        ])
+        ->assertDontSee('100.00')
+        ->assertDontSee('200.00');
+});
+
+test('monthly payroll trends render the same clear state for empty and filtered history', function () {
+    $emptyCompany = Company::factory()->create();
+    $filteredCompany = Company::factory()->create();
+    PayrollResult::factory()->forCompany($filteredCompany)->create([
+        'date' => '2026-01-15',
+        'ordinary_hours' => 44.44,
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+
+    session(['active_company_id' => $emptyCompany->id]);
+    Livewire::test(SuperAdmin::class)
+        ->assertSee('No hay resultados de nómina para la empresa activa en el rango de fechas actual.');
+
+    session(['active_company_id' => $filteredCompany->id]);
+    Livewire::test(SuperAdmin::class)
+        ->set('from', '2026-02-01')
+        ->set('to', '2026-02-28')
+        ->assertSee('No hay resultados de nómina para la empresa activa en el rango de fechas actual.')
+        ->assertDontSee('44.44');
+});
+
+test('sparse one-month payroll history exposes stable semantic exact values', function () {
+    $company = Company::factory()->create();
+    PayrollResult::factory()->forCompany($company)->create([
+        'date' => '2026-05-20',
+        'ordinary_hours' => 7.25,
+        'extra_25_hours' => 1,
+        'extra_50_hours' => 2,
+        'extra_75_hours' => 3,
+        'extra_100_hours' => 4,
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->assertSeeHtml('aria-labelledby="payroll-trends-heading"')
+        ->assertSeeHtml('<ol')
+        ->assertSeeHtml('<dl')
+        ->assertSeeHtml('datetime="2026-05"')
+        ->assertSeeInOrder([
+            'Mayo de 2026',
+            'Registros de resultado',
+            '1',
+            'Horas ordinarias',
+            '7.25',
+            'Horas extras',
+            '10.00',
+        ])
+        ->assertSeeHtml('aria-hidden="true"')
+        ->assertSeeHtml('style="width: 100%"')
+        ->assertDontSee('No hay resultados de nómina para la empresa activa en el rango de fechas actual.');
 });
 
 test('active company payroll overview counts every recognized and unknown status without cross-tenant data', function () {

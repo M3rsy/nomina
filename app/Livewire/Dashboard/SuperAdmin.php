@@ -67,7 +67,7 @@ class SuperAdmin extends Component
             'activeUsers' => $this->activeUsers,
             'activeEmployees' => $this->activeEmployees,
             'payrollOverview' => $this->payrollOverview,
-            'generalStats' => $this->generalStats($companyIds),
+            'payrollTrends' => $companyId === null ? null : $this->monthlyPayrollTrends($companyId),
         ]);
     }
 
@@ -111,27 +111,47 @@ class SuperAdmin extends Component
         ];
     }
 
-    private function generalStats(?array $companyIds): array
+    private function monthlyPayrollTrends(int $companyId): array
     {
-        $results = PayrollResult::withoutCompanyScope()
-            ->with('company')
-            ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
+        $dailyTotals = PayrollResult::withoutCompanyScope()
+            ->where('company_id', $companyId)
             ->when($this->from, fn ($q) => $q->whereDate('date', '>=', $this->from))
             ->when($this->to, fn ($q) => $q->whereDate('date', '<=', $this->to))
-            ->limit(1000)
+            ->selectRaw('date, count(*) as entries')
+            ->selectRaw('coalesce(sum(ordinary_hours), 0) as ordinary_hours')
+            ->selectRaw('coalesce(sum(extra_25_hours), 0) as extra_25_hours')
+            ->selectRaw('coalesce(sum(extra_50_hours), 0) as extra_50_hours')
+            ->selectRaw('coalesce(sum(extra_75_hours), 0) as extra_75_hours')
+            ->selectRaw('coalesce(sum(extra_100_hours), 0) as extra_100_hours')
+            ->groupBy('date')
+            ->orderBy('date')
             ->get();
 
-        return $results
-            ->groupBy(fn (PayrollResult $result) => $result->date->format('Y-m'))
-            ->map(fn ($group, $month) => [
+        $months = [];
+
+        foreach ($dailyTotals as $totals) {
+            $month = $totals->date->format('Y-m');
+            $months[$month] ??= [
                 'month' => $month,
-                'company_name' => $group->first()->company?->name ?? 'Todas',
-                'entries' => $group->count(),
-                'ordinary_hours' => $group->sum('ordinary_hours'),
-                'extra_hours' => $group->sum(fn (PayrollResult $r) => $r->extra_25_hours + $r->extra_50_hours + $r->extra_75_hours + $r->extra_100_hours),
-            ])
-            ->sortKeysDesc()
-            ->values()
-            ->toArray();
+                'label' => ucfirst($totals->date->locale('es')->translatedFormat('F \\d\\e Y')),
+                'entries' => 0,
+                'ordinary_hours' => 0.0,
+                'extra_hours' => 0.0,
+            ];
+            $months[$month]['entries'] += (int) $totals->entries;
+            $months[$month]['ordinary_hours'] += (float) $totals->ordinary_hours;
+            $months[$month]['extra_hours'] += (float) $totals->extra_25_hours
+                + (float) $totals->extra_50_hours
+                + (float) $totals->extra_75_hours
+                + (float) $totals->extra_100_hours;
+        }
+
+        $maxEntries = max(array_column($months, 'entries') ?: [1]);
+        foreach ($months as &$monthTotals) {
+            $monthTotals['bar_width'] = round($monthTotals['entries'] / $maxEntries * 100, 2);
+        }
+        unset($monthTotals);
+
+        return array_values($months);
     }
 }
