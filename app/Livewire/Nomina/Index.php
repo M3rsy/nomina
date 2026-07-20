@@ -32,7 +32,7 @@ class Index extends Component
         $company = current_company();
 
         $payPeriods = $company !== null
-            ? PayPeriod::query()->orderBy('start_date', 'desc')->paginate(10)
+            ? PayPeriod::query()->orderBy('start_date', 'desc')->orderByDesc('id')->paginate(10)
             : collect();
 
         return view('livewire.nomina.index', [
