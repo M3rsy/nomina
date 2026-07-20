@@ -35,7 +35,7 @@
                     <td class="px-4 py-2">{{ $file->original_name }}</td>
                     <td class="px-4 py-2">{{ $file->payPeriod?->name ?? '-' }}</td>
                     <td class="px-4 py-2">{{ $file->status }}</td>
-                    <td class="px-4 py-2">{{ $file->rawMarks()->count() }}</td>
+                    <td class="px-4 py-2">{{ $file->raw_marks_count }}</td>
                     <td class="px-4 py-2">{{ $file->created_at->format('d/m/Y H:i') }}</td>
                     <td class="px-4 py-2">
                         <a href="/archivos/{{ $file->id }}" class="text-indigo-600 hover:underline">Ver</a>

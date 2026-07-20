@@ -25,6 +25,34 @@ test('company admin can view nomina index of own company', function () {
         ->assertSee('/nomina/'.$payPeriod->id.'/revisar');
 });
 
+test('company admin paginates own periods with stable ordering', function () {
+    $company = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $payPeriods = collect(range(1, 11))->map(fn (int $number) => PayPeriod::factory()
+        ->forCompany($company)
+        ->create([
+            'slug' => sprintf('period-%02d', $number),
+            'name' => sprintf('Period %02d', $number),
+            'start_date' => '2026-01-01',
+        ]));
+    PayPeriod::factory()->forCompany($otherCompany)->create(['name' => 'Other company period']);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->assertSeeInOrder($payPeriods->reverse()->take(10)->pluck('name')->all())
+        ->assertDontSee('Period 01')
+        ->assertDontSee('Other company period')
+        ->assertSeeHtml('wire:click="nextPage(\'page\')"')
+        ->call('setPage', 2)
+        ->assertSee('Period 01')
+        ->assertDontSee('Period 11')
+        ->assertSeeHtml('wire:click="previousPage(\'page\')"');
+});
+
 test('nomina index translates stored period statuses for display', function () {
     $company = Company::factory()->create();
     PayPeriod::factory()->forCompany($company)->create(['status' => 'validation_failed']);
@@ -67,13 +95,18 @@ test('company admin cannot view nomina index of other company', function () {
 });
 
 test('super admin without active company sees empty nomina index', function () {
+    $company = Company::factory()->create();
+    PayPeriod::factory()->forCompany($company)->create(['name' => 'Hidden period']);
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     app(CurrentCompany::class)->set(null);
 
-    $this->actingAs($superAdmin)
-        ->get('/nomina')
-        ->assertOk();
+    $this->actingAs($superAdmin);
+
+    Livewire::test(Index::class)
+        ->assertSee('Seleccioná una empresa activa')
+        ->assertDontSee('Hidden period')
+        ->assertDontSee('Pagination Navigation');
 });
 
 test('create period control is enabled and connected to the inline form', function () {

@@ -22,12 +22,20 @@ class Index extends Component
     #[Url]
     public ?int $pay_period_id = null;
 
+    public function updated(string $property): void
+    {
+        if (in_array($property, ['search', 'status', 'pay_period_id'], true)) {
+            $this->resetPage();
+        }
+    }
+
     public function render()
     {
         $this->authorize('viewAny', UploadedFile::class);
 
         $files = UploadedFile::query()
             ->with('payPeriod')
+            ->withCount('rawMarks')
             ->when($this->search, function ($query) {
                 $query->where('original_name', 'like', '%'.$this->search.'%');
             })
@@ -38,6 +46,7 @@ class Index extends Component
                 $query->where('pay_period_id', $this->pay_period_id);
             })
             ->orderBy('created_at', 'desc')
+            ->orderByDesc('id')
             ->paginate(10);
 
         return view('livewire.archivos.index', [

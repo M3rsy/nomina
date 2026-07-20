@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Empleados;
 
-use App\Models\Company;
 use App\Models\Employee;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -17,11 +16,18 @@ class Index extends Component
 
     public string $filter = 'active';
 
+    public function updatedSearch(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedFilter(): void
+    {
+        $this->resetPage();
+    }
+
     public function render()
     {
-        $user = auth()->user();
-        $companyId = current_company_id();
-
         $this->authorize('viewAny', Employee::class);
 
         $employees = Employee::query()
@@ -39,12 +45,11 @@ class Index extends Component
             })
             ->orderBy('last_name')
             ->orderBy('first_name')
+            ->orderBy('id')
             ->paginate(10);
 
         return view('livewire.empleados.index', [
             'employees' => $employees,
-            'companies' => $user->hasRole('super_admin') ? Company::orderBy('name')->get() : null,
-            'currentCompanyId' => $companyId,
         ]);
     }
 }
