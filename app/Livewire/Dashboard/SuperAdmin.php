@@ -28,11 +28,7 @@ class SuperAdmin extends Component
 
     public int $activeEmployees = 0;
 
-    public int $processedPayrolls = 0;
-
-    public int $pendingPayrolls = 0;
-
-    public int $errorPayrolls = 0;
+    public array $payrollOverview = [];
 
     public function mount(): void
     {
@@ -41,7 +37,8 @@ class SuperAdmin extends Component
 
     public function render()
     {
-        $companyId = current_company_id();
+        $company = current_company();
+        $companyId = $company?->id;
         $companyIds = $companyId !== null ? [$companyId] : null;
 
         $this->activeCompanies = Company::query()
@@ -60,34 +57,58 @@ class SuperAdmin extends Component
             ->where('is_active', true)
             ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
             ->count();
-        $this->processedPayrolls = $this->payPeriodQuery($companyIds)
-            ->whereIn('status', ['processed', 'approved', 'exported'])
-            ->count();
-        $this->pendingPayrolls = $this->payPeriodQuery($companyIds)
-            ->whereIn('status', ['draft', 'uploaded', 'validating', 'ready'])
-            ->count();
-        $this->errorPayrolls = $this->payPeriodQuery($companyIds)
-            ->where('status', 'validation_failed')
-            ->count();
+        $this->payrollOverview = $company === null
+            ? []
+            : $this->buildPayrollOverview((int) $company->id, $company->name);
 
         return view('livewire.dashboard.super-admin', [
             'activeCompanies' => $this->activeCompanies,
             'inactiveCompanies' => $this->inactiveCompanies,
             'activeUsers' => $this->activeUsers,
             'activeEmployees' => $this->activeEmployees,
-            'processedPayrolls' => $this->processedPayrolls,
-            'pendingPayrolls' => $this->pendingPayrolls,
-            'errorPayrolls' => $this->errorPayrolls,
+            'payrollOverview' => $this->payrollOverview,
             'generalStats' => $this->generalStats($companyIds),
         ]);
     }
 
-    private function payPeriodQuery(?array $companyIds)
+    private function buildPayrollOverview(int $companyId, string $companyName): array
     {
-        return PayPeriod::withoutCompanyScope()
-            ->when($companyIds, fn ($q) => $q->whereIn('company_id', $companyIds))
+        $counts = PayPeriod::withoutCompanyScope()
+            ->where('company_id', $companyId)
             ->when($this->from, fn ($q) => $q->whereDate('start_date', '>=', $this->from))
-            ->when($this->to, fn ($q) => $q->whereDate('end_date', '<=', $this->to));
+            ->when($this->to, fn ($q) => $q->whereDate('end_date', '<=', $this->to))
+            ->selectRaw('status, count(*) as status_count')
+            ->groupBy('status')
+            ->pluck('status_count', 'status')
+            ->map(fn ($count) => (int) $count)
+            ->all();
+
+        $preparation = ($counts['draft'] ?? 0) + ($counts['uploaded'] ?? 0)
+            + ($counts['validating'] ?? 0) + ($counts['ready'] ?? 0);
+        $processing = $counts['processing'] ?? 0;
+        $completed = ($counts['processed'] ?? 0) + ($counts['approved'] ?? 0) + ($counts['exported'] ?? 0);
+        $validationFailed = $counts['validation_failed'] ?? 0;
+        $cancelled = $counts['cancelled'] ?? 0;
+        $total = array_sum($counts);
+        $hasPeriods = $total > 0;
+
+        if (! $hasPeriods && ($this->from || $this->to)) {
+            $hasPeriods = PayPeriod::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->exists();
+        }
+
+        return [
+            'company_name' => $companyName,
+            'total' => $total,
+            'preparation' => $preparation,
+            'processing' => $processing,
+            'completed' => $completed,
+            'validation_failed' => $validationFailed,
+            'cancelled' => $cancelled,
+            'unknown' => $total - $preparation - $processing - $completed - $validationFailed - $cancelled,
+            'has_periods' => $hasPeriods,
+        ];
     }
 
     private function generalStats(?array $companyIds): array
