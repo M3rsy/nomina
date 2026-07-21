@@ -361,17 +361,38 @@
                                         </p>
                                     </div>
 
-                                    @if ($exception)
-                                        <div class="max-w-sm rounded-xl border px-3 py-2 text-sm {{ $exception->decision === 'granted' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-300 bg-slate-100 text-slate-800' }}">
-                                            <p class="font-bold">{{ $exception->decision === 'granted' ? 'Excepción concedida' : 'Excepción revocada' }}</p>
-                                            <p class="mt-1">{{ $exception->reason }}</p>
-                                            <p class="mt-1 text-xs opacity-80">
-                                                {{ $exception->decider->email ?: 'Usuario eliminado' }} · {{ $exception->created_at?->format('d/m/Y H:i') }}
-                                            </p>
+                                    <div class="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+                                        @if ($exception)
+                                            <div class="rounded-xl border px-3 py-2 text-sm {{ $exception->decision === 'granted' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-300 bg-slate-100 text-slate-800' }}">
+                                                <p class="font-bold">{{ $exception->decision === 'granted' ? 'Excepción concedida' : 'Excepción revocada' }}</p>
+                                                <p class="mt-1">{{ $exception->reason }}</p>
+                                                <p class="mt-1 text-xs opacity-80">
+                                                    {{ $exception->decider->email ?: 'Usuario eliminado' }} · {{ $exception->created_at?->format('d/m/Y H:i') }}
+                                                </p>
+                                            </div>
+                                        @else
+                                            <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Sin excepción · se descuenta</span>
+                                        @endif
+
+                                        <div class="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'granted')"
+                                                @disabled($isBlocked || $exception?->decision === 'granted')
+                                                class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Conceder excepción
+                                            </button>
+                                            <button
+                                                type="button"
+                                                wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'revoked')"
+                                                @disabled($isBlocked || $exception?->decision !== 'granted')
+                                                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Revocar excepción
+                                            </button>
                                         </div>
-                                    @else
-                                        <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Sin excepción · se descuenta</span>
-                                    @endif
+                                    </div>
                                 </div>
                             </div>
                         @endforeach
@@ -527,6 +548,45 @@
             @endforelse
         </div>
     </section>
+
+    @if ($showAttendanceExceptionModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $attendanceExceptionDecision === 'granted' ? 'text-emerald-700' : 'text-slate-700' }}">Decisión auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">
+                    {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción completa' : 'Revocar excepción completa' }}
+                </h2>
+                <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{{ $attendanceDeficitSummary }}</p>
+                <p class="mt-3 text-sm text-slate-600">
+                    El déficit fue calculado por el sistema y no puede modificarse parcialmente. La marca observada seguirá mostrando la hora real.
+                </p>
+
+                <form wire:submit.prevent="saveAttendanceException" class="mt-4 space-y-4">
+                    <label for="attendance_exception_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea
+                            id="attendance_exception_reason"
+                            wire:model="attendanceExceptionReason"
+                            rows="3"
+                            maxlength="500"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                            placeholder="Explique por qué este déficit se reconoce o vuelve a descontarse"
+                        ></textarea>
+                    </label>
+                    @error('attendanceExceptionReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('attendanceDeficitKey') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('attendanceExceptionDecision') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
+                            {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 
     @if ($showOvertimeDecisionModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
