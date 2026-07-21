@@ -7,6 +7,7 @@ use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\PayrollReadinessChecker;
+use App\Services\Payroll\PayPeriodReopener;
 use App\Services\PayrollRules;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -71,6 +72,10 @@ class Revisar extends Component
     public ?string $readyMessage = null;
 
     public array $readinessBlockers = [];
+
+    public bool $showReopenModal = false;
+
+    public string $reopenReason = '';
 
     public bool $locked = false;
 
@@ -468,9 +473,48 @@ class Revisar extends Component
         $this->readyMessage = null;
     }
 
+    public function openReopenModal(): void
+    {
+        if ($this->payPeriod->status !== 'processed') {
+            return;
+        }
+
+        $this->authorize('manage', $this->payPeriod);
+        $this->showReopenModal = true;
+    }
+
+    public function closeReopenModal(): void
+    {
+        $this->showReopenModal = false;
+        $this->reopenReason = '';
+        $this->resetErrorBag();
+    }
+
+    public function reopenProcessedPeriod(): void
+    {
+        if ($this->payPeriod->status !== 'processed') {
+            return;
+        }
+
+        $this->authorize('manage', $this->payPeriod);
+        $validated = $this->validate([
+            'reopenReason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $this->payPeriod = app(PayPeriodReopener::class)->reopen(
+            $this->payPeriod,
+            $validated['reopenReason'],
+            Auth::user(),
+        );
+        $this->locked = false;
+        $this->closeReopenModal();
+
+        session()->flash('success', 'Período reabierto. Los resultados anteriores fueron invalidados.');
+    }
+
     public function isBlocked(): bool
     {
-        return in_array($this->payPeriod->status, ['approved', 'exported', 'cancelled'], true);
+        return in_array($this->payPeriod->status, ['processed', 'approved', 'exported', 'cancelled'], true);
     }
 
     public function readinessBlockerLabel(string $code): string

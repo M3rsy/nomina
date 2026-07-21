@@ -48,7 +48,15 @@
                     Volver a períodos
                 </a>
 
-                @if ($isBlocked)
+                @if ($payPeriod->status === 'processed')
+                    <button
+                        type="button"
+                        wire:click="openReopenModal"
+                        class="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+                    >
+                        Reabrir para corregir
+                    </button>
+                @elseif ($isBlocked)
                     <button
                         type="button"
                         disabled
@@ -78,7 +86,11 @@
 
         @if ($isBlocked)
             <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Este período está bloqueado (estado: {{ $payPeriod->status }}) y no permite modificaciones.
+                @if ($payPeriod->status === 'processed')
+                    Este período ya tiene resultados calculados. Debe reabrirlo con un motivo antes de modificar la asistencia.
+                @else
+                    Este período está bloqueado (estado: {{ $payPeriod->status }}) y no permite modificaciones.
+                @endif
             </div>
         @endif
 
@@ -368,6 +380,26 @@
                     <button type="button" wire:click="cancelReadyConfirm" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
                     <button type="button" wire:click="confirmContinueToReady" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Confirmar</button>
                 </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($showReopenModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <h2 class="text-lg font-bold">Reabrir período procesado</h2>
+                <p class="mt-2 text-sm text-slate-600">Los resultados calculados se eliminarán para evitar usar valores obsoletos. Las marcas y las decisiones auditadas se conservan.</p>
+                <form wire:submit.prevent="reopenProcessedPeriod" class="mt-4 space-y-4">
+                    <label for="reopen_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo obligatorio</span>
+                        <textarea id="reopen_reason" wire:model="reopenReason" rows="3" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>
+                    </label>
+                    @error('reopenReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeReopenModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">Invalidar y reabrir</button>
+                    </div>
+                </form>
             </div>
         </div>
     @endif

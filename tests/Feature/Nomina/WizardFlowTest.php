@@ -159,7 +159,7 @@ test('confirmContinueToReady advances pay period to ready after user acceptance'
     expect($payPeriod->fresh()->status)->toBe('ready');
 });
 
-test('saveDraft and continueToReady are no-ops when pay period is approved, exported or cancelled', function (string $blockedStatus) {
+test('saveDraft and continueToReady are no-ops when pay period is processed or locked', function (string $blockedStatus) {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod($blockedStatus);
 
     $this->actingAs($admin);
@@ -177,6 +177,7 @@ test('saveDraft and continueToReady are no-ops when pay period is approved, expo
 
     expect($payPeriod->fresh()->status)->toBe($blockedStatus);
 })->with([
+    'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
     'cancelled' => ['cancelled'],
