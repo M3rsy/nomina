@@ -6,11 +6,12 @@ use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class RawMark extends Model
 {
     use BelongsToCompany, HasFactory;
+
+    public const SOURCE_MANUAL = 'manual';
 
     protected $fillable = [
         'company_id',
