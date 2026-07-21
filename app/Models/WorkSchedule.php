@@ -13,9 +13,12 @@ class WorkSchedule extends Model
 
     protected $fillable = [
         'company_id',
+        'work_schedule_profile_id',
         'day_of_week',
         'is_working_day',
         'base_ordinary_hours',
+        'start_time',
+        'end_time',
         'banding_json',
         'notes',
     ];
@@ -33,5 +36,10 @@ class WorkSchedule extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function profile(): BelongsTo
+    {
+        return $this->belongsTo(WorkScheduleProfile::class, 'work_schedule_profile_id');
     }
 }
