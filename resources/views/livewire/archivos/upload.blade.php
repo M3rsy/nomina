@@ -69,7 +69,26 @@
                         </div>
                     </div>
 
-                    <div class="relative mt-5 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center transition hover:border-indigo-400 hover:bg-indigo-50/40 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/30 sm:p-8">
+                    <div class="relative mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-1 transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/30 hover:border-indigo-200 hover:bg-slate-50/70">
+                        <label for="upload" class="group block cursor-pointer overflow-hidden rounded-xl border border-transparent bg-white p-4 transition sm:p-6">
+                            <div class="flex min-h-28 flex-col gap-4 text-left sm:flex-row sm:items-center sm:justify-between">
+                                <div class="flex min-w-0 items-center gap-3">
+                                    <span class="grid size-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-100 text-slate-500 transition group-hover:border-indigo-300 group-hover:text-indigo-500">
+                                        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14.5v3.75A1.75 1.75 0 0 0 6.75 20h10.5A1.75 1.75 0 0 0 19 18.25V14.5" />
+                                        </svg>
+                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold leading-6 text-slate-900">Arrastrá el archivo aquí o tocá el botón para abrir el selector</p>
+                                        <p class="mt-1 text-xs text-slate-500">GLG*.txt o ATTLOG *.dat · máximo 5 MB</p>
+                                    </div>
+                                </div>
+                                <span class="inline-flex h-10 shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition group-hover:border-indigo-300 group-hover:bg-indigo-50 group-hover:text-indigo-700">
+                                    Seleccionar archivo
+                                </span>
+                            </div>
+                        </label>
+
                         <input
                             id="upload"
                             type="file"
@@ -79,16 +98,10 @@
                             aria-describedby="attendance-file-contract @error('upload') upload-error @enderror"
                             @error('upload') aria-invalid="true" @else aria-invalid="false" @enderror
                             class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                            style="opacity: 0;"
                         >
-                        <svg class="mx-auto size-8 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14.5v3.75A1.75 1.75 0 0 0 6.75 20h10.5A1.75 1.75 0 0 0 19 18.25V14.5" />
-                        </svg>
-                        <p class="mt-3 text-sm font-semibold text-slate-900">Arrastrá el archivo aquí o presioná para seleccionarlo</p>
-                        <p class="mt-1 text-xs text-slate-500">GLG*.txt o ATTLOG *.dat · máximo 5 MB</p>
-                    </div>
 
-                    <p wire:loading wire:target="upload" role="status" aria-live="polite" class="mt-3 text-sm font-medium text-indigo-700">Cargando el archivo seleccionado...</p>
+                        <p wire:loading wire:target="upload" role="status" aria-live="polite" class="px-4 pb-4 pt-3 text-sm font-medium text-indigo-700">Cargando el archivo seleccionado...</p>
+                    </div>
 
                     @if ($upload)
                         @php

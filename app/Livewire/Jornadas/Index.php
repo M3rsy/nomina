@@ -45,7 +45,7 @@ class Index extends Component
         'La jornada ordinaria vigente es 06:00-14:00 y se completa con 25%, 50% y 75% en la lógica de cálculo.',
         'Domingos y feriados se tratan como jornada 100% extra en el motor de nómina.',
         'Los cambios de `is_working_day` y `base_ordinary_hours` sí pueden cambiar resultados futuros.',
-        'Si más adelante se quiere configuración editable por compañía, agregar `banding_json` a `work_schedules` y usarlo en `PayrollRules/BandSplitter`.',
+        'Los tramos de recargo aceptan JSON en `banding_json`; si el JSON es inválido, el motor vuelve al template histórico.',
     ];
 
     public function mount(): void
@@ -112,6 +112,7 @@ class Index extends Component
                 'is_working_day' => (bool) ($schedule?->is_working_day ?? false),
                 'base_ordinary_hours' => (float) ($schedule?->base_ordinary_hours ?? 0),
                 'notes' => $schedule?->notes,
+                'banding_json' => $this->serializeBandingForInput($schedule?->banding_json),
             ];
         }
 
@@ -151,6 +152,7 @@ class Index extends Component
                     'is_working_day' => $data['is_working_day'],
                     'base_ordinary_hours' => $data['base_ordinary_hours'],
                     'notes' => $data['notes'],
+                    'banding_json' => $data['banding_json'],
                 ]
             );
         }
@@ -220,6 +222,20 @@ class Index extends Component
             'schedules.*.is_working_day' => 'required|boolean',
             'schedules.*.base_ordinary_hours' => 'required|numeric|min:0|max:24',
             'schedules.*.notes' => 'nullable|string|max:500',
+            'schedules.*.banding_json' => [
+                'nullable',
+                'string',
+                'max:5000',
+                function (string $attribute, mixed $value, callable $fail): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+
+                    if (! is_string($value) || json_decode($value, true) === null && json_last_error() !== JSON_ERROR_NONE) {
+                        $fail('El JSON de tramos debe ser válido.');
+                    }
+                },
+            ],
         ]);
 
         return collect($this->schedules)
@@ -232,6 +248,7 @@ class Index extends Component
                         ? $this->normalizeBaseHours($row['base_ordinary_hours'])
                         : 0.0,
                     'notes' => $row['notes'] ?: null,
+                    'banding_json' => $this->normalizeBandingJson($row['banding_json'] ?? null),
                 ];
             })
             ->toArray();
@@ -272,12 +289,42 @@ class Index extends Component
                 continue;
             }
 
+            if ($this->normalizedBandingSignature($original['banding_json'] ?? null)
+                !== $this->normalizedBandingSignature($schedule['banding_json'] ?? null)) {
+                return true;
+            }
+
             if ($currentBase !== $originalBase) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function normalizedBandingSignature(mixed $value): string
+    {
+        $bands = $this->normalizeBandingJson($value);
+
+        if (empty($bands)) {
+            return '[]';
+        }
+
+        if (! array_is_list($bands)) {
+            $bands = $bands['bands'] ?? [];
+        }
+
+        if (! is_array($bands)) {
+            return '[]';
+        }
+
+        $normalized = array_values(
+            array_filter($bands, static fn (mixed $band): bool => is_array($band)),
+        );
+
+        usort($normalized, static fn (array $left, array $right): int => ($left['start'] ?? 0) <=> ($right['start'] ?? 0));
+
+        return json_encode($normalized) ?: '[]';
     }
 
     private function loadHistoricalContext(int $companyId): void
@@ -314,6 +361,32 @@ class Index extends Component
     private function normalizeBaseHours(mixed $value): float
     {
         return round(max(0.0, min(24.0, (float) $value)), 2);
+    }
+
+    private function normalizeBandingJson(mixed $raw): ?array
+    {
+        if (! is_string($raw)) {
+            return is_array($raw) ? $raw : null;
+        }
+
+        $raw = trim($raw);
+
+        if ($raw === '') {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : null;
+    }
+
+    private function serializeBandingForInput(mixed $bands): string
+    {
+        if (! is_array($bands) || $bands === []) {
+            return '';
+        }
+
+        return json_encode(array_values($bands));
     }
 
     public function render()
