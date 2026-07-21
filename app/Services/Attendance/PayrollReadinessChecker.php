@@ -11,7 +11,7 @@ class PayrollReadinessChecker
 {
     public function __construct(private PayrollShiftEvaluationResolver $evaluationResolver) {}
 
-    /** @return Collection<int, array{employee_id:int,work_date:string,code:string,candidate_key?:string}> */
+    /** @return Collection<int, array{employee_id:int,employee_name:string,employee_external_id:string,work_date:string,code:string,candidate_key?:string}> */
     public function blockers(PayPeriod $payPeriod): Collection
     {
         $blockers = collect();
@@ -28,6 +28,8 @@ class PayrollReadinessChecker
                 foreach ($evaluation->blockers as $blocker) {
                     $blockers->push([
                         'employee_id' => $employee->id,
+                        'employee_name' => $employee->full_name,
+                        'employee_external_id' => $employee->external_id,
                         'work_date' => $date->toDateString(),
                         ...$blocker,
                     ]);

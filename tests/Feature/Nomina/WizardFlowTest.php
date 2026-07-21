@@ -7,6 +7,9 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
+use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
@@ -30,6 +33,20 @@ function setUpCompanyAndPayPeriod(string $payPeriodStatus = 'validating'): array
     return [$company, $payPeriod, $file, $admin];
 }
 
+function assignWizardSchedule(Company $company, Employee $employee): void
+{
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach (Company::defaultWorkSchedules() as $day => $definition) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $day,
+            ...$definition,
+        ]);
+    }
+
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada inicial');
+}
+
 test('saveDraft sets pay period status to validating', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('uploaded');
 
@@ -46,11 +63,18 @@ test('saveDraft sets pay period status to validating', function () {
 test('continueToReady sets status to ready when all marks are clean', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
+    assignWizardSchedule($company, $employee);
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
         'employee_external_id' => $employee->external_id,
         'employee_id' => $employee->id,
         'event_at' => Carbon::parse('2026-01-05 06:00:00'),
+        'status' => 'valid',
+    ]);
+    RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'employee_external_id' => $employee->external_id,
+        'employee_id' => $employee->id,
+        'event_at' => Carbon::parse('2026-01-05 14:00:00'),
         'status' => 'valid',
     ]);
 
@@ -66,7 +90,6 @@ test('continueToReady sets status to ready when all marks are clean', function (
 
 test('continueToReady with pending marks opens confirmation modal and does not advance status', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
-    $employee = Employee::factory()->forCompany($company)->create();
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
         'employee_external_id' => 'unknown-123',
@@ -85,6 +108,31 @@ test('continueToReady with pending marks opens confirmation modal and does not a
     $component
         ->assertSet('showReadyConfirm', true)
         ->assertSet('readyMessage', 'Aún existen marcas pendientes, desconocidas, fuera de período o duplicadas. ¿Desea continuar de todas formas?');
+
+    expect($payPeriod->fresh()->status)->toBe('validating');
+});
+
+test('an unreviewed overtime candidate cannot be bypassed when advancing to ready', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $employee = Employee::factory()->forCompany($company)->create();
+    assignWizardSchedule($company, $employee);
+
+    foreach (['2026-01-05 06:00:00', '2026-01-05 14:30:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)
+            ->forEmployee($employee)->create(['event_at' => $eventAt, 'status' => 'valid']);
+    }
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('continueToReady')
+        ->assertSet('showReadyConfirm', false)
+        ->assertCount('readinessBlockers', 1)
+        ->assertSee('Revisión obligatoria pendiente')
+        ->set('showReadyConfirm', true)
+        ->call('confirmContinueToReady')
+        ->assertCount('readinessBlockers', 1);
 
     expect($payPeriod->fresh()->status)->toBe('validating');
 });
