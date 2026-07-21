@@ -152,10 +152,10 @@ class Procesar extends Component
             'total_employees' => (int) ($totals?->total_employees ?? 0),
             'total_records' => (int) ($totals?->total_records ?? 0),
             'ordinary_hours' => (float) ($totals?->ordinary_hours ?? 0),
-            'extra_25_hours' => (int) ($totals?->extra_25_hours ?? 0),
-            'extra_50_hours' => (int) ($totals?->extra_50_hours ?? 0),
-            'extra_75_hours' => (int) ($totals?->extra_75_hours ?? 0),
-            'extra_100_hours' => (int) ($totals?->extra_100_hours ?? 0),
+            'extra_25_hours' => (float) ($totals?->extra_25_hours ?? 0),
+            'extra_50_hours' => (float) ($totals?->extra_50_hours ?? 0),
+            'extra_75_hours' => (float) ($totals?->extra_75_hours ?? 0),
+            'extra_100_hours' => (float) ($totals?->extra_100_hours ?? 0),
         ];
     }
 }

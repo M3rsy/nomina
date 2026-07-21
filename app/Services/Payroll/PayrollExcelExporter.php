@@ -4,10 +4,10 @@ namespace App\Services\Payroll;
 
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -36,8 +36,6 @@ class PayrollExcelExporter
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
 
     private const DECIMAL_HOURS_FORMAT = '#,##0.00';
-
-    private const INTEGER_HOURS_FORMAT = '0';
 
     public function export(PayPeriod $payPeriod): string
     {
@@ -175,7 +173,7 @@ class PayrollExcelExporter
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
                     ->getNumberFormat()
-                    ->setFormatCode(self::INTEGER_HOURS_FORMAT);
+                    ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
             }
 
             $row++;
@@ -189,7 +187,7 @@ class PayrollExcelExporter
 
         $style->getFont()->setBold(true);
         $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFE0E0E0'));
+        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new Color('FFE0E0E0'));
         $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
     }
 

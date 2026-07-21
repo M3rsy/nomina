@@ -8,6 +8,7 @@ use App\Models\PayrollResult;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -21,8 +22,6 @@ class PayrollStubExporter
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
 
     private const DECIMAL_HOURS_FORMAT = '#,##0.00';
-
-    private const INTEGER_HOURS_FORMAT = '0';
 
     public function export(PayPeriod $payPeriod, Employee $employee): string
     {
@@ -123,10 +122,10 @@ class PayrollStubExporter
         $totals = [
             'worked_hours' => 0.0,
             'ordinary_hours' => 0.0,
-            'extra_25_hours' => 0,
-            'extra_50_hours' => 0,
-            'extra_75_hours' => 0,
-            'extra_100_hours' => 0,
+            'extra_25_hours' => 0.0,
+            'extra_50_hours' => 0.0,
+            'extra_75_hours' => 0.0,
+            'extra_100_hours' => 0.0,
         ];
 
         $row = 9;
@@ -167,7 +166,7 @@ class PayrollStubExporter
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
                     ->getNumberFormat()
-                    ->setFormatCode(self::INTEGER_HOURS_FORMAT);
+                    ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
             }
 
             $sheet->setCellValue("K{$row}", $result->is_absence ? 'Sí' : 'No');
@@ -175,10 +174,10 @@ class PayrollStubExporter
 
             $totals['worked_hours'] += (float) $result->worked_hours;
             $totals['ordinary_hours'] += (float) $result->ordinary_hours;
-            $totals['extra_25_hours'] += (int) $result->extra_25_hours;
-            $totals['extra_50_hours'] += (int) $result->extra_50_hours;
-            $totals['extra_75_hours'] += (int) $result->extra_75_hours;
-            $totals['extra_100_hours'] += (int) $result->extra_100_hours;
+            $totals['extra_25_hours'] += (float) $result->extra_25_hours;
+            $totals['extra_50_hours'] += (float) $result->extra_50_hours;
+            $totals['extra_75_hours'] += (float) $result->extra_75_hours;
+            $totals['extra_100_hours'] += (float) $result->extra_100_hours;
 
             $row++;
         }
@@ -187,7 +186,7 @@ class PayrollStubExporter
     }
 
     /**
-     * @param array<string, float|int> $totals
+     * @param  array<string, float|int>  $totals
      */
     private function writeTotalsRow(Worksheet $sheet, array $totals): void
     {
@@ -211,7 +210,7 @@ class PayrollStubExporter
             ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
         $sheet->getStyle("G{$totalsRow}:J{$totalsRow}")
             ->getNumberFormat()
-            ->setFormatCode(self::INTEGER_HOURS_FORMAT);
+            ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
     }
 
     private function applyHeaderStyle(Worksheet $sheet): void
@@ -221,7 +220,7 @@ class PayrollStubExporter
 
         $style->getFont()->setBold(true);
         $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFE0E0E0'));
+        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new Color('FFE0E0E0'));
         $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
     }
 }
