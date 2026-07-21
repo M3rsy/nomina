@@ -20,6 +20,10 @@ final class AccountAccess
             return null;
         }
 
+        if (! $user->hasRole('company_admin')) {
+            return $user->is_active ? null : self::USER_INACTIVE;
+        }
+
         $company = $user->company;
 
         if ($company === null || $user->company_id === null) {
