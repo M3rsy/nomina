@@ -24,5 +24,6 @@ readonly class AttendanceShiftAnalysis
         public BandSplit $scheduledRates,
         public Collection $deficits,
         public Collection $overtimeCandidates,
+        public bool $isHoliday = false,
     ) {}
 }

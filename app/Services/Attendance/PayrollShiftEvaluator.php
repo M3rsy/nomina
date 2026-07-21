@@ -32,7 +32,7 @@ class PayrollShiftEvaluator
         }
 
         if ($analysis->status === ShiftOccurrence::NO_MARKS) {
-            if (! $occurrence->schedule?->is_working_day) {
+            if ($analysis->isHoliday || ! $occurrence->schedule?->is_working_day) {
                 return new PayrollShiftEvaluation(
                     status: PayrollShiftEvaluation::SKIP,
                     workDate: $analysis->workDate,

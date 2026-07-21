@@ -9,6 +9,9 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
+use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
@@ -121,7 +124,7 @@ test('detectFaltas lists working day without marks as falta', function () {
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
     ]);
-    Employee::factory()->forCompany($company)->create();
+    absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     $this->actingAs($admin);
@@ -133,13 +136,50 @@ test('detectFaltas lists working day without marks as falta', function () {
         });
 });
 
+test('detectFaltas follows each employee assigned schedule', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-05',
+    ]);
+    $workingProfile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $restProfile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($workingProfile)->create([
+        'day_of_week' => 1,
+        'is_working_day' => true,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    WorkSchedule::factory()->forProfile($restProfile)->create([
+        'day_of_week' => 1,
+        'is_working_day' => false,
+        'start_time' => null,
+        'end_time' => null,
+        'base_ordinary_hours' => 0,
+    ]);
+    $workingEmployee = Employee::factory()->forCompany($company)->create();
+    $restingEmployee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($workingEmployee, $workingProfile, '2020-01-01', 'Turno diurno');
+    app(EmployeeScheduleAssigner::class)->assign($restingEmployee, $restProfile, '2020-01-01', 'Día libre');
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->assertViewHas('faltas', function ($faltas) use ($workingEmployee) {
+            return $faltas->count() === 1
+                && $faltas->sole()['employee']->is($workingEmployee);
+        });
+});
+
 test('detectFaltas pairs justified absence with falta', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
     ]);
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     JustifiedAbsence::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
@@ -169,7 +209,7 @@ test('detectFaltas excludes non working day Sunday', function () {
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
     ]);
-    Employee::factory()->forCompany($company)->create();
+    absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     $this->actingAs($admin);
@@ -191,7 +231,7 @@ test('detectFaltas excludes holiday from faltas', function () {
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
     ]);
-    Employee::factory()->forCompany($company)->create();
+    absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     Holiday::factory()->forCompany($company)->create([
@@ -219,7 +259,7 @@ test('detectFaltas skips duplicate and deleted raw marks when checking marks', f
         'end_date' => '2026-01-11',
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->forEmployee($employee)->create([
@@ -244,3 +284,17 @@ test('detectFaltas skips duplicate and deleted raw marks when checking marks', f
             return $faltas->count() === 6 && $mondayFalta !== null;
         });
 });
+
+function absenceEmployeeWithDefaultSchedule(Company $company): Employee
+{
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach ($company->defaultWorkSchedules() as $day => $schedule) {
+        WorkSchedule::factory()->forProfile($profile)->create($schedule + ['day_of_week' => $day]);
+    }
+
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada general');
+
+    return $employee;
+}

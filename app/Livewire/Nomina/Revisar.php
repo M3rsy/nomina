@@ -14,6 +14,8 @@ use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use App\Services\Attendance\ShiftOccurrence;
+use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\PayrollRules;
 use Carbon\Carbon;
@@ -995,37 +997,25 @@ class Revisar extends Component
         $employees = Employee::withoutCompanyScope()
             ->where('company_id', $this->payPeriod->company_id)
             ->get();
-
-        $marks = RawMark::withoutCompanyScope()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->whereNotIn('status', ['deleted', 'duplicate'])
-            ->whereNotNull('employee_id')
-            ->get(['employee_id', 'event_at']);
-
         $justified = JustifiedAbsence::withoutCompanyScope()
             ->where('pay_period_id', $this->payPeriod->id)
             ->get(['employee_id', 'date']);
-
+        $occurrenceResolver = app(ShiftOccurrenceResolver::class);
         $faltas = collect();
 
         foreach ($employees as $employee) {
             foreach ($period as $date) {
                 $day = CarbonImmutable::instance($date);
 
-                if (! $rules->getWorkSchedule($company, $day->dayOfWeek)->is_working_day) {
-                    continue;
-                }
-
                 if ($rules->isHoliday($company, $day)) {
                     continue;
                 }
 
                 $dateString = $day->toDateString();
-                $hasMark = $marks->contains(function ($mark) use ($employee, $dateString) {
-                    return $mark->employee_id === $employee->id && $mark->event_at->toDateString() === $dateString;
-                });
+                $occurrence = $occurrenceResolver->resolve($employee, $day);
 
-                if ($hasMark) {
+                if (! $occurrence->schedule?->is_working_day
+                    || $occurrence->status !== ShiftOccurrence::NO_MARKS) {
                     continue;
                 }
 

@@ -27,6 +27,7 @@ class AttendanceShiftAnalyzer
                 new BandSplit,
                 collect(),
                 collect(),
+                $isHoliday,
             );
         }
 
@@ -44,6 +45,7 @@ class AttendanceShiftAnalyzer
                 new BandSplit,
                 collect(),
                 collect(),
+                $isHoliday,
             );
         }
 
@@ -136,6 +138,7 @@ class AttendanceShiftAnalyzer
             scheduledRates: $scheduledRates,
             deficits: $deficits,
             overtimeCandidates: $overtimeCandidates,
+            isHoliday: $isHoliday,
         );
     }
 

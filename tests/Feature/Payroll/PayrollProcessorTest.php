@@ -2,6 +2,7 @@
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\Holiday;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\RawMark;
@@ -240,6 +241,22 @@ test('processor assigns an overnight exit in the next period to the starting wor
         ->and($result->extra_75_minutes)->toBe(360)
         ->and($result->approved_overtime_minutes)->toBe(0)
         ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $nextPeriod->id)->count())->toBe(0);
+});
+
+test('processor skips an active holiday without observed marks', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-06', '2026-01-06');
+    processorEmployee($company);
+    Holiday::factory()->forCompany($company)->create([
+        'date' => '2026-01-06',
+        'is_active' => true,
+    ]);
+
+    app(CurrentCompany::class)->set($company);
+    app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+
+    expect($payPeriod->fresh()->status)->toBe('processed')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 });
 
 test('payroll processor transitions pay period through status flow', function () {
