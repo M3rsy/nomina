@@ -4,6 +4,9 @@ namespace App\Livewire\Empleados;
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -39,6 +42,12 @@ class Edit extends Component
 
     public ?string $notes = null;
 
+    public ?int $schedule_profile_id = null;
+
+    public string $schedule_effective_from = '';
+
+    public string $schedule_reason = '';
+
     public function mount(Employee $employee): void
     {
         $this->authorize('update', $employee);
@@ -57,6 +66,16 @@ class Edit extends Component
         $this->expected_salary = $employee->expected_salary !== null ? (string) $employee->expected_salary : null;
         $this->hired_at = $employee->hired_at?->format('Y-m-d');
         $this->notes = $employee->notes;
+        $this->schedule_effective_from = now()->toDateString();
+
+        if (! $employee->scheduleAssignments()->exists()) {
+            $this->schedule_profile_id = $this->scheduleProfiles()->first()?->id;
+        }
+    }
+
+    public function updatedCompanyId(): void
+    {
+        $this->schedule_profile_id = $this->scheduleProfiles()->first()?->id;
     }
 
     public function save(): void
@@ -65,6 +84,9 @@ class Edit extends Component
 
         $isSuperAdmin = auth()->user()->hasRole('super_admin');
         $companyId = $isSuperAdmin ? ($this->company_id ?? $this->employee->company_id) : auth()->user()->company_id;
+        $requiresSchedule = $companyId !== $this->employee->company_id
+            || ! $this->employee->scheduleAssignments()->exists();
+        $assigningSchedule = $this->schedule_profile_id !== null;
 
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
@@ -81,6 +103,17 @@ class Edit extends Component
             'notes' => ['nullable', 'string'],
         ];
 
+        if ($requiresSchedule || $assigningSchedule) {
+            $rules['schedule_profile_id'] = [
+                'required',
+                Rule::exists('work_schedule_profiles', 'id')->where(
+                    fn ($query) => $query->where('company_id', $companyId)->where('is_active', true),
+                ),
+            ];
+            $rules['schedule_effective_from'] = ['required', 'date'];
+            $rules['schedule_reason'] = ['required', 'string', 'max:255'];
+        }
+
         if ($isSuperAdmin) {
             $rules['company_id'] = ['nullable', 'exists:companies,id'];
         } else {
@@ -92,7 +125,27 @@ class Edit extends Component
         $validated['company_id'] = $companyId;
         $validated['metadata'] = $this->employee->metadata;
 
-        $this->employee->update($validated);
+        $profileId = $validated['schedule_profile_id'] ?? null;
+        $effectiveFrom = $validated['schedule_effective_from'] ?? null;
+        $reason = $validated['schedule_reason'] ?? null;
+        unset($validated['schedule_profile_id'], $validated['schedule_effective_from'], $validated['schedule_reason']);
+
+        DB::transaction(function () use ($validated, $profileId, $effectiveFrom, $reason): void {
+            $this->employee->update($validated);
+
+            if ($profileId === null || $effectiveFrom === null || $reason === null) {
+                return;
+            }
+
+            $profile = WorkScheduleProfile::withoutCompanyScope()->findOrFail($profileId);
+            app(EmployeeScheduleAssigner::class)->assign(
+                $this->employee,
+                $profile,
+                $effectiveFrom,
+                $reason,
+                auth()->user(),
+            );
+        });
 
         $this->redirect('/empleados', navigate: true);
     }
@@ -104,7 +157,26 @@ class Edit extends Component
         return view('livewire.empleados.edit', [
             'companies' => $isSuperAdmin ? Company::orderBy('name')->get() : null,
             'isSuperAdmin' => $isSuperAdmin,
+            'scheduleProfiles' => $this->scheduleProfiles(),
+            'scheduleAssignments' => $this->employee->scheduleAssignments()
+                ->with('profile')
+                ->orderByDesc('effective_from')
+                ->get(),
         ]);
+    }
+
+    private function scheduleProfiles()
+    {
+        $companyId = auth()->user()->hasRole('super_admin')
+            ? ($this->company_id ?? $this->employee->company_id)
+            : auth()->user()->company_id;
+
+        return WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->orderByDesc('version')
+            ->get();
     }
 
     private function messages(): array
@@ -118,6 +190,10 @@ class Edit extends Component
             'sex.in' => 'El sexo debe ser M, F u O.',
             'expected_salary.decimal' => 'El salario esperado debe tener hasta 2 decimales.',
             'company_id.in' => 'No está autorizado para editar empleados de esa empresa.',
+            'schedule_profile_id.required' => 'Seleccioná una jornada para el empleado.',
+            'schedule_profile_id.exists' => 'La jornada seleccionada no está disponible para esta empresa.',
+            'schedule_effective_from.required' => 'Ingresá desde qué fecha rige la jornada.',
+            'schedule_reason.required' => 'Ingresá el motivo de la asignación.',
         ];
     }
 }
