@@ -14,6 +14,8 @@ trait BelongsToCompany
 
             if ($companyId !== null) {
                 $builder->where($builder->getModel()->getTable().'.company_id', $companyId);
+            } elseif (auth()->check() && ! auth()->user()->hasRole('super_admin')) {
+                $builder->whereRaw('1 = 0');
             }
         });
     }

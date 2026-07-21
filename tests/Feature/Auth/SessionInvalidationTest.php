@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Profile\ChangePassword;
+use App\Models\Company;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +13,7 @@ uses()->beforeEach(function () {
 });
 
 test('disabling user kills their existing session', function () {
-    $user = User::factory()->create([
+    $user = User::factory()->forCompany()->create([
         'password' => Hash::make('password'),
         'is_active' => true,
     ]);
@@ -47,9 +48,53 @@ test('disabling user kills their existing session', function () {
     $response = $this->get('/dashboard');
 
     $response->assertRedirect('/login');
-    $response->assertSessionHas('error', 'Cuenta desactivada');
+    $response->assertSessionHas('error', 'No se pudo acceder a la cuenta.');
     $this->assertGuest();
     $this->assertDatabaseMissing('sessions', ['id' => 'other-session-id']);
+});
+
+test('deactivating a company kills tenant sessions and keeps them invalid after reactivation', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create([
+        'company_id' => $company->id,
+        'password' => Hash::make('password'),
+        'is_active' => true,
+    ]);
+    $user->assignRole('company_admin');
+
+    $this->actingAs($user);
+    Session::put('login_at', now());
+
+    DB::table('sessions')->insert([
+        'id' => Session::getId(),
+        'user_id' => $user->id,
+        'ip_address' => '127.0.0.1',
+        'user_agent' => 'PHPUnit',
+        'payload' => serialize(Session::all()),
+        'last_activity' => now()->timestamp,
+    ]);
+
+    DB::table('sessions')->insert([
+        'id' => 'other-company-session',
+        'user_id' => $user->id,
+        'ip_address' => '127.0.0.1',
+        'user_agent' => 'PHPUnit',
+        'payload' => 'test',
+        'last_activity' => now()->timestamp,
+    ]);
+
+    $company->update(['is_active' => false]);
+
+    $this->get('/dashboard')
+        ->assertRedirect('/login')
+        ->assertSessionHas('error', 'No se pudo acceder a la cuenta.');
+
+    $this->assertGuest();
+    $this->assertDatabaseMissing('sessions', ['id' => 'other-company-session']);
+    expect(DB::table('sessions')->where('user_id', $user->id)->count())->toBe(0);
+
+    $company->update(['is_active' => true]);
+    $this->get('/dashboard')->assertRedirect('/login');
 });
 
 test('changing password invalidates other sessions but keeps current', function () {

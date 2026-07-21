@@ -16,6 +16,8 @@ class Index extends Component
 
     public function render()
     {
+        $this->authorize('viewAny', User::class);
+
         $user = auth()->user();
         $isSuperAdmin = $user->hasRole('super_admin');
         $companyId = current_company_id();

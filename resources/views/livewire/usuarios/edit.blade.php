@@ -40,6 +40,8 @@
                 </select>
                 @error('company_id') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
             </div>
+
+            <label class="flex items-center gap-2"><input type="checkbox" wire:model="is_active" class="rounded border-gray-300"> Cuenta activa</label>
         @endif
 
         <button type="submit" class="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700">Guardar</button>

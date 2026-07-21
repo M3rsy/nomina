@@ -4,7 +4,11 @@ namespace App\Livewire\Usuarios;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\AccountAccess;
+use App\Services\DatabaseSessionRevoker;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -24,6 +28,8 @@ class Edit extends Component
 
     public ?int $company_id = null;
 
+    public bool $is_active = true;
+
     public function mount(User $user): void
     {
         $this->authorize('update', $user);
@@ -33,6 +39,8 @@ class Edit extends Component
         $this->email = $user->email;
         $this->company_id = $user->company_id;
         $this->role = $user->getRoleNames()->first() ?? 'company_admin';
+        $this->is_active = $user->is_active
+            && app(AccountAccess::class)->denialReason($user) !== AccountAccess::COMPANY_ASSIGNMENT_MISSING;
     }
 
     public function save(): void
@@ -40,6 +48,10 @@ class Edit extends Component
         $this->authorize('update', $this->user);
 
         $isSuperAdmin = auth()->user()->hasRole('super_admin');
+        $wasCompanyAdmin = $this->user->hasRole('company_admin');
+        $wasOrphan = app(AccountAccess::class)->denialReason($this->user) === AccountAccess::COMPANY_ASSIGNMENT_MISSING;
+        $wasInactive = ! $this->user->is_active;
+        $needsRecovery = $isSuperAdmin && $wasCompanyAdmin && ($wasOrphan || $wasInactive);
 
         $rules = [
             'name' => ['required', 'string', 'max:255'],
@@ -47,8 +59,13 @@ class Edit extends Component
         ];
 
         if ($isSuperAdmin) {
-            $rules['company_id'] = ['nullable', 'exists:companies,id'];
+            $rules['company_id'] = [
+                Rule::requiredIf($this->role === 'company_admin' || $needsRecovery),
+                'nullable',
+                Rule::exists('companies', 'id')->whereNull('deleted_at'),
+            ];
             $rules['role'] = ['required', Rule::in(['super_admin', 'company_admin'])];
+            $rules['is_active'] = $needsRecovery ? ['boolean', 'accepted'] : ['boolean'];
         } else {
             $this->company_id = auth()->user()->company_id;
         }
@@ -63,6 +80,8 @@ class Edit extends Component
             'email.email' => 'El correo no es válido.',
             'email.unique' => 'El correo ya está en uso.',
             'password.min' => 'La contraseña debe tener al menos 8 caracteres.',
+            'company_id.required' => 'La empresa es obligatoria para recuperar la cuenta.',
+            'is_active.accepted' => 'La cuenta debe activarse para recuperar la cuenta.',
         ]);
 
         $data = [
@@ -71,7 +90,8 @@ class Edit extends Component
         ];
 
         if ($isSuperAdmin) {
-            $data['company_id'] = $this->company_id;
+            $data['company_id'] = $validated['company_id'];
+            $data['is_active'] = $validated['is_active'];
         }
 
         if ($this->password) {
@@ -79,10 +99,33 @@ class Edit extends Component
             $data['password_changed_at'] = now();
         }
 
-        $this->user->update($data);
+        $originalRole = $this->user->getRoleNames()->first();
+        $originalCompanyId = $this->user->company_id;
+        $originalIsActive = (bool) $this->user->is_active;
 
-        if ($isSuperAdmin) {
-            $this->user->syncRoles($validated['role'] ?? $this->role);
+        DB::transaction(function () use ($data, $isSuperAdmin, $validated, $needsRecovery, $originalRole, $originalCompanyId, $originalIsActive): void {
+            $this->user->update($data);
+
+            if ($isSuperAdmin) {
+                $this->user->syncRoles($validated['role']);
+            }
+
+            $roleChanged = $isSuperAdmin && $validated['role'] !== $originalRole;
+            $companyChanged = $isSuperAdmin
+                && array_key_exists('company_id', $data)
+                && (int) ($data['company_id'] ?? 0) !== (int) ($originalCompanyId ?? 0);
+            $activeChanged = array_key_exists('is_active', $data) && (bool) $data['is_active'] !== $originalIsActive;
+
+            if ($roleChanged || $companyChanged || $activeChanged || $needsRecovery) {
+                app(DatabaseSessionRevoker::class)->revokeUser($this->user->id);
+            }
+        });
+
+        if ($needsRecovery) {
+            Log::warning('Company admin recovered', [
+                'event' => 'company_admin_recovered', 'actor_id' => auth()->id(),
+                'company_id' => $this->user->company_id, 'user_id' => $this->user->id,
+            ]);
         }
 
         $this->redirect('/usuarios', navigate: true);
