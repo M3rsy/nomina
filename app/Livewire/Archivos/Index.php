@@ -22,7 +22,7 @@ class Index extends Component
         'invalid' => 'Con errores',
     ];
 
-    public const PER_PAGE = 12;
+    public const PER_PAGE = 10;
 
     #[Url]
     public string $search = '';
@@ -135,6 +135,7 @@ class Index extends Component
 
         $files = $filesQuery
             ->orderBy('created_at', 'desc')
+            ->orderByDesc('id')
             ->paginate(self::PER_PAGE);
 
         $payPeriods = PayPeriod::query()
