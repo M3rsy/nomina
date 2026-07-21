@@ -37,7 +37,9 @@ test('shows exact server-calculated overtime candidates beside observed and sche
         ->assertSee('Salida posterior')
         ->assertSee('30 min · 0,50 h')
         ->assertSee('25%: 30 min')
-        ->assertSee('Pendiente de decisión');
+        ->assertSee('Pendiente de decisión')
+        ->assertSee('Aprobar completo')
+        ->assertSee('Rechazar completo');
 });
 
 test('shows the current audited decision and its reason', function () {
@@ -64,6 +66,114 @@ test('shows the current audited decision and its reason', function () {
         ->assertSee('Tiempo de traslado hasta el reloj')
         ->assertSee($context['actor']->email);
 });
+
+test('approves the complete server-calculated candidate with a mandatory reason', function () {
+    $context = overtimeReviewPageFixture();
+    $candidate = app(OvertimeCandidateReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->overtimeCandidates
+        ->sole();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call(
+            'openOvertimeDecision',
+            $context['employee']->id,
+            '2026-07-20',
+            $candidate->key,
+            OvertimeDecision::APPROVED,
+        )
+        ->assertSet('showOvertimeDecisionModal', true)
+        ->assertSet('overtimeCandidateSummary', '14:00 → 14:30 · 30 min')
+        ->set('overtimeDecisionReason', 'Cobertura extraordinaria confirmada')
+        ->call('saveOvertimeDecision')
+        ->assertHasNoErrors()
+        ->assertSet('showOvertimeDecisionModal', false)
+        ->assertSee('Aprobado')
+        ->assertSee('Cobertura extraordinaria confirmada');
+
+    $decision = OvertimeDecision::query()->sole();
+
+    expect($decision->decision)->toBe(OvertimeDecision::APPROVED)
+        ->and($decision->candidate_key)->toBe($candidate->key)
+        ->and($decision->minutes)->toBe(30)
+        ->and($decision->rate_minutes['extra25'])->toBe(30)
+        ->and($decision->decided_by)->toBe($context['actor']->id);
+});
+
+test('requires a reason and rejects a candidate key that is not current', function () {
+    $context = overtimeReviewPageFixture();
+    $candidate = app(OvertimeCandidateReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->overtimeCandidates
+        ->sole();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call(
+            'openOvertimeDecision',
+            $context['employee']->id,
+            '2026-07-20',
+            $candidate->key,
+            OvertimeDecision::REJECTED,
+        )
+        ->call('saveOvertimeDecision')
+        ->assertHasErrors(['overtimeDecisionReason' => 'required'])
+        ->call(
+            'openOvertimeDecision',
+            $context['employee']->id,
+            '2026-07-20',
+            str_repeat('0', 64),
+            OvertimeDecision::APPROVED,
+        )
+        ->assertSet('showOvertimeDecisionModal', false)
+        ->assertHasErrors('overtimeCandidateKey')
+        ->call(
+            'openOvertimeDecision',
+            $context['employee']->id,
+            '2026-07-19',
+            $candidate->key,
+            OvertimeDecision::APPROVED,
+        )
+        ->assertSet('showOvertimeDecisionModal', false)
+        ->assertHasErrors('overtimeCandidateKey');
+
+    expect(OvertimeDecision::query()->count())->toBe(0);
+});
+
+test('does not allow overtime decisions while the period is locked', function (string $status) {
+    $context = overtimeReviewPageFixture();
+    $candidate = app(OvertimeCandidateReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->overtimeCandidates
+        ->sole();
+    $context['period']->update(['status' => $status]);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']->fresh()])
+        ->call(
+            'openOvertimeDecision',
+            $context['employee']->id,
+            '2026-07-20',
+            $candidate->key,
+            OvertimeDecision::APPROVED,
+        )
+        ->assertSet('showOvertimeDecisionModal', false)
+        ->set('overtimeDecisionEmployeeId', $context['employee']->id)
+        ->set('overtimeDecisionWorkDate', '2026-07-20')
+        ->set('overtimeCandidateKey', $candidate->key)
+        ->set('overtimeDecision', OvertimeDecision::APPROVED)
+        ->set('overtimeDecisionReason', 'Intento fuera de estado')
+        ->call('saveOvertimeDecision');
+
+    expect(OvertimeDecision::query()->count())->toBe(0);
+})->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
 function overtimeReviewPageFixture(): array
 {

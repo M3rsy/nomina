@@ -4,10 +4,13 @@ namespace App\Livewire\Nomina;
 
 use App\Models\Employee;
 use App\Models\JustifiedAbsence;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\OvertimeCandidateReviewQuery;
+use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\PayrollRules;
 use Carbon\Carbon;
@@ -17,6 +20,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -77,6 +81,20 @@ class Revisar extends Component
     public bool $showReopenModal = false;
 
     public string $reopenReason = '';
+
+    public bool $showOvertimeDecisionModal = false;
+
+    public ?int $overtimeDecisionEmployeeId = null;
+
+    public string $overtimeDecisionWorkDate = '';
+
+    public string $overtimeCandidateKey = '';
+
+    public string $overtimeDecision = '';
+
+    public string $overtimeDecisionReason = '';
+
+    public string $overtimeCandidateSummary = '';
 
     public bool $locked = false;
 
@@ -440,6 +458,116 @@ class Revisar extends Component
         session()->flash('success', 'Borrador guardado.');
     }
 
+    public function openOvertimeDecision(
+        int $employeeId,
+        string $workDate,
+        string $candidateKey,
+        string $decision,
+    ): void {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $this->closeOvertimeDecisionModal();
+
+        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)) {
+            $this->addError('overtimeDecision', 'La decisión debe aprobar o rechazar el tramo completo.');
+
+            return;
+        }
+
+        if (validator(['work_date' => $workDate], ['work_date' => ['required', 'date_format:Y-m-d']])->fails()) {
+            $this->addError('overtimeCandidateKey', 'La fecha laboral del candidato no es válida.');
+
+            return;
+        }
+
+        $employee = $this->findOvertimeEmployee($employeeId);
+
+        if ($employee === null) {
+            $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        try {
+            $review = app(PayrollShiftEvaluationResolver::class)
+                ->review($this->payPeriod, $employee, $workDate);
+        } catch (InvalidArgumentException) {
+            $this->addError('overtimeCandidateKey', 'El candidato no pertenece a este período.');
+
+            return;
+        }
+        $candidate = $review->analysis->overtimeCandidates->firstWhere('key', $candidateKey);
+
+        if ($candidate === null) {
+            $this->addError('overtimeCandidateKey', 'El candidato ya no coincide con las marcas vigentes.');
+
+            return;
+        }
+
+        $this->overtimeDecisionEmployeeId = $employee->id;
+        $this->overtimeDecisionWorkDate = $review->analysis->workDate->toDateString();
+        $this->overtimeCandidateKey = $candidate->key;
+        $this->overtimeDecision = $decision;
+        $this->overtimeCandidateSummary = $candidate->start->format('H:i')
+            .' → '.$candidate->end->format('H:i')
+            .' · '.$candidate->minutes.' min';
+        $this->showOvertimeDecisionModal = true;
+    }
+
+    public function closeOvertimeDecisionModal(): void
+    {
+        $this->showOvertimeDecisionModal = false;
+        $this->overtimeDecisionEmployeeId = null;
+        $this->overtimeDecisionWorkDate = '';
+        $this->overtimeCandidateKey = '';
+        $this->overtimeDecision = '';
+        $this->overtimeDecisionReason = '';
+        $this->overtimeCandidateSummary = '';
+        $this->resetErrorBag();
+    }
+
+    public function saveOvertimeDecision(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $validated = $this->validate([
+            'overtimeDecisionEmployeeId' => ['required', 'integer'],
+            'overtimeDecisionWorkDate' => ['required', 'date_format:Y-m-d'],
+            'overtimeCandidateKey' => ['required', 'string', 'size:64'],
+            'overtimeDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
+            'overtimeDecisionReason' => ['required', 'string', 'max:500'],
+        ], [
+            'overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.',
+        ]);
+        $employee = $this->findOvertimeEmployee((int) $validated['overtimeDecisionEmployeeId']);
+
+        if ($employee === null) {
+            $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        app(OvertimeDecisionRecorder::class)->decide(
+            $this->payPeriod,
+            $employee,
+            $validated['overtimeDecisionWorkDate'],
+            $validated['overtimeCandidateKey'],
+            $validated['overtimeDecision'],
+            $validated['overtimeDecisionReason'],
+            Auth::user(),
+        );
+
+        $decision = $validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado';
+        $this->closeOvertimeDecisionModal();
+        $this->loadReadinessBlockers();
+
+        session()->flash('success', "Tramo completo {$decision} y registrado en el historial.");
+    }
+
     public function continueToReady(): void
     {
         if ($this->isBlocked()) {
@@ -518,7 +646,12 @@ class Revisar extends Component
 
     public function isBlocked(): bool
     {
-        return in_array($this->payPeriod->status, ['processed', 'approved', 'exported', 'cancelled'], true);
+        $status = PayPeriod::withoutCompanyScope()
+            ->whereKey($this->payPeriod->id)
+            ->value('status');
+
+        return $status === null
+            || in_array($status, ['processing', 'processed', 'approved', 'exported', 'cancelled'], true);
     }
 
     public function readinessBlockerLabel(string $code): string
@@ -676,6 +809,17 @@ class Revisar extends Component
         }
 
         return RawMark::find($id);
+    }
+
+    private function findOvertimeEmployee(?int $id): ?Employee
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        return Employee::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->find($id);
     }
 
     private function assignEmployeeToRawMark(RawMark $rawMark, int $employeeId): void

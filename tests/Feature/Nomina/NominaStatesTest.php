@@ -40,7 +40,7 @@ function setupLockedRevisar(string $status): array
     return [$company, $payPeriod, $file, $employee, $admin, $rawMark];
 }
 
-test('revisar sets locked property for processed approved exported and cancelled statuses', function (string $status) {
+test('revisar sets locked property for immutable payroll statuses', function (string $status) {
     [$company, $payPeriod, $file, $employee, $admin] = setupLockedRevisar($status);
 
     $this->actingAs($admin);
@@ -50,6 +50,7 @@ test('revisar sets locked property for processed approved exported and cancelled
 
     expect($component->instance()->locked)->toBeTrue();
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
@@ -73,6 +74,7 @@ test('edit actions are no-ops when pay period is locked', function (string $stat
     $rawMark->refresh();
     expect($rawMark->status)->toBe('valid');
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
@@ -95,6 +97,7 @@ test('delete actions are no-ops when pay period is locked', function (string $st
     $rawMark->refresh();
     expect($rawMark->status)->toBe('valid');
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
@@ -114,6 +117,7 @@ test('markCorrected is no-op when pay period is locked', function (string $statu
     $rawMark->refresh();
     expect($rawMark->status)->toBe('valid');
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
@@ -133,6 +137,7 @@ test('justifyAbsence is no-op when pay period is locked', function (string $stat
 
     expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
@@ -156,11 +161,24 @@ test('assign actions are no-ops when pay period is locked', function (string $st
     $rawMark->refresh();
     expect($rawMark->employee_id)->toBe($employee->id);
 })->with([
+    'processing' => ['processing'],
     'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
     'cancelled' => ['cancelled'],
 ]);
+
+test('mutations recheck the current period status after the review was opened', function () {
+    [$company, $payPeriod, $file, $employee, $admin, $rawMark] = setupLockedRevisar('validating');
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+
+    $payPeriod->update(['status' => 'processing']);
+    $component->call('markCorrected', $rawMark->id)->assertHasNoErrors();
+
+    expect($rawMark->fresh()->status)->toBe('valid');
+});
 
 test('processed payroll can be reopened with an audited reason and stale results are removed', function () {
     [$company, $payPeriod, $file, $employee, $admin] = setupLockedRevisar('processed');
