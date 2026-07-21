@@ -7,7 +7,7 @@ use App\Models\PayPeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
-class OvertimeCandidateReviewQuery
+class AttendanceReviewQuery
 {
     public function __construct(private PayrollShiftEvaluationResolver $evaluationResolver) {}
 
@@ -28,7 +28,8 @@ class OvertimeCandidateReviewQuery
             foreach ($employees as $employee) {
                 $review = $this->evaluationResolver->review($payPeriod, $employee, $date);
 
-                if ($review->analysis->overtimeCandidates->isEmpty()) {
+                if ($review->analysis->overtimeCandidates->isEmpty()
+                    && $review->analysis->deficits->isEmpty()) {
                     continue;
                 }
 

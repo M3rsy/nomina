@@ -9,8 +9,8 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\EmployeeScheduleAssigner;
-use App\Services\Attendance\OvertimeCandidateReviewQuery;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
@@ -20,9 +20,9 @@ beforeEach(function () {
 });
 
 test('projects exact overtime candidates from the shared shift analysis', function () {
-    $context = overtimeReviewFixture();
+    $context = attendanceReviewFixture();
 
-    $review = app(OvertimeCandidateReviewQuery::class)
+    $review = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
         ->sole();
     $candidate = $review->analysis->overtimeCandidates->sole();
@@ -39,13 +39,34 @@ test('projects exact overtime candidates from the shared shift analysis', functi
         ->and($review->decisionFor($candidate))->toBeNull();
 });
 
+test('projects exact attendance deficits even when there is no overtime candidate', function () {
+    $context = attendanceReviewFixture();
+    RawMark::withoutCompanyScope()
+        ->where('uploaded_file_id', $context['entry_file']->id)
+        ->update(['event_at' => '2026-07-20 06:15:00']);
+    RawMark::withoutCompanyScope()
+        ->where('uploaded_file_id', $context['exit_file']->id)
+        ->update(['event_at' => '2026-07-20 14:00:00']);
+
+    $review = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole();
+    $deficit = $review->analysis->deficits->sole();
+
+    expect($review->analysis->overtimeCandidates)->toBeEmpty()
+        ->and($deficit->kind)->toBe('late_arrival')
+        ->and($deficit->minutes)->toBe(15)
+        ->and($deficit->rateMinutes->ordinaryMinutes)->toBe(15)
+        ->and($review->exceptionFor($deficit))->toBeNull();
+});
+
 test('file filtering changes visibility without removing marks from shift analysis', function () {
-    $context = overtimeReviewFixture();
+    $context = attendanceReviewFixture();
     $unrelatedFile = UploadedFile::factory()
         ->forCompany($context['company'])
         ->forPayPeriod($context['period'])
         ->create();
-    $query = app(OvertimeCandidateReviewQuery::class);
+    $query = app(AttendanceReviewQuery::class);
 
     $fromEntryFile = $query->forPeriod($context['period'], $context['entry_file']->id)->sole();
     $fromExitFile = $query->forPeriod($context['period'], $context['exit_file']->id)->sole();
@@ -57,8 +78,8 @@ test('file filtering changes visibility without removing marks from shift analys
 });
 
 test('exposes the current append-only decision for its exact candidate', function () {
-    $context = overtimeReviewFixture();
-    $query = app(OvertimeCandidateReviewQuery::class);
+    $context = attendanceReviewFixture();
+    $query = app(AttendanceReviewQuery::class);
     $candidate = $query->forPeriod($context['period'])->sole()->analysis->overtimeCandidates->sole();
 
     $decision = app(OvertimeDecisionRecorder::class)->decide(
@@ -77,7 +98,7 @@ test('exposes the current append-only decision for its exact candidate', functio
         ->and($review->currentDecisions->sole()->relationLoaded('decider'))->toBeTrue();
 });
 
-function overtimeReviewFixture(): array
+function attendanceReviewFixture(): array
 {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();

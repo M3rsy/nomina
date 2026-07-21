@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Nomina\Revisar;
+use App\Models\AttendanceException;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
@@ -10,8 +11,9 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceExceptionRecorder;
+use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\EmployeeScheduleAssigner;
-use App\Services\Attendance\OvertimeCandidateReviewQuery;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
@@ -22,7 +24,7 @@ beforeEach(function () {
 });
 
 test('shows exact server-calculated overtime candidates beside observed and scheduled time', function () {
-    $context = overtimeReviewPageFixture();
+    $context = attendanceReviewPageFixture();
     $this->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
@@ -42,9 +44,50 @@ test('shows exact server-calculated overtime candidates beside observed and sche
         ->assertSee('Rechazar completo');
 });
 
+test('shows exact attendance deficits without changing the observed marks', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('deficitReviews', fn ($reviews) => $reviews->count() === 1)
+        ->assertSee('Excepciones de asistencia')
+        ->assertSee('La marca observada no se modifica')
+        ->assertSee('María Guardia')
+        ->assertSee('06:15 → 14:00')
+        ->assertSee('Llegada tardía')
+        ->assertSee('06:00 → 06:15')
+        ->assertSee('15 min · 0,25 h')
+        ->assertSee('Sin excepción · se descuenta');
+});
+
+test('shows the current audited attendance exception and its reason', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $deficit = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->deficits
+        ->sole();
+    app(AttendanceExceptionRecorder::class)->decide(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+        $deficit->key,
+        AttendanceException::GRANTED,
+        'Demora autorizada por supervisión',
+        $context['actor'],
+    );
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertSee('Excepción concedida')
+        ->assertSee('Demora autorizada por supervisión')
+        ->assertSee($context['actor']->email);
+});
+
 test('shows the current audited decision and its reason', function () {
-    $context = overtimeReviewPageFixture();
-    $candidate = app(OvertimeCandidateReviewQuery::class)
+    $context = attendanceReviewPageFixture();
+    $candidate = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
         ->sole()
         ->analysis
@@ -68,8 +111,8 @@ test('shows the current audited decision and its reason', function () {
 });
 
 test('approves the complete server-calculated candidate with a mandatory reason', function () {
-    $context = overtimeReviewPageFixture();
-    $candidate = app(OvertimeCandidateReviewQuery::class)
+    $context = attendanceReviewPageFixture();
+    $candidate = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
         ->sole()
         ->analysis
@@ -104,8 +147,8 @@ test('approves the complete server-calculated candidate with a mandatory reason'
 });
 
 test('requires a reason and rejects a candidate key that is not current', function () {
-    $context = overtimeReviewPageFixture();
-    $candidate = app(OvertimeCandidateReviewQuery::class)
+    $context = attendanceReviewPageFixture();
+    $candidate = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
         ->sole()
         ->analysis
@@ -146,8 +189,8 @@ test('requires a reason and rejects a candidate key that is not current', functi
 });
 
 test('does not allow overtime decisions while the period is locked', function (string $status) {
-    $context = overtimeReviewPageFixture();
-    $candidate = app(OvertimeCandidateReviewQuery::class)
+    $context = attendanceReviewPageFixture();
+    $candidate = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
         ->sole()
         ->analysis
@@ -175,8 +218,10 @@ test('does not allow overtime decisions while the period is locked', function (s
     expect(OvertimeDecision::query()->count())->toBe(0);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
-function overtimeReviewPageFixture(): array
-{
+function attendanceReviewPageFixture(
+    string $entryAt = '2026-07-20 06:00:00',
+    string $exitAt = '2026-07-20 14:30:00',
+): array {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
     WorkSchedule::factory()->forProfile($profile)->create([
@@ -198,7 +243,7 @@ function overtimeReviewPageFixture(): array
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
 
-    foreach (['2026-07-20 06:00:00', '2026-07-20 14:30:00'] as $eventAt) {
+    foreach ([$entryAt, $exitAt] as $eventAt) {
         RawMark::factory()->forCompany($company)->forPayPeriod($period)
             ->forUploadedFile($file)->forEmployee($employee)->create([
                 'event_at' => $eventAt,
