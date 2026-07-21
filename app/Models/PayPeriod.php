@@ -81,6 +81,11 @@ class PayPeriod extends Model
         return $this->hasMany(OvertimeDecision::class);
     }
 
+    public function attendanceExceptions(): HasMany
+    {
+        return $this->hasMany(AttendanceException::class);
+    }
+
     public function isActive(): bool
     {
         return ! $this->trashed() && in_array($this->status, ['draft', 'uploaded', 'ready'], true);
