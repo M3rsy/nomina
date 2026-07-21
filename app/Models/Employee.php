@@ -135,6 +135,11 @@ class Employee extends Model
         return $this->hasMany(EmployeeScheduleAssignment::class);
     }
 
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class);
+    }
+
     public function getFullNameAttribute(): string
     {
         return trim($this->first_name.' '.$this->last_name);
