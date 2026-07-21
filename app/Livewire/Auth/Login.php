@@ -4,7 +4,10 @@ namespace App\Livewire\Auth;
 
 use App\Models\LoginAttempt;
 use App\Models\User;
+use App\Services\AccountAccess;
+use App\Services\DatabaseSessionRevoker;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Validation\ValidationException;
@@ -14,6 +17,8 @@ use Livewire\Component;
 #[Layout('components.layouts.app')]
 class Login extends Component
 {
+    private const CREDENTIALS_INVALID = 'credentials_invalid';
+
     public string $email = '';
 
     public string $password = '';
@@ -39,21 +44,14 @@ class Login extends Component
         }
 
         $user = User::where('email', $this->email)->first();
+        $reason = $user ? app(AccountAccess::class)->denialReason($user) : self::CREDENTIALS_INVALID;
 
-        if (! $user || ! $user->is_active) {
-            RateLimiter::hit($throttleKey);
-            $this->recordAttempt(false, $user);
-            throw ValidationException::withMessages([
-                'email' => 'Credenciales incorrectas o cuenta desactivada.',
-            ]);
+        if (! $user || $reason !== null) {
+            $this->deny($throttleKey, $user, $reason);
         }
 
         if (! Auth::attempt(['email' => $this->email, 'password' => $this->password], remember: false)) {
-            RateLimiter::hit($throttleKey);
-            $this->recordAttempt(false, $user);
-            throw ValidationException::withMessages([
-                'email' => 'Credenciales incorrectas.',
-            ]);
+            $this->deny($throttleKey, $user, self::CREDENTIALS_INVALID);
         }
 
         RateLimiter::clear($throttleKey);
@@ -69,6 +67,20 @@ class Login extends Component
         };
 
         $this->redirect($route, navigate: true);
+    }
+
+    private function deny(string $throttleKey, ?User $user, string $reason): never
+    {
+        RateLimiter::hit($throttleKey);
+        $this->recordAttempt(false, $user);
+        if ($user && $reason !== self::CREDENTIALS_INVALID) {
+            app(DatabaseSessionRevoker::class)->revokeUser($user->id);
+        }
+        Log::warning('Account access denied', [
+            'event' => 'account_access_denied', 'reason' => $reason, 'user_id' => $user?->id,
+        ]);
+
+        throw ValidationException::withMessages(['email' => AccountAccess::USER_MESSAGE]);
     }
 
     protected function recordAttempt(bool $success, ?User $user = null): void

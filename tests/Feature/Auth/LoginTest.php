@@ -102,8 +102,30 @@ test('disabled user cannot login and gets error', function () {
     $this->assertGuest();
 });
 
+test('login blocked when assigned company is inactive', function () {
+    $user = User::factory()->forCompany(Company::factory()->inactive()->create())->create([
+        'email' => 'company-inactive@nomina.test',
+        'password' => Hash::make('password'),
+    ]);
+    $user->assignRole('company_admin');
+
+    Livewire::test(Login::class)
+        ->set('email', 'company-inactive@nomina.test')
+        ->set('password', 'password')
+        ->call('login')
+        ->assertHasErrors('email');
+
+    $this->assertGuest();
+    $this->assertDatabaseHas('login_attempts', [
+        'user_id' => $user->id,
+        'company_id' => $user->company_id,
+        'email' => 'company-inactive@nomina.test',
+        'success' => false,
+    ]);
+});
+
 test('login attempt recorded on success and failure', function () {
-    $user = User::factory()->create([
+    $user = User::factory()->forCompany()->create([
         'email' => 'ok@nomina.test',
         'password' => Hash::make('password'),
     ]);

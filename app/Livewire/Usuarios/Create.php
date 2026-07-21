@@ -4,6 +4,7 @@ namespace App\Livewire\Usuarios;
 
 use App\Models\Company;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
@@ -41,7 +42,11 @@ class Create extends Component
         ];
 
         if ($isSuperAdmin) {
-            $rules['company_id'] = ['nullable', 'exists:companies,id'];
+            $rules['company_id'] = [
+                Rule::requiredIf($this->role === 'company_admin'),
+                'nullable',
+                Rule::exists('companies', 'id')->whereNull('deleted_at'),
+            ];
         } else {
             $rules['company_id'] = ['required', 'in:'.auth()->user()->company_id];
         }
@@ -56,15 +61,17 @@ class Create extends Component
             'role.in' => 'El rol seleccionado no es válido.',
         ]);
 
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'company_id' => $this->company_id,
-            'is_active' => true,
-        ]);
+        DB::transaction(function () use ($validated): void {
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'company_id' => $validated['company_id'],
+                'is_active' => true,
+            ]);
 
-        $user->syncRoles($validated['role']);
+            $user->syncRoles($validated['role']);
+        });
 
         $this->redirect('/usuarios', navigate: true);
     }

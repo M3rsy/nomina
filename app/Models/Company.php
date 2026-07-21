@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Services\DatabaseSessionRevoker;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class Company extends Model
 {
@@ -40,6 +43,26 @@ class Company extends Model
             if (empty($company->slug)) {
                 $company->slug = Str::slug($company->name);
             }
+        });
+
+        static::updating(function (self $company): void {
+            if (! ($company->isDirty('is_active') && $company->getOriginal('is_active') && ! $company->is_active)) {
+                return;
+            }
+
+            $companyId = $company->id;
+
+            DB::afterCommit(function () use ($companyId): void {
+                $revokedSessions = app(DatabaseSessionRevoker::class)->revokeCompanyUsers($companyId);
+
+                if ($revokedSessions > 0) {
+                    Log::warning('Company access revoked', [
+                        'event' => 'company_access_revoked',
+                        'company_id' => $companyId,
+                        'revoked_sessions' => $revokedSessions,
+                    ]);
+                }
+            });
         });
     }
 
