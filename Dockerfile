@@ -3,6 +3,7 @@ FROM php:8.5-cli-alpine
 # Install system dependencies and PHP extensions
 RUN apk add --no-cache \
     postgresql-dev \
+    sqlite-dev \
     libzip-dev \
     libpng-dev \
     libjpeg-turbo-dev \
@@ -13,6 +14,7 @@ RUN apk add --no-cache \
     npm \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
+    pdo_sqlite \
     pdo_pgsql \
     pgsql \
     zip \

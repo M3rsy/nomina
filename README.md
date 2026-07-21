@@ -40,8 +40,25 @@ Sistema multi-tenant de planilla y asistencia construido con Laravel 12, Livewir
 
 ## Tests
 
+The canonical suite always resolves to an in-memory SQLite database. PHPUnit
+forces these values, so inherited host or Docker development settings cannot
+select a persistent database.
+
+Local:
+
 ```bash
-php artisan test
+APP_ENV=testing DB_CONNECTION=sqlite DB_DATABASE=:memory: DB_URL= composer test
+```
+
+Docker (runs in a new disposable app container and does not start the database service):
+
+```bash
+docker compose run --rm --no-deps \
+    -e APP_ENV=testing \
+    -e DB_CONNECTION=sqlite \
+    -e DB_DATABASE=:memory: \
+    -e DB_URL= \
+    app composer test
 ```
 
 ## Estructura del proyecto
