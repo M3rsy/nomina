@@ -22,7 +22,7 @@ test('fase 8 routes are reachable for authorized users', function () {
     $this->get('/dashboard')->assertRedirect('/dashboard/company');
     $this->get('/dashboard/company')->assertOk();
     $this->get('/auditoria')->assertOk();
-    $this->get('/respaldos')->assertOk();
+    $this->get('/respaldos')->assertForbidden();
 });
 
 test('nav shows new links for authorized users', function () {
@@ -37,5 +37,5 @@ test('nav shows new links for authorized users', function () {
 
     $response->assertSee('Panel');
     $response->assertSee('Auditoría');
-    $response->assertSee('Respaldos');
+    $response->assertDontSee('Respaldos');
 });

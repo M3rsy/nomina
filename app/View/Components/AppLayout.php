@@ -4,6 +4,7 @@ namespace App\View\Components;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Providers\AppServiceProvider;
 use App\Services\CurrentCompany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -25,7 +26,7 @@ class AppLayout extends Component
         ['label' => 'Jornadas', 'route' => 'jornadas.index', 'active' => 'jornadas.*', 'permission' => 'work_schedules.view'],
         ['label' => 'Feriados', 'route' => 'feriados.index', 'active' => 'feriados.*', 'permission' => 'holidays.view'],
         ['label' => 'Auditoría', 'route' => 'auditoria.index', 'active' => 'auditoria.*', 'permission' => 'audit.view'],
-        ['label' => 'Respaldos', 'route' => 'respaldos.index', 'active' => 'respaldos.*', 'permission' => 'backups.run'],
+        ['label' => 'Respaldos', 'route' => 'respaldos.index', 'active' => 'respaldos.*', 'permission' => 'backups.manage-global'],
     ];
 
     public ?User $user;
@@ -89,7 +90,9 @@ class AppLayout extends Component
     private function visibleNavigation(array $items, User $user): array
     {
         return Collection::make($items)
-            ->filter(fn (array $item): bool => $item['permission'] === null || $user->can($item['permission']))
+            ->filter(fn (array $item): bool => $item['permission'] === null || ($item['permission'] === 'backups.manage-global'
+                ? AppServiceProvider::canManageGlobalBackups($user)
+                : $user->can($item['permission'])))
             ->map(fn (array $item): array => [
                 'label' => $item['label'],
                 'route' => $item['route'],

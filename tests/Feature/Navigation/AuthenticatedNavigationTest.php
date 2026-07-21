@@ -27,32 +27,34 @@ test('current named route is exposed in the authenticated navigation', function 
     expect($activeLinks->length)->toBe(2);
 });
 
-test('company admin navigation contains permitted named destinations but not companies', function () {
-    $company = Company::factory()->create();
-    $admin = User::factory()->forCompany($company)->create();
-    $admin->assignRole('company_admin');
+test('company admins cannot see global backup navigation even with direct permission', function () {
+    foreach (Company::factory()->count(2)->create() as $company) {
+        $admin = User::factory()->forCompany($company)->create();
+        $admin->assignRole('company_admin');
+        $admin->givePermissionTo('backups.run');
 
-    $response = $this->actingAs($admin)->get(route('profile.change-password'));
+        $response = $this->actingAs($admin)->get(route('profile.change-password'));
 
-    $response->assertOk();
+        $response->assertOk();
 
-    foreach ([
-        'dashboard',
-        'empleados.index',
-        'archivos.index',
-        'nomina.index',
-        'usuarios.index',
-        'jornadas.index',
-        'feriados.index',
-        'auditoria.index',
-        'respaldos.index',
-    ] as $routeName) {
-        $response->assertSee('href="'.route($routeName).'"', escape: false);
+        foreach ([
+            'dashboard',
+            'empleados.index',
+            'archivos.index',
+            'nomina.index',
+            'usuarios.index',
+            'jornadas.index',
+            'feriados.index',
+            'auditoria.index',
+        ] as $routeName) {
+            $response->assertSee('href="'.route($routeName).'"', escape: false);
+        }
+
+        $response
+            ->assertDontSee('href="'.route('respaldos.index').'"', escape: false)
+            ->assertDontSee('href="'.route('empresas.index').'"', escape: false)
+            ->assertDontSee('action="'.route('current-company.update').'"', escape: false);
     }
-
-    $response
-        ->assertDontSee('href="'.route('empresas.index').'"', escape: false)
-        ->assertDontSee('action="'.route('current-company.update').'"', escape: false);
 });
 
 test('super admin selector lists active companies with one selector query', function () {
@@ -74,6 +76,7 @@ test('super admin selector lists active companies with one selector query', func
         ->get(route('profile.change-password'))
         ->assertOk()
         ->assertSee('href="'.route('empresas.index').'"', escape: false)
+        ->assertSee('href="'.route('respaldos.index').'"', escape: false)
         ->assertSee('action="'.route('current-company.update').'"', escape: false)
         ->assertSee($activeCompany->name)
         ->assertDontSee($inactiveCompany->name)
