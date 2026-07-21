@@ -76,6 +76,45 @@ test('company admin can save work schedules for own company', function () {
     expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
 });
 
+test('company admin can save custom overtime bands in work schedule JSON', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    $customBands = '[{"start":"06:00","end":"12:00","extra_percent":0},{"start":"12:00","end":"18:00","extra_percent":25},{"start":"18:00","end":"00:00","extra_percent":50},{"start":"00:00","end":"06:00","extra_percent":75}]';
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.banding_json', $customBands)
+        ->call('save')
+        ->assertSet('showSuccess', true)
+        ->assertHasNoErrors();
+
+    $schedule = WorkSchedule::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->where('day_of_week', 1)
+        ->first();
+
+    expect($schedule)
+        ->not->toBeNull()
+        ->and($schedule->banding_json)->toBeArray()
+        ->and($schedule->banding_json[0]['start'])->toBe('06:00')
+        ->and($schedule->banding_json[3]['end'])->toBe('06:00');
+});
+
+test('company admin gets validation error for invalid overtime band JSON', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.banding_json', '[{"start":"06:00",')
+        ->call('save')
+        ->assertHasErrors(['schedules.1.banding_json']);
+});
+
 test('company admin can access feriados page of own company', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
