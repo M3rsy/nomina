@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Models\AttendanceException;
 use App\Models\Employee;
 use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
@@ -39,6 +40,7 @@ class PayrollShiftEvaluationResolver
             $review->analysis,
             $review->currentDecisions,
             $absence,
+            $review->currentExceptions,
         );
     }
 
@@ -68,7 +70,15 @@ class PayrollShiftEvaluationResolver
             ->current()
             ->with('decider')
             ->get();
+        $exceptions = AttendanceException::withoutCompanyScope()
+            ->where('company_id', $payPeriod->company_id)
+            ->where('pay_period_id', $payPeriod->id)
+            ->where('employee_id', $employee->id)
+            ->whereDate('work_date', $date->toDateString())
+            ->current()
+            ->with('decider')
+            ->get();
 
-        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions);
+        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions, $exceptions);
     }
 }

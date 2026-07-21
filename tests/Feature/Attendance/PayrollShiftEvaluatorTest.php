@@ -1,12 +1,13 @@
 <?php
 
+use App\Models\AttendanceException;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
-use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\AttendanceSegment;
+use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\ShiftOccurrence;
 use Carbon\CarbonImmutable;
@@ -92,6 +93,44 @@ test('records rejected candidate time as reviewed but not payable', function () 
         ->and($evaluation->approvedOvertimeMinutes)->toBe(0)
         ->and($evaluation->payableRates->extra25Minutes)->toBe(0)
         ->and($evaluation->blockers)->toBeEmpty();
+});
+
+test('credits only an exact granted attendance deficit', function () {
+    [$occurrence, $analysis] = payrollShift(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:15:00',
+        exitAt: '2026-07-20 14:00:00',
+    );
+    $deficit = $analysis->deficits->sole();
+    $evaluator = app(PayrollShiftEvaluator::class);
+    $withoutException = $evaluator->evaluate($occurrence, $analysis, collect());
+    $granted = payrollAttendanceException($deficit, AttendanceException::GRANTED);
+    $withException = $evaluator->evaluate($occurrence, $analysis, collect(), null, collect([$granted]));
+
+    expect($withoutException->scheduledMinutes)->toBe(480)
+        ->and($withoutException->recognizedMinutes)->toBe(465)
+        ->and($withoutException->excusedDeficitMinutes)->toBe(0)
+        ->and($withException->scheduledMinutes)->toBe(480)
+        ->and($withException->recognizedMinutes)->toBe(480)
+        ->and($withException->excusedDeficitMinutes)->toBe(15)
+        ->and($withException->payableRates->ordinaryMinutes)->toBe(480)
+        ->and($withException->metadata)->toBe([
+            'attendance_exception_ids' => [42],
+            'excused_deficit_minutes' => 15,
+        ]);
+
+    $granted->fingerprint = str_repeat('f', 64);
+    $stale = $evaluator->evaluate($occurrence, $analysis, collect(), null, collect([$granted]));
+    $revoked = $evaluator->evaluate(
+        $occurrence,
+        $analysis,
+        collect(),
+        null,
+        collect([payrollAttendanceException($deficit, AttendanceException::REVOKED)]),
+    );
+
+    expect($stale->recognizedMinutes)->toBe(465)
+        ->and($revoked->recognizedMinutes)->toBe(465);
 });
 
 test('blocks unresolved attendance instead of inventing payable time', function () {
@@ -202,6 +241,26 @@ function payrollDecision(AttendanceSegment $candidate, string $decision): Overti
             'extra50' => $candidate->rateMinutes->extra50Minutes,
             'extra75' => $candidate->rateMinutes->extra75Minutes,
             'extra100' => $candidate->rateMinutes->extra100Minutes,
+        ],
+        'decision' => $decision,
+    ]);
+}
+
+function payrollAttendanceException(AttendanceSegment $deficit, string $decision): AttendanceException
+{
+    return (new AttendanceException)->forceFill([
+        'id' => 42,
+        'deficit_key' => $deficit->key,
+        'fingerprint' => $deficit->fingerprint,
+        'starts_at' => $deficit->start,
+        'ends_at' => $deficit->end,
+        'minutes' => $deficit->minutes,
+        'rate_minutes' => [
+            'ordinary' => $deficit->rateMinutes->ordinaryMinutes,
+            'extra25' => $deficit->rateMinutes->extra25Minutes,
+            'extra50' => $deficit->rateMinutes->extra50Minutes,
+            'extra75' => $deficit->rateMinutes->extra75Minutes,
+            'extra100' => $deficit->rateMinutes->extra100Minutes,
         ],
         'decision' => $decision,
     ]);

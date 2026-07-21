@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
 use Database\Seeders\PermissionRoleSeeder;
@@ -43,6 +44,16 @@ test('grants and revokes the complete server-calculated deficit', function () {
             'extra100' => 0,
         ])
         ->and($granted->decider->is($context['actor']))->toBeTrue();
+
+    $evaluation = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+    );
+
+    expect($evaluation->scheduledMinutes)->toBe(480)
+        ->and($evaluation->recognizedMinutes)->toBe(480)
+        ->and($evaluation->excusedDeficitMinutes)->toBe(15);
 
     expect(fn () => $recorder->decide(
         $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
