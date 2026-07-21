@@ -93,8 +93,8 @@ test('file mark totals render without per-row count queries', function () {
 
     Livewire::test(Index::class)
         ->assertSeeInOrder(['WITH-SEVEN.TXT', 'WITH-THREE.TXT'])
-        ->assertSeeHtml('<td class="px-4 py-2">7</td>')
-        ->assertSeeHtml('<td class="px-4 py-2">3</td>');
+        ->assertSeeHtml('>7</td>')
+        ->assertSeeHtml('>3</td>');
 
     $rawMarkQueries = collect(DB::getQueryLog())
         ->pluck('query')

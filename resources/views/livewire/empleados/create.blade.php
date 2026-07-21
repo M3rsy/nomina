@@ -1,101 +1,158 @@
-<div class="max-w-2xl mx-auto py-8">
-    <h1 class="text-2xl font-bold mb-6">Nuevo empleado</h1>
-
-    <form wire:submit="save" class="bg-white p-6 rounded-lg shadow space-y-4">
-        @if ($isSuperAdmin)
+<div class="min-h-screen bg-slate-50/80">
+    <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+        <header class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
             <div>
-                <label for="company_id" class="block text-sm font-medium text-gray-700">Empresa</label>
-                <select id="company_id" wire:model="company_id" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-                    <option value="">Seleccione...</option>
-                    @foreach ($companies as $company)
-                        <option value="{{ $company->id }}">{{ $company->name }}</option>
-                    @endforeach
-                </select>
-                @error('company_id') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
+                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Crear registro</p>
+                <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900">Nuevo empleado</h1>
+                <p class="mt-2 text-sm text-slate-600">Completá la ficha del empleado con los datos requeridos para poder incluirlo en la nómina.</p>
             </div>
-        @endif
+        </header>
 
-        <div>
-            <label for="external_id" class="block text-sm font-medium text-gray-700">Código de empleado</label>
-            <input id="external_id" type="text" wire:model="external_id" class="mt-1 block w-full rounded border-gray-300 shadow-sm" required>
-            @error('external_id') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
+        <form wire:submit="save" class="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+            <div class="space-y-5">
+                @if ($isSuperAdmin)
+                    <label for="company_id" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Empresa</span>
+                        <select
+                            id="company_id"
+                            wire:model="company_id"
+                            class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                            <option value="">Seleccione...</option>
+                            @foreach ($companies as $company)
+                                <option value="{{ $company->id }}">{{ $company->name }}</option>
+                            @endforeach
+                        </select>
+                        @error('company_id')
+                            <p id="company_id-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+                @endif
 
-        <div class="grid grid-cols-2 gap-4">
-            <div>
-                <label for="first_name" class="block text-sm font-medium text-gray-700">Nombre</label>
-                <input id="first_name" type="text" wire:model="first_name" class="mt-1 block w-full rounded border-gray-300 shadow-sm" required>
-                @error('first_name') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
+                <div class="grid gap-5 sm:grid-cols-2">
+                    <label for="external_id" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Código de empleado</span>
+                        <input id="external_id" type="text" wire:model="external_id" required class="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('external_id')
+                            <p id="external_id-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+
+                    <label for="dni" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Identidad (DNI)</span>
+                        <input id="dni" type="text" wire:model="dni" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('dni')
+                            <p id="dni-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+                </div>
+
+                <div class="grid gap-5 sm:grid-cols-2">
+                    <label for="first_name" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Nombre</span>
+                        <input id="first_name" type="text" wire:model="first_name" required class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('first_name')
+                            <p id="first_name-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+
+                    <label for="last_name" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Apellido</span>
+                        <input id="last_name" type="text" wire:model="last_name" required class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('last_name')
+                            <p id="last_name-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+                </div>
+
+                <div class="grid gap-5 sm:grid-cols-2">
+                    <label for="sex" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Sexo</span>
+                        <select
+                            id="sex"
+                            wire:model="sex"
+                            class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        >
+                            <option value="">Seleccione...</option>
+                            <option value="M">Masculino</option>
+                            <option value="F">Femenino</option>
+                            <option value="O">Otro</option>
+                        </select>
+                        @error('sex')
+                            <p id="sex-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+
+                    <label for="birth_date" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Fecha de nacimiento</span>
+                        <input id="birth_date" type="date" wire:model="birth_date" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('birth_date')
+                            <p id="birth_date-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+                </div>
+
+                <label for="address" class="block space-y-1.5">
+                    <span class="text-sm font-semibold text-slate-800">Dirección</span>
+                    <input id="address" type="text" wire:model="address" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                    @error('address')
+                        <p id="address-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                    @enderror
+                </label>
+
+                <label for="phone" class="block space-y-1.5">
+                    <span class="text-sm font-semibold text-slate-800">Teléfono</span>
+                    <input id="phone" type="text" wire:model="phone" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                    @error('phone')
+                        <p id="phone-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                    @enderror
+                </label>
+
+                <label for="job_title" class="block space-y-1.5">
+                    <span class="text-sm font-semibold text-slate-800">Cargo</span>
+                    <input id="job_title" type="text" wire:model="job_title" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                    @error('job_title')
+                        <p id="job_title-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                    @enderror
+                </label>
+
+                <div class="grid gap-5 sm:grid-cols-2">
+                    <label for="expected_salary" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Salario esperado</span>
+                        <input id="expected_salary" type="number" step="0.01" wire:model="expected_salary" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('expected_salary')
+                            <p id="expected_salary-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+
+                    <label for="hired_at" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Fecha de contratación</span>
+                        <input id="hired_at" type="date" wire:model="hired_at" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('hired_at')
+                            <p id="hired_at-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+                </div>
+
+                <label for="notes" class="block space-y-1.5">
+                    <span class="text-sm font-semibold text-slate-800">Notas</span>
+                    <textarea id="notes" wire:model="notes" rows="4" class="w-full rounded-xl border border-slate-300 bg-white p-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"></textarea>
+                    @error('notes')
+                        <p id="notes-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                    @enderror
+                </label>
+
+                <div class="border-t border-slate-100 pt-3">
+                    <button
+                        type="submit"
+                        wire:loading.attr="disabled"
+                        class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                    >
+                        <span wire:loading.remove>Guardar</span>
+                        <span wire:loading>Guardando...</span>
+                    </button>
+                </div>
             </div>
-
-            <div>
-                <label for="last_name" class="block text-sm font-medium text-gray-700">Apellido</label>
-                <input id="last_name" type="text" wire:model="last_name" class="mt-1 block w-full rounded border-gray-300 shadow-sm" required>
-                @error('last_name') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-            </div>
-        </div>
-
-        <div>
-            <label for="dni" class="block text-sm font-medium text-gray-700">Identidad (DNI)</label>
-            <input id="dni" type="text" wire:model="dni" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('dni') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div class="grid grid-cols-2 gap-4">
-            <div>
-                <label for="sex" class="block text-sm font-medium text-gray-700">Sexo</label>
-                <select id="sex" wire:model="sex" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-                    <option value="">Seleccione...</option>
-                    <option value="M">Masculino</option>
-                    <option value="F">Femenino</option>
-                    <option value="O">Otro</option>
-                </select>
-                @error('sex') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-            </div>
-
-            <div>
-                <label for="birth_date" class="block text-sm font-medium text-gray-700">Fecha de nacimiento</label>
-                <input id="birth_date" type="date" wire:model="birth_date" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-                @error('birth_date') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-            </div>
-        </div>
-
-        <div>
-            <label for="address" class="block text-sm font-medium text-gray-700">Dirección</label>
-            <input id="address" type="text" wire:model="address" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('address') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div>
-            <label for="phone" class="block text-sm font-medium text-gray-700">Teléfono</label>
-            <input id="phone" type="text" wire:model="phone" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('phone') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div>
-            <label for="job_title" class="block text-sm font-medium text-gray-700">Cargo</label>
-            <input id="job_title" type="text" wire:model="job_title" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('job_title') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div>
-            <label for="expected_salary" class="block text-sm font-medium text-gray-700">Salario esperado</label>
-            <input id="expected_salary" type="number" step="0.01" wire:model="expected_salary" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('expected_salary') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div>
-            <label for="hired_at" class="block text-sm font-medium text-gray-700">Fecha de contratación</label>
-            <input id="hired_at" type="date" wire:model="hired_at" class="mt-1 block w-full rounded border-gray-300 shadow-sm">
-            @error('hired_at') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <div>
-            <label for="notes" class="block text-sm font-medium text-gray-700">Notas</label>
-            <textarea id="notes" wire:model="notes" rows="3" class="mt-1 block w-full rounded border-gray-300 shadow-sm"></textarea>
-            @error('notes') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
-        </div>
-
-        <button type="submit" class="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700">Guardar</button>
-    </form>
+        </form>
+    </div>
 </div>

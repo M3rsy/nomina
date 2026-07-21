@@ -20,6 +20,7 @@ class WorkScheduleFactory extends Factory
             'day_of_week' => fake()->numberBetween(0, 6),
             'is_working_day' => true,
             'base_ordinary_hours' => 8.00,
+            'banding_json' => null,
             'notes' => null,
         ];
     }

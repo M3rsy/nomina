@@ -16,6 +16,7 @@ class WorkSchedule extends Model
         'day_of_week',
         'is_working_day',
         'base_ordinary_hours',
+        'banding_json',
         'notes',
     ];
 
@@ -25,6 +26,7 @@ class WorkSchedule extends Model
             'day_of_week' => 'integer',
             'is_working_day' => 'boolean',
             'base_ordinary_hours' => 'decimal:2',
+            'banding_json' => 'array',
         ];
     }
 

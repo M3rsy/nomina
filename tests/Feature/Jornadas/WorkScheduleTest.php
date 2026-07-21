@@ -74,3 +74,28 @@ test('updating a work schedule persists', function () {
         ->and((float) $schedule->base_ordinary_hours)->toBe(6.00)
         ->and($schedule->notes)->toBe('Ajuste especial');
 });
+
+test('work schedule can persist configurable banding json', function () {
+    $company = Company::factory()->create();
+    $schedule = WorkSchedule::factory()->forCompany($company)->create([
+        'day_of_week' => 2,
+        'is_working_day' => true,
+        'base_ordinary_hours' => 8.00,
+    ]);
+
+    $schedule->update([
+        'banding_json' => [
+            ['start' => '06:00', 'end' => '14:00', 'extra_percent' => 0],
+            ['start' => '14:00', 'end' => '18:00', 'extra_percent' => 25],
+            ['start' => '18:00', 'end' => '00:00', 'extra_percent' => 50],
+            ['start' => '00:00', 'end' => '06:00', 'extra_percent' => 75],
+        ],
+        'notes' => 'Pro bands',
+    ]);
+
+    $schedule->refresh();
+
+    expect($schedule->banding_json)->toBeArray()
+        ->and($schedule->banding_json[0]['extra_percent'])->toBe(0)
+        ->and($schedule->notes)->toBe('Pro bands');
+});

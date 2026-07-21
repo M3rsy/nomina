@@ -75,19 +75,6 @@
                         </select>
                         @error('company_id') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
                     </div>
-
-                    <div>
-                        <label for="is_active" class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                            <input
-                                id="is_active"
-                                type="checkbox"
-                                wire:model="is_active"
-                                class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                            >
-                            <span>Cuenta activa</span>
-                        </label>
-                        @error('is_active') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
-                    </div>
                 @endif
             </div>
 

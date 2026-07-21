@@ -40,7 +40,7 @@ test('company admin can view uploaded file detail with counts', function () {
     $response = $this->get('/archivos/'.$uploadedFile->id);
     $response->assertOk();
     $response->assertSee('GLG_001.TXT');
-    $response->assertSee('valid_with_warnings');
+    $response->assertSee('Válido con advertencias');
     $response->assertSee('34');
     $response->assertSee('32');
 });
