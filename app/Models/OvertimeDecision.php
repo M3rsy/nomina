@@ -88,6 +88,9 @@ class OvertimeDecision extends Model
 
     public function scopeCurrent(Builder $query): Builder
     {
-        return $query->whereDoesntHave('supersedingDecision');
+        return $query->whereDoesntHave(
+            'supersedingDecision',
+            fn (Builder $superseding): Builder => $superseding->withoutGlobalScopes(),
+        );
     }
 }
