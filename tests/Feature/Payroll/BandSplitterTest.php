@@ -71,3 +71,31 @@ test('split returns zero for equal or reversed boundaries', function () {
 
     expect($split->totalHours())->toEqual(0.0);
 });
+
+test('split accepts custom 100% overtime band', function () {
+    $bands = [
+        ['start' => 0, 'end' => 480, 'bucket' => 'ordinary'],
+        ['start' => 480, 'end' => 1440, 'bucket' => 'extra100'],
+    ];
+
+    $split = $this->splitter->split(Carbon::parse('2026-10-07 06:00:00'), Carbon::parse('2026-10-07 10:00:00'), $bands);
+
+    expect($split->ordinaryHours())->toEqual(2.0)
+        ->and($split->extra100Hours())->toEqual(2.0)
+        ->and($split->extra25Hours())->toEqual(0.0)
+        ->and($split->extra50Hours())->toEqual(0.0)
+        ->and($split->extra75Hours())->toEqual(0.0)
+        ->and($split->totalHours())->toEqual(4.0);
+});
+
+test('split supports wrapped bands that reach into next day', function () {
+    $bands = [
+        ['start' => 1080, 'end' => 60, 'bucket' => 'extra50'],
+        ['start' => 60, 'end' => 360, 'bucket' => 'extra25'],
+    ];
+
+    $split = $this->splitter->split(Carbon::parse('2026-10-07 22:00:00'), Carbon::parse('2026-10-08 04:00:00'), $bands);
+
+    expect($split->extra50Hours())->toBe(2.0)
+        ->and($split->extra25Hours())->toBe(3.0);
+});

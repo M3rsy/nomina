@@ -5,6 +5,7 @@ use App\Models\Employee;
 use App\Models\Holiday;
 use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
+use App\Models\WorkSchedule;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Services\Payroll\PayrollCalculator;
@@ -74,6 +75,44 @@ test('weekday tuesday 05:14 to 17:27 uses half up rounding for extras', function
         ->and($result->workedHours)->toBeBetween(12.21, 12.22);
 
     expect($result->metadata['raw_split']['extra_25'])->toBeBetween(3.44, 3.46);
+});
+
+test('weekday uses custom overtime bands from work schedule', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $date = Carbon::parse('2025-10-07'); // Tuesday
+
+    WorkSchedule::withoutCompanyScope()->updateOrCreate(
+        [
+            'company_id' => $company->id,
+            'day_of_week' => $date->dayOfWeek,
+        ],
+        [
+            'is_working_day' => true,
+            'base_ordinary_hours' => 8.00,
+            'banding_json' => [
+                ['start' => '06:00', 'end' => '07:00', 'extra_percent' => 0],
+                ['start' => '07:00', 'end' => '00:00', 'extra_percent' => 100],
+            ],
+            'notes' => null,
+        ]
+    );
+
+    $marks = marksForDay($company, $payPeriod, $employee, $date->toDateString(), [
+        '2025-10-07 06:00:00',
+        '2025-10-07 14:00:00',
+    ]);
+
+    $result = $this->calculator->calculateForDay($company, $employee, $date, $marks);
+
+    expect($result->ordinaryHours)->toEqual(1.0)
+        ->and($result->extra100Hours)->toBe(7)
+        ->and($result->extra25Hours)->toBe(0)
+        ->and($result->extra50Hours)->toBe(0)
+        ->and($result->extra75Hours)->toBe(0)
+        ->and($result->metadata['raw_split']['extra_100'])->toEqual(7.0)
+        ->and($result->metadata['raw_split']['extra_25'])->toEqual(0.0);
 });
 
 test('saturday 06:00 to 14:00 caps ordinary at four and shifts rest to extra 25', function () {
