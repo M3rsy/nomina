@@ -13,11 +13,14 @@ use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
+use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollProcessingBlocked;
 use App\Services\Payroll\PayrollProcessor;
 use Database\Seeders\PermissionRoleSeeder;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -70,7 +73,7 @@ test('processor rolls back when an overtime candidate is pending', function () {
         ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 });
 
-test('processor persists approved overtime in exact minutes and decimal hours', function () {
+test('reviewed overtime flows from readiness to exact payroll and export', function () {
     $company = Company::factory()->create();
     $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
     $employee = processorEmployee($company);
@@ -85,6 +88,7 @@ test('processor persists approved overtime in exact minutes and decimal hours', 
     }
 
     app(CurrentCompany::class)->set($company);
+    $pending = app(PayrollReadinessChecker::class)->blockers($payPeriod)->sole();
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-01-05');
     $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -98,8 +102,17 @@ test('processor persists approved overtime in exact minutes and decimal hours', 
         $actor,
     );
 
+    expect($pending)->toMatchArray([
+        'employee_id' => $employee->id,
+        'work_date' => '2026-01-05',
+        'code' => 'pending_overtime_candidate',
+        'candidate_key' => $candidate->key,
+    ])->and(app(PayrollReadinessChecker::class)->blockers($payPeriod))->toBeEmpty();
+
     app(PayrollProcessor::class)->processPayPeriod($payPeriod);
     $result = PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->sole();
+    $path = app(PayrollExcelExporter::class)->export($payPeriod->fresh());
+    $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
 
     expect($result->worked_minutes)->toBe(510)
         ->and($result->scheduled_minutes)->toBe(480)
@@ -109,7 +122,10 @@ test('processor persists approved overtime in exact minutes and decimal hours', 
         ->and($result->ordinary_minutes)->toBe(480)
         ->and($result->extra_25_minutes)->toBe(30)
         ->and((float) $result->extra_25_hours)->toBe(0.5)
+        ->and($data[5][6])->toBe(0.5)
         ->and($payPeriod->fresh()->status)->toBe('processed');
+
+    unlink($path);
 });
 
 test('processor credits an exact granted attendance deficit without changing observed time', function () {
