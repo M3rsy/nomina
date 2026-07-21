@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Services\Attendance\OvertimeCandidateReviewQuery;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\PayrollRules;
@@ -98,6 +99,8 @@ class Revisar extends Component
         $faltas = $this->detectFaltas();
         $isBlocked = $this->isBlocked();
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
+        $overtimeReviews = app(OvertimeCandidateReviewQuery::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -106,6 +109,7 @@ class Revisar extends Component
             'faltas' => $faltas,
             'isBlocked' => $isBlocked,
             'uploadedFiles' => $uploadedFiles,
+            'overtimeReviews' => $overtimeReviews,
         ]);
     }
 
