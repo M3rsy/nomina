@@ -130,6 +130,11 @@ class Employee extends Model
         return $this->hasMany(JustifiedAbsence::class);
     }
 
+    public function scheduleAssignments(): HasMany
+    {
+        return $this->hasMany(EmployeeScheduleAssignment::class);
+    }
+
     public function getFullNameAttribute(): string
     {
         return trim($this->first_name.' '.$this->last_name);

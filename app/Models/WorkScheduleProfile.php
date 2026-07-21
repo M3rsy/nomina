@@ -40,6 +40,11 @@ class WorkScheduleProfile extends Model
         return $this->hasMany(WorkSchedule::class);
     }
 
+    public function employeeAssignments(): HasMany
+    {
+        return $this->hasMany(EmployeeScheduleAssignment::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
