@@ -18,6 +18,8 @@ test('recognizes an exact scheduled shift in integer minutes', function () {
     expect($analysis->status)->toBe(ShiftOccurrence::RESOLVED)
         ->and($analysis->workedMinutes)->toBe(480)
         ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(480)
         ->and($analysis->deficits)->toBeEmpty()
         ->and($analysis->overtimeCandidates)->toBeEmpty();
 });
@@ -35,6 +37,9 @@ test('detects a complete post-shift overtime candidate', function () {
         ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 14:00:00')
         ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 14:30:00')
         ->and($candidate->minutes)->toBe(30)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(30)
+        ->and($candidate->rateMinutes->extra25Hours())->toBe(0.5)
+        ->and($candidate->rateMinutes->ordinaryMinutes)->toBe(0)
         ->and($candidate->fingerprint)->toHaveLength(64)
         ->and($candidate->key)->toHaveLength(64);
 });
@@ -63,6 +68,7 @@ test('reports late arrival and early departure as exact scheduled deficits', fun
         ->and($analysis->scheduledMinutes)->toBe(450)
         ->and($analysis->deficits->pluck('kind')->all())->toBe(['late_arrival', 'early_departure'])
         ->and($analysis->deficits->pluck('minutes')->all())->toBe([15, 15])
+        ->and($analysis->deficits->pluck('rateMinutes.ordinaryMinutes')->all())->toBe([15, 15])
         ->and($analysis->overtimeCandidates)->toBeEmpty();
 });
 
@@ -80,7 +86,8 @@ test('treats the whole observed interval on a non-working date as one candidate'
         ->and($analysis->scheduledMinutes)->toBe(0)
         ->and($analysis->deficits)->toBeEmpty()
         ->and($candidate->kind)->toBe('non_working')
-        ->and($candidate->minutes)->toBe(120);
+        ->and($candidate->minutes)->toBe(120)
+        ->and($candidate->rateMinutes->extra100Minutes)->toBe(120);
 });
 
 test('recognizes an overnight scheduled interval on its starting work date', function () {
@@ -94,8 +101,70 @@ test('recognizes an overnight scheduled interval on its starting work date', fun
 
     expect($analysis->workedMinutes)->toBe(720)
         ->and($analysis->scheduledMinutes)->toBe(720)
+        ->and($analysis->scheduledRates->extra50Minutes)->toBe(360)
+        ->and($analysis->scheduledRates->extra75Minutes)->toBe(360)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(720)
         ->and($analysis->deficits)->toBeEmpty()
         ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('classifies saturday scheduled time and its complete post-shift candidate separately', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-18',
+        entryAt: '2026-07-18 08:00:00',
+        exitAt: '2026-07-18 13:00:00',
+        scheduledStart: '08:00',
+        scheduledEnd: '12:00',
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->scheduledRates->ordinaryMinutes)->toBe(240)
+        ->and($candidate->minutes)->toBe(60)
+        ->and($candidate->rateMinutes->ordinaryMinutes)->toBe(0)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(60);
+});
+
+test('classifies scheduled work on a holiday at one hundred percent', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:00:00',
+    ), isHoliday: true);
+
+    expect($analysis->scheduledRates->ordinaryMinutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra100Minutes)->toBe(480)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(480);
+});
+
+test('changes candidate identity when holiday classification changes', function () {
+    $occurrence = attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:30:00',
+    );
+    $regular = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
+    $holiday = app(AttendanceShiftAnalyzer::class)->analyze($occurrence, isHoliday: true)->overtimeCandidates->sole();
+
+    expect($holiday->key)->not->toBe($regular->key)
+        ->and($holiday->rateMinutes->extra100Minutes)->toBe(30);
+});
+
+test('uses the assigned schedule version rate bands', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 08:00:00',
+        exitAt: '2026-07-20 12:00:00',
+        scheduledStart: '08:00',
+        scheduledEnd: '12:00',
+        bands: [
+            ['start' => '08:00', 'end' => '10:00', 'rate' => 25],
+            ['start' => '10:00', 'end' => '12:00', 'rate' => 50],
+        ],
+    ));
+
+    expect($analysis->scheduledRates->extra25Minutes)->toBe(120)
+        ->and($analysis->scheduledRates->extra50Minutes)->toBe(120)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(240);
 });
 
 test('propagates an unresolved occurrence without inventing observed time', function () {
@@ -140,6 +209,7 @@ function attendanceOccurrence(
     string $exitAt,
     ?string $scheduledStart = '06:00',
     ?string $scheduledEnd = '14:00',
+    ?array $bands = null,
 ): ShiftOccurrence {
     $date = CarbonImmutable::parse($workDate)->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -148,6 +218,7 @@ function attendanceOccurrence(
         'is_working_day' => $scheduledStart !== null,
         'start_time' => $scheduledStart,
         'end_time' => $scheduledEnd,
+        'banding_json' => $bands,
     ]);
     $assignment = (new EmployeeScheduleAssignment)->forceFill([
         'id' => 30,
