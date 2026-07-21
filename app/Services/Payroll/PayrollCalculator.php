@@ -62,10 +62,12 @@ class PayrollCalculator
             return $this->buildHolidayResult($entry, $exit, $workedHours);
         }
 
+        $bands = $this->rules->overtimeBandsFor($company, $date->dayOfWeek);
+
         return match ($date->dayOfWeek) {
             PayrollRules::DAY_SUNDAY => $this->buildSundayResult($entry, $exit, $workedHours),
-            PayrollRules::DAY_SATURDAY => $this->buildSaturdayResult($entry, $exit, $workedHours),
-            default => $this->buildWeekdayResult($entry, $exit, $workedHours),
+            PayrollRules::DAY_SATURDAY => $this->buildSaturdayResult($entry, $exit, $workedHours, $bands),
+            default => $this->buildWeekdayResult($entry, $exit, $workedHours, $bands),
         };
     }
 
@@ -101,9 +103,9 @@ class PayrollCalculator
         );
     }
 
-    private function buildWeekdayResult(CarbonInterface $entry, CarbonInterface $exit, float $workedHours): PayrollDayResult
+    private function buildWeekdayResult(CarbonInterface $entry, CarbonInterface $exit, float $workedHours, array $bands): PayrollDayResult
     {
-        $split = $this->bandSplitter->split($entry, $exit);
+        $split = $this->bandSplitter->split($entry, $exit, $bands);
 
         return $this->buildResult(
             entry: $entry,
@@ -113,13 +115,13 @@ class PayrollCalculator
             raw25: $split->extra25Hours(),
             raw50: $split->extra50Hours(),
             raw75: $split->extra75Hours(),
-            raw100: 0.0,
+            raw100: $split->extra100Hours(),
         );
     }
 
-    private function buildSaturdayResult(CarbonInterface $entry, CarbonInterface $exit, float $workedHours): PayrollDayResult
+    private function buildSaturdayResult(CarbonInterface $entry, CarbonInterface $exit, float $workedHours, array $bands): PayrollDayResult
     {
-        $split = $this->bandSplitter->split($entry, $exit);
+        $split = $this->bandSplitter->split($entry, $exit, $bands);
 
         // Saturday: first 4 hours of worked time are ordinary, the rest are extras.
         // We cap the clock-time ordinary band at 4 hours and push the excess
@@ -128,6 +130,7 @@ class PayrollCalculator
         $extra25 = $split->extra25Hours();
         $extra50 = $split->extra50Hours();
         $extra75 = $split->extra75Hours();
+        $extra100 = $split->extra100Hours();
 
         if ($ordinaryHours > 4.0) {
             $excess = $ordinaryHours - 4.0;
@@ -148,7 +151,7 @@ class PayrollCalculator
             raw25: $extra25,
             raw50: $extra50,
             raw75: $extra75,
-            raw100: 0.0,
+            raw100: $extra100,
         );
     }
 
