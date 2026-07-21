@@ -2,6 +2,8 @@
 
 namespace App\Livewire\Respaldos;
 
+use App\Models\User;
+use App\Providers\AppServiceProvider;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Gate;
@@ -23,12 +25,12 @@ class Index extends Component
 
     public function mount(): void
     {
-        Gate::authorize('backups.run');
+        Gate::allowIf(fn (User $user): bool => AppServiceProvider::canManageGlobalBackups($user));
     }
 
     public function generate(): void
     {
-        Gate::authorize('backups.run');
+        Gate::allowIf(fn (User $user): bool => AppServiceProvider::canManageGlobalBackups($user));
 
         if (! config('backup.enabled', true)) {
             $this->message = 'Los respaldos están deshabilitados en este entorno.';
@@ -80,13 +82,16 @@ class Index extends Component
 
     public function render()
     {
-        $files = collect(Storage::disk('backups')->allFiles(''))
+        Gate::allowIf(fn (User $user): bool => AppServiceProvider::canManageGlobalBackups($user));
+
+        $disk = Storage::disk('backups');
+        $files = collect($disk->allFiles(''))
             ->filter(fn (string $path) => str_ends_with(strtolower($path), '.zip'))
             ->map(fn (string $path) => [
                 'path' => $path,
                 'name' => basename($path),
-                'size' => $this->formatBytes((int) Storage::disk('backups')->size($path)),
-                'modified' => Carbon::createFromTimestamp(Storage::disk('backups')->lastModified($path))->format('Y-m-d H:i:s'),
+                'size' => $this->formatBytes((int) $disk->size($path)),
+                'modified' => Carbon::createFromTimestamp($disk->lastModified($path))->format('Y-m-d H:i:s'),
             ])
             ->sortByDesc('modified')
             ->values();

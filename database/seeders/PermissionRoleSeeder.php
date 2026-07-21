@@ -75,7 +75,6 @@ class PermissionRoleSeeder extends Seeder
             'payroll.export',
             'payroll.receipts.download',
             'audit.view',
-            'backups.run',
             'work_schedules.view',
             'work_schedules.manage',
             'holidays.view',
@@ -102,7 +101,12 @@ class PermissionRoleSeeder extends Seeder
                 ['name' => $roleName, 'guard_name' => 'web']
             );
 
-            $role->syncPermissions($permissionNames);
+            $unmanagedPermissionNames = $role->permissions
+                ->pluck('name')
+                ->diff(self::PERMISSIONS)
+                ->all();
+
+            $role->syncPermissions([...$permissionNames, ...$unmanagedPermissionNames]);
         }
     }
 }

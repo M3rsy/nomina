@@ -2,41 +2,46 @@
 
 use App\Http\Controllers\CurrentCompanyController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\HealthController;
+use App\Http\Controllers\PayrollExportController;
+use App\Http\Controllers\UploadedFileReportController;
+use App\Livewire\Archivos\Index as FilesIndex;
+use App\Livewire\Archivos\Show as FileShow;
+use App\Livewire\Archivos\Upload as FileUpload;
+use App\Livewire\Auditoria\Index as AuditoriaIndex;
 use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
-use App\Http\Controllers\UploadedFileReportController;
-use App\Livewire\Auditoria\Index as AuditoriaIndex;
 use App\Livewire\Auth\ResetPassword;
+use App\Livewire\Dashboard\CompanyAdmin as DashboardCompanyAdmin;
+use App\Livewire\Dashboard\SuperAdmin as DashboardSuperAdmin;
 use App\Livewire\Empleados\Create as EmployeeCreate;
-use App\Livewire\Respaldos\Index as RespaldosIndex;
 use App\Livewire\Empleados\Edit as EmployeeEdit;
 use App\Livewire\Empleados\Index as EmployeesIndex;
 use App\Livewire\Empresas\Create as CompanyCreate;
 use App\Livewire\Empresas\Edit as CompanyEdit;
 use App\Livewire\Empresas\Index as CompaniesIndex;
-use App\Livewire\Archivos\Index as FilesIndex;
-use App\Livewire\Archivos\Show as FileShow;
-use App\Livewire\Archivos\Upload as FileUpload;
 use App\Livewire\Feriados\Index as HolidaysIndex;
 use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
-use App\Http\Controllers\PayrollExportController;
 use App\Livewire\Nomina\Index as NominaIndex;
 use App\Livewire\Nomina\Procesar as NominaProcesar;
 use App\Livewire\Nomina\Revisar as NominaRevisar;
-use App\Livewire\Dashboard\CompanyAdmin as DashboardCompanyAdmin;
-use App\Livewire\Dashboard\SuperAdmin as DashboardSuperAdmin;
 use App\Livewire\Profile\ChangePassword;
+use App\Livewire\Respaldos\Index as RespaldosIndex;
 use App\Livewire\Usuarios\Create as UserCreate;
 use App\Livewire\Usuarios\Edit as UserEdit;
 use App\Livewire\Usuarios\Index as UsersIndex;
+use App\Models\PayPeriod;
+use App\Models\User;
+use App\Providers\AppServiceProvider;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/health', \App\Http\Controllers\HealthController::class)
+Route::get('/health', HealthController::class)
     ->name('health');
 
 Route::get('/login', Login::class)
@@ -129,7 +134,7 @@ Route::middleware(['auth', 'can:files.view'])
         Route::get('/{uploadedFile}', FileShow::class)->name('archivos.show');
     });
 
-Route::bind('payPeriod', fn ($value) => \App\Models\PayPeriod::withoutCompanyScope()->findOrFail($value));
+Route::bind('payPeriod', fn ($value) => PayPeriod::withoutCompanyScope()->findOrFail($value));
 
 Route::middleware(['auth', 'can:pay_periods.view'])
     ->prefix('nomina')
@@ -144,23 +149,23 @@ Route::middleware(['auth', 'can:pay_periods.view'])
         Route::get('/{payPeriod}/excel', PayrollExportController::class)
             ->name('nomina.excel')
             ->can('payroll.export');
-    Route::get('/{payPeriod}/empleado/{employee}/comprobante', [PayrollExportController::class, 'stub'])
-        ->name('nomina.comprobante')
-        ->can('payroll.export');
-});
+        Route::get('/{payPeriod}/empleado/{employee}/comprobante', [PayrollExportController::class, 'stub'])
+            ->name('nomina.comprobante')
+            ->can('payroll.export');
+    });
 
 Route::middleware(['auth', 'can:audit.view'])
     ->get('/auditoria', AuditoriaIndex::class)
     ->name('auditoria.index');
 
-Route::middleware(['auth', 'can:backups.run'])
+Route::middleware(['auth'])
     ->prefix('respaldos')
     ->group(function () {
         Route::get('/', RespaldosIndex::class)->name('respaldos.index');
         Route::get('/{path}/descargar', function (string $path) {
-            Gate::authorize('backups.run');
+            Gate::allowIf(fn (User $user): bool => AppServiceProvider::canManageGlobalBackups($user));
 
-            $disk = \Illuminate\Support\Facades\Storage::disk('backups');
+            $disk = Storage::disk('backups');
 
             if (! $disk->exists($path)) {
                 abort(404);
