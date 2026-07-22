@@ -6,12 +6,23 @@ use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LogicException;
 
 class RawMark extends Model
 {
     use BelongsToCompany, HasFactory;
 
     public const SOURCE_MANUAL = 'manual';
+
+    private const IMMUTABLE_EVIDENCE_FIELDS = [
+        'company_id',
+        'pay_period_id',
+        'uploaded_file_id',
+        'employee_external_id',
+        'raw_line',
+        'source',
+        'row_number',
+    ];
 
     protected $fillable = [
         'company_id',
@@ -34,6 +45,15 @@ class RawMark extends Model
             'event_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $rawMark): void {
+            if ($rawMark->isDirty(self::IMMUTABLE_EVIDENCE_FIELDS)) {
+                throw new LogicException('Attendance source evidence is immutable after creation.');
+            }
+        });
     }
 
     public function company(): BelongsTo
