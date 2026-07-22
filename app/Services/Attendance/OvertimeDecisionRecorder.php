@@ -17,8 +17,6 @@ use Illuminate\Validation\ValidationException;
 
 class OvertimeDecisionRecorder
 {
-    private const LOCKED_PERIOD_STATUSES = ['processing', 'processed', 'approved', 'exported', 'cancelled'];
-
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceShiftAnalyzer $analyzer,
@@ -123,7 +121,7 @@ class OvertimeDecisionRecorder
             || $employee->company_id !== $payPeriod->company_id
             || $date->lt($payPeriod->start_date->startOfDay())
             || $date->gt($payPeriod->end_date)
-            || in_array($payPeriod->status, self::LOCKED_PERIOD_STATUSES, true)) {
+            || in_array($payPeriod->status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true)) {
             throw ValidationException::withMessages([
                 'pay_period' => 'El período, empleado o fecha laboral no admite decisiones.',
             ]);

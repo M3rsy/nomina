@@ -4,6 +4,7 @@ namespace App\Services\Attendance;
 
 use App\Models\Employee;
 use App\Models\EmployeeScheduleAssignment;
+use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use Carbon\CarbonImmutable;
@@ -59,6 +60,26 @@ class EmployeeScheduleAssigner
 
             $previous = $assignments->last(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->lt($from));
             $next = $assignments->first(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->gt($from));
+            $effectiveTo = $next === null
+                ? null
+                : CarbonImmutable::instance($next->effective_from)->subDay();
+            $affectedPeriods = PayPeriod::withoutCompanyScope()
+                ->withTrashed()
+                ->where('company_id', $lockedEmployee->company_id)
+                ->whereDate('end_date', '>=', $from->toDateString())
+                ->when($effectiveTo !== null, fn ($query) => $query->whereDate('start_date', '<=', $effectiveTo->toDateString()))
+                ->lockForUpdate()
+                ->get(['id', 'status']);
+
+            if ($affectedPeriods->contains(fn (PayPeriod $period): bool => in_array(
+                $period->status,
+                PayPeriod::ATTENDANCE_LOCKED_STATUSES,
+                true,
+            ))) {
+                throw ValidationException::withMessages([
+                    'schedule_effective_from' => 'La jornada no puede cambiar fechas cubiertas por un período de nómina bloqueado.',
+                ]);
+            }
 
             if ($previous !== null && ($previous->effective_to === null || $previous->effective_to->gte($from))) {
                 $previous->update(['effective_to' => $from->subDay()->toDateString()]);
@@ -69,9 +90,7 @@ class EmployeeScheduleAssigner
                 'employee_id' => $employee->id,
                 'work_schedule_profile_id' => $profile->id,
                 'effective_from' => $from->toDateString(),
-                'effective_to' => $next === null
-                    ? null
-                    : CarbonImmutable::instance($next->effective_from)->subDay()->toDateString(),
+                'effective_to' => $effectiveTo?->toDateString(),
                 'assigned_by' => $actor?->id,
                 'reason' => $reason,
             ]);
