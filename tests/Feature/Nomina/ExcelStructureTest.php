@@ -70,6 +70,46 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
         ->and($data[5][9])->toBe(0.0);
 });
 
+test('PayrollExcelExporter keeps employee identity snapshot after employee changes', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2024-01-20',
+        'end_date' => '2024-01-27',
+        'status' => 'processed',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create([
+        'external_id' => '1',
+        'first_name' => 'Juan',
+        'last_name' => 'Perez',
+    ]);
+
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2024-01-22',
+        'employee_external_id' => '1',
+        'employee_name' => 'Juan Perez',
+        'worked_hours' => 9,
+        'ordinary_hours' => 8,
+        'worked_minutes' => 540,
+        'ordinary_minutes' => 480,
+        'extra_25_minutes' => 30,
+        'extra_25_hours' => 0.5,
+    ]);
+
+    $employee->update([
+        'external_id' => '2',
+        'first_name' => 'Renamed',
+        'last_name' => 'Worker',
+    ]);
+
+    $path = (new PayrollExcelExporter)->export($payPeriod);
+    $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
+
+    expect($data[5][0])->toBe(1)
+        ->and($data[5][1])->toBe('Juan Perez');
+
+    unlink($path);
+});
+
 test('PayrollStubExporter produces expected sheet structure', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
@@ -113,6 +153,52 @@ test('PayrollStubExporter produces expected sheet structure', function () {
         ->and($data[8])->toContain('Juan Perez', 1)
         ->and($data[8][6])->toBe(0.5)
         ->and($data[9][6])->toBe(0.5);
+});
+
+test('PayrollStubExporter keeps employee identity snapshot after employee changes', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2024-01-20',
+        'end_date' => '2024-01-27',
+        'status' => 'exported',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create([
+        'external_id' => '1',
+        'first_name' => 'Juan',
+        'last_name' => 'Perez',
+    ]);
+
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2024-01-22',
+        'employee_external_id' => '1',
+        'employee_name' => 'Juan Perez',
+        'worked_hours' => 9,
+        'ordinary_hours' => 8,
+        'worked_minutes' => 540,
+        'ordinary_minutes' => 480,
+        'extra_25_minutes' => 30,
+        'extra_25_hours' => 0.5,
+    ]);
+
+    $employee->update([
+        'external_id' => '2',
+        'first_name' => 'Renamed',
+        'last_name' => 'Worker',
+    ]);
+
+    $exporter = new PayrollStubExporter;
+    $path = $exporter->export($payPeriod, $employee);
+
+    expect($exporter->filename($payPeriod, $employee))->toBe("Comprobante 1 {$payPeriod->slug}.xlsx");
+
+    $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
+
+    expect($data[1][1])->toBe('Juan Perez')
+        ->and($data[2][1])->toBe(1)
+        ->and($data[8][0])->toBe(1)
+        ->and($data[8][1])->toBe('Juan Perez');
+
+    unlink($path);
 });
 
 test('payroll exports derive exact hours and totals from canonical minutes', function () {
