@@ -47,6 +47,7 @@ draft → validating → ready → processing → processed → approved → exp
 
 - La transición a `ready` se bloquea mientras falte una asignación de jornada, existan marcas ambiguas o pares incompletos, o haya candidatos de hora extra pendientes de autorización o rechazo.
 - Los estados `processing`, `processed`, `approved`, `exported` y `cancelled` bloquean cualquier entrada que pueda alterar la asistencia calculada, incluidas marcas y asignaciones de jornada efectivas.
+- La empresa de un empleado es inmutable después de crearlo porque identifica toda su historia de asistencia. Un traslado futuro debe modelar afiliaciones efectivas sin reescribir registros anteriores.
 - Solo un período `processed` puede reabrirse. La reapertura exige permiso y motivo, elimina los resultados derivados obsoletos, registra actor y fecha, y devuelve el período a `validating`.
 - `approved`, `exported` y `cancelled` permanecen inmutables; `cancelled` es un estado terminal fuera del flujo principal mostrado arriba.
 

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
+use LogicException;
 
 class Employee extends Model
 {
@@ -61,6 +62,10 @@ class Employee extends Model
     protected static function booted(): void
     {
         static::updating(function (self $employee): void {
+            if ($employee->isDirty('company_id')) {
+                throw new LogicException('Employee company is immutable after creation.');
+            }
+
             if (static::$withoutRevisions) {
                 return;
             }

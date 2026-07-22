@@ -11,22 +11,16 @@
         <form wire:submit="save" class="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
             <div class="space-y-5">
                 @if ($isSuperAdmin)
-                    <label for="company_id" class="block space-y-1.5">
+                    <div class="block space-y-1.5">
                         <span class="text-sm font-semibold text-slate-800">Empresa</span>
-                        <select
-                            id="company_id"
-                            wire:model.live="company_id"
-                            class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                        >
-                            <option value="">Seleccione...</option>
-                            @foreach ($companies as $company)
-                                <option value="{{ $company->id }}">{{ $company->name }}</option>
-                            @endforeach
-                        </select>
+                        <p class="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700">
+                            {{ $employee->company->name }}
+                        </p>
+                        <p class="text-xs text-slate-500">La empresa forma parte del historial del empleado y no puede cambiarse desde esta edición.</p>
                         @error('company_id')
                             <p id="company_id-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
                         @enderror
-                    </label>
+                    </div>
                 @endif
 
                 <div class="grid gap-5 sm:grid-cols-2">
