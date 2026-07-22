@@ -125,6 +125,39 @@ test('an imported overnight exit remains valid in its starting pay period', func
         ->and($importedExit->fresh()->notes)->toBeNull();
 });
 
+test('an imported overnight exit can be corrected beyond the default day boundary', function () {
+    $this->lockedPeriod->update(['status' => 'validating']);
+    $this->exit->update(['status' => 'deleted']);
+    $assignment = $this->employee->scheduleAssignments()->firstOrFail();
+    $profile = WorkScheduleProfile::findOrFail($assignment->work_schedule_profile_id);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 2,
+        'is_working_day' => false,
+        'start_time' => null,
+        'end_time' => null,
+        'base_ordinary_hours' => 0,
+    ]);
+    $lockedFile = UploadedFile::query()->where('pay_period_id', $this->lockedPeriod->id)->firstOrFail();
+    $importedExit = RawMark::factory()->forCompany($this->company)->forPayPeriod($this->lockedPeriod)
+        ->forUploadedFile($lockedFile)->forEmployee($this->employee)->create([
+            'event_at' => '2026-07-21 06:00:00',
+            'status' => 'valid',
+        ]);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $this->lockedPeriod])
+        ->set('editRawMarkId', $importedExit->id)
+        ->set('editEventAt', '2026-07-21 10:00:00')
+        ->set('editReason', 'La salida observada ocurrió cuatro horas después')
+        ->call('saveEditRawMark')
+        ->assertHasNoErrors();
+
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($this->employee, '2026-07-20');
+
+    expect($importedExit->fresh()->status)->toBe('corrected')
+        ->and($occurrence->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($occurrence->exitMark()?->id)->toBe($importedExit->id);
+});
+
 test('a corrected manual overnight exit remains valid in its starting pay period', function () {
     $this->lockedPeriod->update(['status' => 'validating']);
     $this->exit->update(['status' => 'deleted']);

@@ -53,12 +53,20 @@ class ShiftOccurrenceResolver
                 2 => ShiftOccurrence::RESOLVED,
                 default => ShiftOccurrence::AMBIGUOUS,
             },
-            factGeneration: $this->factGenerations->current($employee, $date),
+            // Adjacent facts can move a boundary, so they also invalidate this occurrence identity.
+            factGeneration: $this->factGenerations->currentForDates($employee, [
+                $date->subDay(),
+                $date,
+                $date->addDay(),
+            ]),
         );
     }
 
-    public function workDateFor(Employee $employee, CarbonInterface|string $eventAt): CarbonImmutable
-    {
+    public function workDateFor(
+        Employee $employee,
+        CarbonInterface|string $eventAt,
+        ?int $ignoreRawMarkId = null,
+    ): CarbonImmutable {
         $instant = CarbonImmutable::parse($eventAt);
         $calendarDate = $instant->startOfDay();
 
@@ -70,7 +78,13 @@ class ShiftOccurrenceResolver
                 continue;
             }
 
-            [, , $windowStart, $windowEnd] = $this->bounds($employee, $workDate, $schedule);
+            [, , $windowStart, $windowEnd] = $this->bounds(
+                $employee,
+                $workDate,
+                $schedule,
+                $instant,
+                $ignoreRawMarkId,
+            );
 
             if ($instant->gte($windowStart) && $instant->lt($windowEnd)) {
                 return $workDate;
@@ -97,22 +111,99 @@ class ShiftOccurrenceResolver
     /**
      * @return array{CarbonImmutable|null, CarbonImmutable|null, CarbonImmutable, CarbonImmutable}
      */
-    private function bounds(Employee $employee, CarbonImmutable $date, WorkSchedule $schedule): array
-    {
+    private function bounds(
+        Employee $employee,
+        CarbonImmutable $date,
+        WorkSchedule $schedule,
+        ?CarbonImmutable $probe = null,
+        ?int $ignoreRawMarkId = null,
+    ): array {
         [$start, $end] = $this->scheduledInterval($date, $schedule);
 
         return [
             $start,
             $end,
-            $this->boundaryBetween($employee, $date->subDay(), $date),
-            $this->boundaryBetween($employee, $date, $date->addDay()),
+            $this->boundaryBetween($employee, $date->subDay(), $date, $probe, $ignoreRawMarkId),
+            $this->boundaryBetween($employee, $date, $date->addDay(), $probe, $ignoreRawMarkId),
         ];
     }
 
-    private function boundaryBetween(Employee $employee, CarbonImmutable $leftDate, CarbonImmutable $rightDate): CarbonImmutable
-    {
+    private function boundaryBetween(
+        Employee $employee,
+        CarbonImmutable $leftDate,
+        CarbonImmutable $rightDate,
+        ?CarbonImmutable $probe = null,
+        ?int $ignoreRawMarkId = null,
+    ): CarbonImmutable {
         [$leftStart, $scheduledEnd] = $this->assignedInterval($employee, $leftDate);
         [$rightStart, $rightEnd] = $this->assignedInterval($employee, $rightDate);
+        $boundary = $this->defaultBoundary(
+            $leftDate,
+            $leftStart,
+            $scheduledEnd,
+            $rightDate,
+            $rightStart,
+            $rightEnd,
+        );
+
+        if (! $this->canBridgeOvernightPair($employee, $leftStart, $scheduledEnd, $rightDate, $rightStart, $rightEnd)) {
+            return $boundary;
+        }
+
+        $windowStart = $this->defaultBoundaryBetween($employee, $leftDate->subDay(), $leftDate);
+        $windowEnd = $this->defaultBoundaryBetween($employee, $rightDate, $rightDate->addDay());
+        $markInstants = RawMark::withoutCompanyScope()
+            ->where('company_id', $employee->company_id)
+            ->where('employee_id', $employee->id)
+            ->whereIn('status', ['valid', 'corrected'])
+            ->when($ignoreRawMarkId !== null, fn ($query) => $query->whereKeyNot($ignoreRawMarkId))
+            ->where('event_at', '>=', $windowStart)
+            ->where('event_at', '<', $windowEnd)
+            ->orderBy('event_at')
+            ->pluck('event_at')
+            ->map(fn ($eventAt): CarbonImmutable => CarbonImmutable::parse($eventAt));
+
+        if ($probe !== null
+            && $probe->gte($windowStart)
+            && $probe->lt($windowEnd)
+            && ! $markInstants->contains(fn (CarbonImmutable $instant): bool => $instant->equalTo($probe))) {
+            $markInstants->push($probe);
+        }
+
+        $leftMarks = $markInstants->filter(fn (CarbonImmutable $instant): bool => $instant->lt($boundary));
+        $rightMarks = $markInstants->filter(fn (CarbonImmutable $instant): bool => $instant->gte($boundary));
+
+        return $leftMarks->count() === 1 && $rightMarks->count() === 1
+            ? $rightMarks->first()->addSecond()
+            : $boundary;
+    }
+
+    private function defaultBoundaryBetween(
+        Employee $employee,
+        CarbonImmutable $leftDate,
+        CarbonImmutable $rightDate,
+    ): CarbonImmutable {
+        [$leftStart, $scheduledEnd] = $this->assignedInterval($employee, $leftDate);
+        [$rightStart, $rightEnd] = $this->assignedInterval($employee, $rightDate);
+
+        return $this->defaultBoundary(
+            $leftDate,
+            $leftStart,
+            $scheduledEnd,
+            $rightDate,
+            $rightStart,
+            $rightEnd,
+        );
+    }
+
+    private function defaultBoundary(
+        CarbonImmutable $leftDate,
+        ?CarbonImmutable $leftStart,
+        ?CarbonImmutable $scheduledEnd,
+        CarbonImmutable $rightDate,
+        ?CarbonImmutable $rightStart,
+        ?CarbonImmutable $rightEnd,
+    ): CarbonImmutable {
 
         // Without a following shift, measure from the prior exit so a late exit remains a post-shift candidate.
         $leftAnchor = $leftDate->addHours(12);
@@ -131,6 +222,29 @@ class ShiftOccurrenceResolver
         return $scheduledEnd !== null && $boundary->lte($scheduledEnd)
             ? $scheduledEnd->addSecond()
             : $boundary;
+    }
+
+    private function canBridgeOvernightPair(
+        Employee $employee,
+        ?CarbonImmutable $leftStart,
+        ?CarbonImmutable $scheduledEnd,
+        CarbonImmutable $rightDate,
+        ?CarbonImmutable $rightStart,
+        ?CarbonImmutable $rightEnd,
+    ): bool {
+        if ($leftStart === null
+            || $scheduledEnd === null
+            || $rightStart !== null
+            || $rightEnd !== null
+            || $leftStart->isSameDay($scheduledEnd)
+            || ! $scheduledEnd->isSameDay($rightDate)) {
+            return false;
+        }
+
+        $assignment = $this->assignmentFor($employee, $rightDate);
+        $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $rightDate);
+
+        return $schedule !== null && ! $schedule->is_working_day;
     }
 
     /** @return array{CarbonImmutable|null, CarbonImmutable|null} */

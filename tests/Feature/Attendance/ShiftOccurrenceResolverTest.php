@@ -7,6 +7,7 @@ use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\ShiftOccurrence;
@@ -134,6 +135,60 @@ test('keeps a late overnight exit on its starting work date before a non-working
         ->and($nonWorkingDay->entryMark()?->event_at->toDateTimeString())->toBe('2026-07-21 10:00:00')
         ->and($resolver->workDateFor($employee, '2026-07-21 06:30:00')->toDateString())->toBe('2026-07-20')
         ->and($resolver->workDateFor($employee, '2026-07-21 10:00:00')->toDateString())->toBe('2026-07-21');
+});
+
+test('bridges one very late overnight exit across a non-working day boundary', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+        'base_ordinary_hours' => 12,
+    ]);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 2,
+        'is_working_day' => false,
+        'start_time' => null,
+        'end_time' => null,
+        'base_ordinary_hours' => 0,
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Turno nocturno');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-21',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+
+    foreach (['2026-07-20 18:00:00', '2026-07-21 10:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]);
+    }
+
+    $resolver = app(ShiftOccurrenceResolver::class);
+    $overnight = $resolver->resolve($employee, '2026-07-20');
+    $nonWorkingDay = $resolver->resolve($employee, '2026-07-21');
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($overnight);
+    $candidateKey = $analysis->overtimeCandidates->first()?->key;
+
+    expect($overnight->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($overnight->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-21 10:00:00')
+        ->and($analysis->overtimeCandidates->first()?->kind)->toBe('post_shift')
+        ->and($analysis->overtimeCandidates->first()?->minutes)->toBe(240)
+        ->and($nonWorkingDay->status)->toBe(ShiftOccurrence::NO_MARKS)
+        ->and($resolver->workDateFor($employee, '2026-07-21 10:00:00')->toDateString())->toBe('2026-07-20');
+
+    app(AttendanceFactGenerationTracker::class)->advance($employee, '2026-07-21');
+    $newCandidateKey = app(AttendanceShiftAnalyzer::class)
+        ->analyze($resolver->resolve($employee, '2026-07-20'))
+        ->overtimeCandidates
+        ->first()?->key;
+
+    expect($newCandidateKey)->not->toBe($candidateKey);
 });
 
 test('reports incomplete and ambiguous mark pairs instead of guessing', function () {

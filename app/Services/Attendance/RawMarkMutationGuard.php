@@ -69,7 +69,7 @@ class RawMarkMutationGuard
             if ($nextEmployee !== null) {
                 $affectedOccurrences->push([
                     'employee' => $nextEmployee,
-                    'work_date' => $this->resolver->workDateFor($nextEmployee, $nextEventAt),
+                    'work_date' => $this->resolver->workDateFor($nextEmployee, $nextEventAt, $lockedMark->id),
                 ]);
             }
 

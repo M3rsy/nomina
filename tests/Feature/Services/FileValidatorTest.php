@@ -115,6 +115,13 @@ test('validator accepts a next-day exit whose overnight work date is inside the 
         'end_time' => '06:00',
         'base_ordinary_hours' => 12,
     ]);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 2,
+        'is_working_day' => false,
+        'start_time' => null,
+        'end_time' => null,
+        'base_ordinary_hours' => 0,
+    ]);
     $employee = Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Turno nocturno');
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
@@ -128,7 +135,7 @@ test('validator accepts a next-day exit whose overnight work date is inside the 
 
     $report = app(FileValidator::class)->validate($uploadedFile, collect([
         buildPayload('13767', '2026-07-20 18:00:00', 1),
-        buildPayload('13767', '2026-07-21 06:00:00', 2),
+        buildPayload('13767', '2026-07-21 10:00:00', 2),
     ]));
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
 
@@ -139,7 +146,7 @@ test('validator accepts a next-day exit whose overnight work date is inside the 
         ->toBe(['valid', 'valid'])
         ->and($occurrence->status)->toBe('resolved')
         ->and($occurrence->entryMark()?->event_at->toDateTimeString())->toBe('2026-07-20 18:00:00')
-        ->and($occurrence->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-21 06:00:00');
+        ->and($occurrence->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-21 10:00:00');
 });
 
 test('validator marks unknown employee records', function () {
