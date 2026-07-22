@@ -81,6 +81,25 @@
                 Este período está bloqueado (estado: {{ $payPeriod->status }}) y no permite modificaciones.
             </div>
         @endif
+
+        @if ($readinessBlockers !== [])
+            <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950" role="alert">
+                <p class="font-bold">Revisión obligatoria pendiente: {{ count($readinessBlockers) }} {{ count($readinessBlockers) === 1 ? 'caso' : 'casos' }}</p>
+                <p class="mt-1 text-rose-800">El período no puede marcarse como listo hasta resolver cada caso.</p>
+                <ul class="mt-3 space-y-2">
+                    @foreach (array_slice($readinessBlockers, 0, 10) as $blocker)
+                        <li class="rounded-lg border border-rose-200 bg-white/70 px-3 py-2">
+                            <span class="font-semibold">{{ $blocker['employee_name'] }}</span>
+                            <span class="text-rose-700">({{ $blocker['employee_external_id'] }}) · {{ \Carbon\CarbonImmutable::parse($blocker['work_date'])->format('d/m/Y') }}</span>
+                            <span class="block text-rose-900">{{ $this->readinessBlockerLabel($blocker['code']) }}</span>
+                        </li>
+                    @endforeach
+                </ul>
+                @if (count($readinessBlockers) > 10)
+                    <p class="mt-2 text-rose-800">Se muestran los primeros 10 casos.</p>
+                @endif
+            </div>
+        @endif
     </header>
 
     <section class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

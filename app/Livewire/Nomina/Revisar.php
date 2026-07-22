@@ -6,7 +6,9 @@ use App\Models\Employee;
 use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\PayrollRules;
+use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
@@ -67,6 +69,8 @@ class Revisar extends Component
     public bool $showReadyConfirm = false;
 
     public ?string $readyMessage = null;
+
+    public array $readinessBlockers = [];
 
     public bool $locked = false;
 
@@ -162,7 +166,7 @@ class Revisar extends Component
             'editEventAt' => ['required', 'date'],
         ]);
 
-        $newEventAt = \Carbon\Carbon::parse($validated['editEventAt']);
+        $newEventAt = Carbon::parse($validated['editEventAt']);
         $oldEventAt = $rawMark->event_at;
         $payPeriodStart = $this->payPeriod->start_date;
         $payPeriodEnd = $this->payPeriod->end_date;
@@ -433,6 +437,10 @@ class Revisar extends Component
             return;
         }
 
+        if ($this->loadReadinessBlockers()) {
+            return;
+        }
+
         $message = $this->readinessMessage();
 
         if ($message !== null) {
@@ -463,6 +471,18 @@ class Revisar extends Component
     public function isBlocked(): bool
     {
         return in_array($this->payPeriod->status, ['approved', 'exported', 'cancelled'], true);
+    }
+
+    public function readinessBlockerLabel(string $code): string
+    {
+        return match ($code) {
+            'pending_overtime_candidate' => 'Candidato de hora extra sin aprobar o rechazar',
+            'ambiguous' => 'Más de dos marcas; no se puede determinar entrada y salida',
+            'missing_pair' => 'Falta la marca de entrada o salida',
+            'missing_assignment' => 'El empleado no tiene una jornada asignada',
+            'missing_schedule' => 'La jornada asignada no define este día',
+            default => 'La asistencia necesita revisión',
+        };
     }
 
     public function statusClass(string $status): string
@@ -646,11 +666,30 @@ class Revisar extends Component
 
     private function moveToReady(): void
     {
+        if ($this->loadReadinessBlockers()) {
+            return;
+        }
+
         $this->payPeriod->update(['status' => 'ready']);
 
         $this->showReadyConfirm = false;
         $this->readyMessage = null;
 
         session()->flash('success', 'Período listo para procesar.');
+    }
+
+    private function loadReadinessBlockers(): bool
+    {
+        $this->readinessBlockers = app(PayrollReadinessChecker::class)
+            ->blockers($this->payPeriod)
+            ->values()
+            ->all();
+
+        if ($this->readinessBlockers !== []) {
+            $this->showReadyConfirm = false;
+            $this->readyMessage = null;
+        }
+
+        return $this->readinessBlockers !== [];
     }
 }
