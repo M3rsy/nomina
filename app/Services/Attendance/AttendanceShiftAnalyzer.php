@@ -17,14 +17,30 @@ class AttendanceShiftAnalyzer
     public function analyze(ShiftOccurrence $occurrence, bool $isHoliday = false): AttendanceShiftAnalysis
     {
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
+            $scheduledMinutes = 0;
+            $scheduledRates = new BandSplit;
+
+            if ($occurrence->status === ShiftOccurrence::NO_MARKS
+                && $occurrence->scheduledStart !== null
+                && $occurrence->scheduledEnd !== null) {
+                $scheduledMinutes = $this->minutes($occurrence->scheduledStart, $occurrence->scheduledEnd);
+                $scheduledRates = $this->ratesFor(
+                    $occurrence,
+                    $occurrence->scheduledStart,
+                    $occurrence->scheduledEnd,
+                    false,
+                    $isHoliday,
+                );
+            }
+
             return new AttendanceShiftAnalysis(
                 $occurrence->status,
                 $occurrence->workDate,
                 null,
                 null,
                 0,
-                0,
-                new BandSplit,
+                $scheduledMinutes,
+                $scheduledRates,
                 collect(),
                 collect(),
                 $isHoliday,

@@ -145,17 +145,17 @@ class Procesar extends Component
             });
 
         $totals = (clone $query)->selectRaw(
-            'count(*) as total_records, count(distinct employee_id) as total_employees, sum(ordinary_hours) as ordinary_hours, sum(extra_25_hours) as extra_25_hours, sum(extra_50_hours) as extra_50_hours, sum(extra_75_hours) as extra_75_hours, sum(extra_100_hours) as extra_100_hours'
+            'count(*) as total_records, count(distinct employee_id) as total_employees, sum(ordinary_minutes) as ordinary_minutes, sum(extra_25_minutes) as extra_25_minutes, sum(extra_50_minutes) as extra_50_minutes, sum(extra_75_minutes) as extra_75_minutes, sum(extra_100_minutes) as extra_100_minutes'
         )->first();
 
         return [
             'total_employees' => (int) ($totals?->total_employees ?? 0),
             'total_records' => (int) ($totals?->total_records ?? 0),
-            'ordinary_hours' => (float) ($totals?->ordinary_hours ?? 0),
-            'extra_25_hours' => (float) ($totals?->extra_25_hours ?? 0),
-            'extra_50_hours' => (float) ($totals?->extra_50_hours ?? 0),
-            'extra_75_hours' => (float) ($totals?->extra_75_hours ?? 0),
-            'extra_100_hours' => (float) ($totals?->extra_100_hours ?? 0),
+            'ordinary_hours' => (int) ($totals?->ordinary_minutes ?? 0) / 60,
+            'extra_25_hours' => (int) ($totals?->extra_25_minutes ?? 0) / 60,
+            'extra_50_hours' => (int) ($totals?->extra_50_minutes ?? 0) / 60,
+            'extra_75_hours' => (int) ($totals?->extra_75_minutes ?? 0) / 60,
+            'extra_100_hours' => (int) ($totals?->extra_100_minutes ?? 0) / 60,
         ];
     }
 }
