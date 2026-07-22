@@ -8,6 +8,7 @@ use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
+use App\Services\Attendance\FullDayAbsenceSnapshot;
 use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\ShiftOccurrence;
 use Carbon\CarbonImmutable;
@@ -166,7 +167,10 @@ test('keeps a scheduled day with no marks as an unpaid absence', function () {
 
 test('credits the configured scheduled minutes for a justified full-day absence', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks();
-    $absence = (new JustifiedAbsence)->forceFill(['reason' => 'permission']);
+    $absence = (new JustifiedAbsence)->forceFill([
+        'reason' => 'permission',
+        ...FullDayAbsenceSnapshot::from($occurrence, $analysis)->attributes(),
+    ]);
 
     $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
 
@@ -179,12 +183,25 @@ test('credits the configured scheduled minutes for a justified full-day absence'
         ->and($evaluation->payableRates->ordinaryMinutes)->toBe(480);
 });
 
+test('does not credit a legacy absence without the current schedule snapshot', function () {
+    [$occurrence, $analysis] = payrollShiftWithoutMarks();
+    $absence = (new JustifiedAbsence)->forceFill(['reason' => 'permission']);
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
+
+    expect($evaluation->isJustified)->toBeFalse()
+        ->and($evaluation->recognizedMinutes)->toBe(0);
+});
+
 test('preserves scheduled rate bands for a justified overnight absence', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks(
         scheduledStart: '18:00',
         scheduledEnd: '06:00',
     );
-    $absence = (new JustifiedAbsence)->forceFill(['reason' => 'permission']);
+    $absence = (new JustifiedAbsence)->forceFill([
+        'reason' => 'permission',
+        ...FullDayAbsenceSnapshot::from($occurrence, $analysis)->attributes(),
+    ]);
 
     $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
 

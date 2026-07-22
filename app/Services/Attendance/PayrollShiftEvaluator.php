@@ -43,7 +43,14 @@ class PayrollShiftEvaluator
             $scheduledMinutes = $hasScheduledInterval
                 ? $analysis->scheduledMinutes
                 : (int) round((float) $occurrence->schedule->base_ordinary_hours * 60);
-            $isJustified = $absence !== null;
+            try {
+                $absenceSnapshot = FullDayAbsenceSnapshot::from($occurrence, $analysis);
+            } catch (\InvalidArgumentException) {
+                $absenceSnapshot = null;
+            }
+            $isJustified = $absence !== null
+                && $absenceSnapshot !== null
+                && $absenceSnapshot->matches($absence);
             $payableRates = $isJustified
                 ? ($hasScheduledInterval
                     ? $analysis->scheduledRates
@@ -59,7 +66,11 @@ class PayrollShiftEvaluator
                 isAbsence: true,
                 isJustified: $isJustified,
                 unjustified: ! $isJustified,
-                metadata: $isJustified ? ['absence_reason' => $absence->reason] : [],
+                metadata: $isJustified ? [
+                    'justified_absence_id' => $absence->id,
+                    'absence_reason' => $absence->reason,
+                    'absence_schedule_fingerprint' => $absence->schedule_fingerprint,
+                ] : [],
             );
         }
 
