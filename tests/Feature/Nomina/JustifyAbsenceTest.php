@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
@@ -24,8 +25,11 @@ beforeEach(function () {
 
 test('justifyAbsence creates a justified absence with reason and notes', function () {
     $company = Company::factory()->create();
-    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
-    $employee = Employee::factory()->forCompany($company)->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-11',
+    ]);
+    $employee = absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     $this->actingAs($admin);
@@ -46,7 +50,20 @@ test('justifyAbsence creates a justified absence with reason and notes', functio
     expect($absence)->not->toBeNull()
         ->and($absence->reason)->toBe('permission')
         ->and($absence->notes)->toBe('Personal matters')
-        ->and($absence->justified_by)->toBe($admin->id);
+        ->and($absence->justified_by)->toBe($admin->id)
+        ->and($absence->scheduled_start->format('Y-m-d H:i'))->toBe('2026-01-05 06:00')
+        ->and($absence->scheduled_end->format('Y-m-d H:i'))->toBe('2026-01-05 14:00')
+        ->and($absence->scheduled_minutes)->toBe(480)
+        ->and($absence->rate_minutes)->toBe([
+            'ordinary' => 480,
+            'extra25' => 0,
+            'extra50' => 0,
+            'extra75' => 0,
+            'extra100' => 0,
+        ])
+        ->and($absence->metadata['revisions'])->toHaveCount(1)
+        ->and($absence->metadata['revisions'][0]['old_values'])->toBeNull()
+        ->and($absence->metadata['revisions'][0]['new_values']['reason'])->toBe('permission');
 });
 
 test('justifyAbsence cannot write after the period becomes processed', function () {
@@ -79,8 +96,11 @@ test('justifyAbsence cannot write after the period becomes processed', function 
 
 test('justifyAbsence upserts existing absence for same employee and date', function () {
     $company = Company::factory()->create();
-    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
-    $employee = Employee::factory()->forCompany($company)->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-11',
+    ]);
+    $employee = absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     JustifiedAbsence::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
@@ -107,9 +127,78 @@ test('justifyAbsence upserts existing absence for same employee and date', funct
     expect($absence)->not->toBeNull()
         ->and($absence->reason)->toBe('holiday')
         ->and($absence->notes)->toBe('Updated note')
-        ->and($absence->justified_by)->toBe($admin->id);
+        ->and($absence->justified_by)->toBe($admin->id)
+        ->and($absence->metadata['revisions'])->toHaveCount(1)
+        ->and($absence->metadata['revisions'][0]['old_values']['reason'])->toBe('other')
+        ->and($absence->metadata['revisions'][0]['old_values']['notes'])->toBe('Original note')
+        ->and($absence->metadata['revisions'][0]['new_values']['reason'])->toBe('holiday')
+        ->and($absence->metadata['revisions'][0]['new_values']['scheduled_minutes'])->toBe(480);
 
     expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(1);
+});
+
+test('a full day justification becomes stale when the assigned schedule changes', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-05',
+        'status' => 'validating',
+    ]);
+    $employee = absenceEmployeeWithDefaultSchedule($company);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->set('absenceReason', 'permission')
+        ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission', 'Turno diurno autorizado')
+        ->assertHasNoErrors();
+
+    $initial = app(PayrollShiftEvaluationResolver::class)->resolve($payPeriod, $employee, '2026-01-05');
+
+    expect($initial->isJustified)->toBeTrue()
+        ->and($initial->recognizedMinutes)->toBe(480);
+
+    $nightProfile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($nightProfile)->create([
+        'day_of_week' => 1,
+        'is_working_day' => true,
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+        'base_ordinary_hours' => 12,
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $nightProfile,
+        '2026-01-05',
+        'Cambio a turno nocturno',
+        $admin,
+    );
+
+    $stale = app(PayrollShiftEvaluationResolver::class)->resolve($payPeriod, $employee, '2026-01-05');
+
+    expect($stale->isJustified)->toBeFalse()
+        ->and($stale->recognizedMinutes)->toBe(0);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->set('absenceReason', 'permission')
+        ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission', 'Turno nocturno autorizado')
+        ->assertHasNoErrors();
+
+    $renewed = app(PayrollShiftEvaluationResolver::class)->resolve($payPeriod, $employee, '2026-01-05');
+    $absence = JustifiedAbsence::withoutCompanyScope()
+        ->where('pay_period_id', $payPeriod->id)
+        ->where('employee_id', $employee->id)
+        ->firstOrFail();
+
+    expect($renewed->isJustified)->toBeTrue()
+        ->and($renewed->recognizedMinutes)->toBe(720)
+        ->and($renewed->payableRates->extra50Minutes)->toBe(360)
+        ->and($renewed->payableRates->extra75Minutes)->toBe(360)
+        ->and($absence->metadata['revisions'])->toHaveCount(2)
+        ->and($absence->metadata['revisions'][0]['new_values']['schedule_fingerprint'])
+        ->not->toBe($absence->metadata['revisions'][1]['new_values']['schedule_fingerprint']);
 });
 
 test('justifyAbsence validates reason against allowed values', function () {
@@ -211,15 +300,12 @@ test('detectFaltas pairs justified absence with falta', function () {
     $employee = absenceEmployeeWithDefaultSchedule($company);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    JustifiedAbsence::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
-        'date' => '2026-01-05',
-        'reason' => 'permission',
-    ]);
-
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->set('absenceReason', 'permission')
+        ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission')
         ->assertViewHas('faltas', function ($faltas) use ($employee) {
             $mondayFalta = $faltas->first(function ($falta) {
                 return $falta['date']->toDateString() === '2026-01-05';
