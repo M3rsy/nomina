@@ -130,6 +130,7 @@ test('an unknown exit cannot be assigned into a locked overnight work date', fun
         ->set('assignRawMarkId', $this->exit->id)
         ->set('assignEmployeeId', $this->employee->id)
         ->set('assignApplyAll', false)
+        ->set('assignReason', 'Código verificado contra el legajo')
         ->call('saveAssign')
         ->assertHasErrors(['raw_mark']);
 
@@ -153,6 +154,7 @@ test('assigning every matching code rolls back when one mark belongs to a locked
         ->set('assignRawMarkId', $safeMark->id)
         ->set('assignEmployeeId', $this->employee->id)
         ->set('assignApplyAll', true)
+        ->set('assignReason', 'Código verificado para todas las marcas')
         ->call('saveAssign')
         ->assertHasErrors(['raw_mark']);
 
