@@ -10,6 +10,9 @@ use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\ManualRawMarkRecorder;
+use App\Services\Attendance\ShiftOccurrence;
+use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Livewire\Livewire;
@@ -98,6 +101,34 @@ test('an overnight exit remains editable while every affected period is open', f
 
     expect($this->exit->fresh()->event_at->toDateTimeString())->toBe('2026-07-21 06:15:00')
         ->and($this->exit->fresh()->status)->toBe('corrected');
+});
+
+test('a corrected manual overnight exit remains valid in its starting pay period', function () {
+    $this->lockedPeriod->update(['status' => 'validating']);
+    $this->exit->delete();
+
+    $manualExit = app(ManualRawMarkRecorder::class)->record(
+        $this->lockedPeriod,
+        $this->employee,
+        '2026-07-20',
+        '2026-07-21 06:00:00',
+        'El reloj omitió la salida real',
+        $this->admin,
+    );
+
+    Livewire::test(Revisar::class, ['payPeriod' => $this->lockedPeriod])
+        ->set('editRawMarkId', $manualExit->id)
+        ->set('editEventAt', '2026-07-21 06:15:00')
+        ->set('editReason', 'La salida real ocurrió quince minutos después')
+        ->call('saveEditRawMark')
+        ->assertHasNoErrors();
+
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($this->employee, '2026-07-20');
+
+    expect($manualExit->fresh()->status)->toBe('corrected')
+        ->and($manualExit->fresh()->notes)->toBeNull()
+        ->and($occurrence->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($occurrence->exitMark()?->id)->toBe($manualExit->id);
 });
 
 test('an exit stored in the next period cannot be deleted from a locked overnight work date', function () {
