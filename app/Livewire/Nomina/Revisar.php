@@ -24,6 +24,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
@@ -299,18 +300,20 @@ class Revisar extends Component
 
         $this->authorize('delete', $rawMark);
 
-        $revisions = $rawMark->metadata['revisions'] ?? [];
-        $revisions[] = [
-            'action' => 'delete',
-            'user_id' => Auth::id(),
-            'previous_status' => $rawMark->status,
-            'at' => now()->toDateTimeString(),
-        ];
+        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark): void {
+            $revisions = $lockedMark->metadata['revisions'] ?? [];
+            $revisions[] = [
+                'action' => 'delete',
+                'user_id' => Auth::id(),
+                'previous_status' => $lockedMark->status,
+                'at' => now()->toDateTimeString(),
+            ];
 
-        $rawMark->update([
-            'status' => 'deleted',
-            'metadata' => array_merge($rawMark->metadata ?? [], ['revisions' => $revisions]),
-        ]);
+            $lockedMark->update([
+                'status' => 'deleted',
+                'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
+            ]);
+        });
 
         $this->showDeleteModal = false;
         $this->deleteRawMarkId = null;
@@ -368,25 +371,34 @@ class Revisar extends Component
 
         $employeeId = (int) $validated['assignEmployeeId'];
         $applyAll = (bool) $validated['assignApplyAll'];
+        $employee = $this->findPeriodEmployee($employeeId);
 
-        $this->assignEmployeeToRawMark($rawMark, $employeeId);
+        if ($employee === null) {
+            $this->addError('assignEmployeeId', 'El empleado ya no está disponible.');
 
-        if ($applyAll) {
-            $rawMarks = RawMark::withoutCompanyScope()
-                ->where('company_id', $this->payPeriod->company_id)
-                ->where('pay_period_id', $this->payPeriod->id)
-                ->where('employee_external_id', $rawMark->employee_external_id)
-                ->whereNull('employee_id')
-                ->get();
-
-            foreach ($rawMarks as $mark) {
-                if ($mark->id === $rawMark->id) {
-                    continue;
-                }
-
-                $this->assignEmployeeToRawMark($mark, $employeeId);
-            }
+            return;
         }
+
+        DB::transaction(function () use ($rawMark, $employee, $applyAll): void {
+            $this->assignEmployeeToRawMark($rawMark, $employee);
+
+            if ($applyAll) {
+                $rawMarks = RawMark::withoutCompanyScope()
+                    ->where('company_id', $this->payPeriod->company_id)
+                    ->where('pay_period_id', $this->payPeriod->id)
+                    ->where('employee_external_id', $rawMark->employee_external_id)
+                    ->whereNull('employee_id')
+                    ->get();
+
+                foreach ($rawMarks as $mark) {
+                    if ($mark->id === $rawMark->id) {
+                        continue;
+                    }
+
+                    $this->assignEmployeeToRawMark($mark, $employee);
+                }
+            }
+        });
 
         $this->showAssignModal = false;
         $this->assignRawMarkId = null;
@@ -408,18 +420,20 @@ class Revisar extends Component
 
         $this->authorize('manage', $rawMark);
 
-        $revisions = $rawMark->metadata['revisions'] ?? [];
-        $revisions[] = [
-            'action' => 'mark_corrected',
-            'user_id' => Auth::id(),
-            'previous_status' => $rawMark->status,
-            'at' => now()->toDateTimeString(),
-        ];
+        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark): void {
+            $revisions = $lockedMark->metadata['revisions'] ?? [];
+            $revisions[] = [
+                'action' => 'mark_corrected',
+                'user_id' => Auth::id(),
+                'previous_status' => $lockedMark->status,
+                'at' => now()->toDateTimeString(),
+            ];
 
-        $rawMark->update([
-            'status' => 'corrected',
-            'metadata' => array_merge($rawMark->metadata ?? [], ['revisions' => $revisions]),
-        ]);
+            $lockedMark->update([
+                'status' => 'corrected',
+                'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
+            ]);
+        });
     }
 
     public function openAbsencesModal(): void
@@ -1060,24 +1074,30 @@ class Revisar extends Component
             ->find($id);
     }
 
-    private function assignEmployeeToRawMark(RawMark $rawMark, int $employeeId): void
+    private function assignEmployeeToRawMark(RawMark $rawMark, Employee $employee): void
     {
-        $revisions = $rawMark->metadata['revisions'] ?? [];
-        $revisions[] = [
-            'action' => 'assign_employee',
-            'user_id' => Auth::id(),
-            'previous_employee_id' => $rawMark->employee_id,
-            'new_employee_id' => $employeeId,
-            'at' => now()->toDateTimeString(),
-        ];
+        app(RawMarkMutationGuard::class)->mutate(
+            $rawMark,
+            function (RawMark $lockedMark) use ($employee): void {
+                $revisions = $lockedMark->metadata['revisions'] ?? [];
+                $revisions[] = [
+                    'action' => 'assign_employee',
+                    'user_id' => Auth::id(),
+                    'previous_employee_id' => $lockedMark->employee_id,
+                    'new_employee_id' => $employee->id,
+                    'at' => now()->toDateTimeString(),
+                ];
 
-        $newStatus = $rawMark->status === 'unknown_employee' ? 'corrected' : $rawMark->status;
+                $newStatus = $lockedMark->status === 'unknown_employee' ? 'corrected' : $lockedMark->status;
 
-        $rawMark->update([
-            'employee_id' => $employeeId,
-            'status' => $newStatus,
-            'metadata' => array_merge($rawMark->metadata ?? [], ['revisions' => $revisions]),
-        ]);
+                $lockedMark->update([
+                    'employee_id' => $employee->id,
+                    'status' => $newStatus,
+                    'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
+                ]);
+            },
+            targetEmployee: $employee,
+        );
     }
 
     private function readinessMessage(): ?string

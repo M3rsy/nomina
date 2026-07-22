@@ -96,3 +96,61 @@ test('an overnight exit remains editable while every affected period is open', f
     expect($this->exit->fresh()->event_at->toDateTimeString())->toBe('2026-07-21 06:15:00')
         ->and($this->exit->fresh()->status)->toBe('corrected');
 });
+
+test('an exit stored in the next period cannot be deleted from a locked overnight work date', function () {
+    Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
+        ->set('deleteRawMarkId', $this->exit->id)
+        ->call('deleteRawMark')
+        ->assertHasErrors(['raw_mark']);
+
+    expect($this->exit->fresh()->status)->toBe('valid');
+});
+
+test('an exit stored in the next period cannot be corrected for a locked overnight work date', function () {
+    Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
+        ->call('markCorrected', $this->exit->id)
+        ->assertHasErrors(['raw_mark']);
+
+    expect($this->exit->fresh()->status)->toBe('valid');
+});
+
+test('an unknown exit cannot be assigned into a locked overnight work date', function () {
+    $this->exit->update([
+        'employee_id' => null,
+        'status' => 'unknown_employee',
+    ]);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
+        ->set('assignRawMarkId', $this->exit->id)
+        ->set('assignEmployeeId', $this->employee->id)
+        ->set('assignApplyAll', false)
+        ->call('saveAssign')
+        ->assertHasErrors(['raw_mark']);
+
+    expect($this->exit->fresh()->employee_id)->toBeNull()
+        ->and($this->exit->fresh()->status)->toBe('unknown_employee');
+});
+
+test('assigning every matching code rolls back when one mark belongs to a locked work date', function () {
+    $this->exit->update([
+        'employee_id' => null,
+        'status' => 'unknown_employee',
+    ]);
+    $safeMark = RawMark::factory()->forCompany($this->company)->forPayPeriod($this->openPeriod)
+        ->forUploadedFile($this->openFile)->create([
+            'employee_external_id' => $this->exit->employee_external_id,
+            'event_at' => '2026-07-22 12:00:00',
+            'status' => 'unknown_employee',
+        ]);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
+        ->set('assignRawMarkId', $safeMark->id)
+        ->set('assignEmployeeId', $this->employee->id)
+        ->set('assignApplyAll', true)
+        ->call('saveAssign')
+        ->assertHasErrors(['raw_mark']);
+
+    expect($safeMark->fresh()->employee_id)->toBeNull()
+        ->and($safeMark->fresh()->status)->toBe('unknown_employee')
+        ->and($this->exit->fresh()->employee_id)->toBeNull();
+});
