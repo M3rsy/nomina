@@ -116,23 +116,30 @@ class FileValidator
                 $notes = 'La fecha laboral pertenece a un período bloqueado.';
             }
 
+            $markQuery = RawMark::query()
+                ->where('uploaded_file_id', $uploadedFile->id)
+                ->where('row_number', $record->row_number);
+            $markQuery->update([
+                'status' => $status,
+                'notes' => $notes,
+                'employee_id' => $employee?->id,
+            ]);
+
             if ($status === 'valid') {
-                $validCount++;
-            } else {
-                $issueCount++;
+                $occurrence = $this->shiftOccurrenceResolver->resolve($employee, $workDate);
+
+                if (! $occurrence->satisfiesManualPairInvariant()) {
+                    $status = 'invalid';
+                    $notes = 'La importación rompería un par con una marca manual auditada.';
+                    $markQuery->update(['status' => $status, 'notes' => $notes]);
+                }
             }
 
-            RawMark::query()
-                ->where('uploaded_file_id', $uploadedFile->id)
-                ->where('row_number', $record->row_number)
-                ->update([
-                    'status' => $status,
-                    'notes' => $notes,
-                    'employee_id' => $employee?->id,
-                ]);
-
             if ($status === 'valid') {
+                $validCount++;
                 $this->factGenerations->advance($employee, $workDate);
+            } else {
+                $issueCount++;
             }
         }
 

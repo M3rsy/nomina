@@ -291,3 +291,54 @@ test('validator cannot add a mark to a locked overnight work date', function () 
         ->and($newMark->notes)->toBe('La fecha laboral pertenece a un período bloqueado.')
         ->and(app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20')->marks)->toHaveCount(2);
 });
+
+test('validator rejects an imported mark that would break an active manual pair', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($profile)->create(['day_of_week' => 1]);
+    $employee = Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-01-01', 'Jornada diurna');
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $sourceFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $newFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'status' => 'pending',
+    ]);
+
+    RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+        ->forUploadedFile($sourceFile)->forEmployee($employee)->create([
+            'employee_external_id' => $employee->external_id,
+            'event_at' => '2026-01-05 06:00:00',
+            'status' => 'valid',
+        ]);
+    RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+        ->forEmployee($employee)->create([
+            'uploaded_file_id' => null,
+            'employee_external_id' => $employee->external_id,
+            'event_at' => '2026-01-05 14:00:00',
+            'raw_line' => null,
+            'source' => RawMark::SOURCE_MANUAL,
+            'row_number' => null,
+            'status' => 'corrected',
+        ]);
+    $generations = app(AttendanceFactGenerationTracker::class);
+    $generations->advance($employee, '2026-01-05');
+    $generations->advance($employee, '2026-01-05');
+
+    $report = app(FileValidator::class)->validate($newFile, collect([
+        buildPayload('13767', '2026-01-05 12:00:00', 1),
+    ]));
+    $newMark = RawMark::where('uploaded_file_id', $newFile->id)->sole();
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-01-05');
+
+    expect($report->counts['invalid_row'])->toBe(1)
+        ->and($report->counts['valid'])->toBe(0)
+        ->and($newMark->status)->toBe('invalid')
+        ->and($newMark->notes)->toBe('La importación rompería un par con una marca manual auditada.')
+        ->and($occurrence->status)->toBe('resolved')
+        ->and($occurrence->marks)->toHaveCount(2)
+        ->and($generations->current($employee, '2026-01-05'))->toBe(2);
+});
