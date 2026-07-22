@@ -108,24 +108,35 @@ class ShiftOccurrenceResolver
 
     private function boundaryBetween(Employee $employee, CarbonImmutable $leftDate, CarbonImmutable $rightDate): CarbonImmutable
     {
-        // Midpoints partition adjacent work dates; an exact scheduled exit stays with the earlier shift.
-        $boundary = $this->midpoint($this->anchorFor($employee, $leftDate), $this->anchorFor($employee, $rightDate));
-        $assignment = $this->assignmentFor($employee, $leftDate);
-        $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $leftDate);
-        [, $scheduledEnd] = $schedule === null ? [null, null] : $this->scheduledInterval($leftDate, $schedule);
+        [$leftStart, $scheduledEnd] = $this->assignedInterval($employee, $leftDate);
+        [$rightStart, $rightEnd] = $this->assignedInterval($employee, $rightDate);
+
+        // Without a following shift, measure from the prior exit so a late exit remains a post-shift candidate.
+        $leftAnchor = $leftDate->addHours(12);
+
+        if ($leftStart !== null && $scheduledEnd !== null) {
+            $leftAnchor = $rightStart === null
+                ? $scheduledEnd
+                : $this->midpoint($leftStart, $scheduledEnd);
+        }
+
+        $rightAnchor = $rightStart === null || $rightEnd === null
+            ? $rightDate->addHours(12)
+            : $this->midpoint($rightStart, $rightEnd);
+        $boundary = $this->midpoint($leftAnchor, $rightAnchor);
 
         return $scheduledEnd !== null && $boundary->lte($scheduledEnd)
             ? $scheduledEnd->addSecond()
             : $boundary;
     }
 
-    private function anchorFor(Employee $employee, CarbonImmutable $date): CarbonImmutable
+    /** @return array{CarbonImmutable|null, CarbonImmutable|null} */
+    private function assignedInterval(Employee $employee, CarbonImmutable $date): array
     {
         $assignment = $this->assignmentFor($employee, $date);
         $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $date);
-        [$start, $end] = $schedule === null ? [null, null] : $this->scheduledInterval($date, $schedule);
 
-        return $start === null ? $date->addHours(12) : $this->midpoint($start, $end);
+        return $schedule === null ? [null, null] : $this->scheduledInterval($date, $schedule);
     }
 
     private function scheduleFor(
