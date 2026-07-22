@@ -35,7 +35,7 @@ Resumen técnico de las fases de construcción y de la arquitectura vigente.
 - `Payroll/PayrollProcessor`: transiciona el período y persiste resultados canónicos en minutos; las horas decimales son valores derivados.
 - `Export`: genera Excel con phpoffice/phpspreadsheet a partir de los minutos persistidos, sin reprocesar marcas.
 
-El TXT/DAT, cada línea importada y la identidad física del archivo son evidencia inmutable. Las asignaciones, correcciones y marcas manuales actúan sobre registros normalizados y conservan actor, motivo, valores aplicados y fecha de auditoría.
+El TXT/DAT, cada línea importada y la identidad física del archivo son evidencia inmutable. Las asignaciones y correcciones actúan sobre registros normalizados y conservan actor, motivo, valores aplicados y fecha de auditoría. Una marca manual auditada solo incorpora una entrada o salida real omitida por el reloj, sin archivo, fila ni `raw_line`; no ingresa horas pagables ni reemplaza una excepción de asistencia.
 
 ## Estado de período de nómina
 
