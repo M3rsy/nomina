@@ -298,9 +298,7 @@ class Index extends Component
                         $userId = $rev['user_id'] ?? null;
                         $user = $userId ? User::find($userId) : null;
 
-                        $description = ($rev['action'] ?? null) === 'manual_create'
-                            ? "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para {$rev['work_date']} a {$rev['event_at']}. Motivo: {$rev['reason']}"
-                            : "Marca #{$rawMark->id} (empleado {$rawMark->employee_external_id}): acción {$rev['action']}";
+                        $description = $this->describeMarkRevision($rawMark, $rev);
                         $entries[] = new AuditEntry(
                             'mark_revision',
                             'Revisión de marca',
@@ -319,6 +317,28 @@ class Index extends Component
         usort($entries, fn (AuditEntry $a, AuditEntry $b) => $b->createdAt <=> $a->createdAt);
 
         return $entries;
+    }
+
+    private function describeMarkRevision(RawMark $rawMark, array $revision): string
+    {
+        $prefix = "Marca #{$rawMark->id} (empleado {$rawMark->employee_external_id})";
+        $reason = $revision['reason'] ?? 'Sin motivo registrado';
+        $oldEventAt = $revision['old_event_at'] ?? 'desconocida';
+        $newEventAt = $revision['new_event_at'] ?? 'desconocida';
+        $previousStatus = $revision['previous_status'] ?? 'desconocido';
+        $newStatus = $revision['new_status'] ?? match ($revision['action'] ?? null) {
+            'mark_corrected' => 'corrected',
+            'delete' => 'deleted',
+            default => 'desconocido',
+        };
+
+        return match ($revision['action'] ?? null) {
+            'manual_create' => "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para {$revision['work_date']} a {$revision['event_at']}. Motivo: {$reason}",
+            'edit_event_at' => "{$prefix}: fecha/hora de {$oldEventAt} a {$newEventAt}. Motivo: {$reason}",
+            'mark_corrected' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",
+            'delete' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",
+            default => "{$prefix}: acción ".($revision['action'] ?? 'desconocida').". Motivo: {$reason}",
+        };
     }
 
     private function dateIsVisible(Carbon $date): bool

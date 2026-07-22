@@ -68,6 +68,7 @@ test('edit actions are no-ops when pay period is locked', function (string $stat
         ->assertSet('showEditModal', false)
         ->set('editRawMarkId', $rawMark->id)
         ->set('editEventAt', '2026-01-05 09:00:00')
+        ->set('editReason', 'Corregir la hora observada')
         ->call('saveEditRawMark')
         ->assertHasNoErrors();
 
@@ -111,7 +112,11 @@ test('markCorrected is no-op when pay period is locked', function (string $statu
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
-        ->call('markCorrected', $rawMark->id)
+        ->call('openCorrectRawMark', $rawMark->id)
+        ->assertSet('showCorrectModal', false)
+        ->set('correctRawMarkId', $rawMark->id)
+        ->set('correctReason', 'Validación manual del estado')
+        ->call('markCorrected')
         ->assertHasNoErrors();
 
     $rawMark->refresh();
@@ -172,10 +177,12 @@ test('mutations recheck the current period status after the review was opened', 
     [$company, $payPeriod, $file, $employee, $admin, $rawMark] = setupLockedRevisar('validating');
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
-    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openCorrectRawMark', $rawMark->id)
+        ->set('correctReason', 'Validación manual del estado');
 
     $payPeriod->update(['status' => 'processing']);
-    $component->call('markCorrected', $rawMark->id)->assertHasNoErrors();
+    $component->call('markCorrected')->assertHasNoErrors();
 
     expect($rawMark->fresh()->status)->toBe('valid');
 });

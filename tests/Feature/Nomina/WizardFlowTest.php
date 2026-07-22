@@ -183,7 +183,44 @@ test('saveDraft and continueToReady are no-ops when pay period is processed or l
     'cancelled' => ['cancelled'],
 ]);
 
-test('markCorrected changes raw mark status to corrected and records audit entry', function () {
+test('editing a raw mark requires a reason and records the applied values', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $employee = Employee::factory()->forCompany($company)->create();
+    $rawMark = RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'employee_external_id' => $employee->external_id,
+        'employee_id' => $employee->id,
+        'event_at' => '2026-01-05 06:00:00',
+        'status' => 'valid',
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openEditRawMark', $rawMark->id)
+        ->set('editEventAt', '2026-01-05 06:15:00')
+        ->call('saveEditRawMark')
+        ->assertHasErrors(['editReason' => 'required']);
+
+    expect($rawMark->fresh()->event_at->toDateTimeString())->toBe('2026-01-05 06:00:00');
+
+    $component
+        ->set('editReason', 'El reloj registró una hora incorrecta')
+        ->call('saveEditRawMark')
+        ->assertHasNoErrors();
+
+    $revision = collect($rawMark->fresh()->metadata['revisions'])->last();
+
+    expect($rawMark->fresh()->event_at->toDateTimeString())->toBe('2026-01-05 06:15:00')
+        ->and($revision['action'])->toBe('edit_event_at')
+        ->and($revision['user_id'])->toBe($admin->id)
+        ->and($revision['reason'])->toBe('El reloj registró una hora incorrecta')
+        ->and($revision['old_event_at'])->toBe('2026-01-05 06:00:00')
+        ->and($revision['new_event_at'])->toBe('2026-01-05 06:15:00')
+        ->and($revision['at'])->not->toBeEmpty();
+});
+
+test('correcting a raw mark status requires a reason and records the applied values', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
 
@@ -197,8 +234,17 @@ test('markCorrected changes raw mark status to corrected and records audit entry
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
-        ->call('markCorrected', $rawMark->id)
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openCorrectRawMark', $rawMark->id)
+        ->assertSet('showCorrectModal', true)
+        ->call('markCorrected')
+        ->assertHasErrors(['correctReason' => 'required']);
+
+    expect($rawMark->fresh()->status)->toBe('valid');
+
+    $component
+        ->set('correctReason', 'Validación manual contra el reporte del supervisor')
+        ->call('markCorrected')
         ->assertHasNoErrors();
 
     $rawMark->refresh();
@@ -211,10 +257,13 @@ test('markCorrected changes raw mark status to corrected and records audit entry
 
     expect($lastAudit['action'])->toBe('mark_corrected')
         ->and($lastAudit['user_id'])->toBe($admin->id)
-        ->and($lastAudit['previous_status'])->toBe('valid');
+        ->and($lastAudit['reason'])->toBe('Validación manual contra el reporte del supervisor')
+        ->and($lastAudit['previous_status'])->toBe('valid')
+        ->and($lastAudit['new_status'])->toBe('corrected')
+        ->and($lastAudit['at'])->not->toBeEmpty();
 });
 
-test('deleteRawMark sets raw mark status to deleted and records audit entry', function () {
+test('deleting a raw mark requires a reason and records the applied values', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
 
@@ -228,10 +277,17 @@ test('deleteRawMark sets raw mark status to deleted and records audit entry', fu
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->call('openDeleteRawMark', $rawMark->id)
         ->assertSet('showDeleteModal', true)
         ->assertSet('deleteRawMarkId', $rawMark->id)
+        ->call('deleteRawMark')
+        ->assertHasErrors(['deleteReason' => 'required']);
+
+    expect($rawMark->fresh()->status)->toBe('valid');
+
+    $component
+        ->set('deleteReason', 'La marca no corresponde a un hecho real')
         ->call('deleteRawMark')
         ->assertHasNoErrors();
 
@@ -245,5 +301,8 @@ test('deleteRawMark sets raw mark status to deleted and records audit entry', fu
 
     expect($lastAudit['action'])->toBe('delete')
         ->and($lastAudit['user_id'])->toBe($admin->id)
-        ->and($lastAudit['previous_status'])->toBe('valid');
+        ->and($lastAudit['reason'])->toBe('La marca no corresponde a un hecho real')
+        ->and($lastAudit['previous_status'])->toBe('valid')
+        ->and($lastAudit['new_status'])->toBe('deleted')
+        ->and($lastAudit['at'])->not->toBeEmpty();
 });
