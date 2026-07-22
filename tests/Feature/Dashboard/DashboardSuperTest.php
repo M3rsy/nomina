@@ -84,18 +84,29 @@ test('monthly payroll trends aggregate exact active-company values in chronologi
             'extra_50_hours' => 2,
             'extra_75_hours' => 3,
             'extra_100_hours' => 4,
+            'ordinary_minutes' => 450,
+            'extra_25_minutes' => 60,
+            'extra_50_minutes' => 120,
+            'extra_75_minutes' => 180,
+            'extra_100_minutes' => 240,
         ],
         [
             'date' => '2026-01-31',
             'ordinary_hours' => 8.25,
             'extra_25_hours' => 2,
             'extra_75_hours' => 1,
+            'ordinary_minutes' => 495,
+            'extra_25_minutes' => 120,
+            'extra_75_minutes' => 60,
         ],
         [
             'date' => '2026-02-01',
             'ordinary_hours' => 6.75,
             'extra_50_hours' => 1,
             'extra_100_hours' => 2,
+            'ordinary_minutes' => 405,
+            'extra_50_minutes' => 60,
+            'extra_100_minutes' => 120,
         ],
     ]);
     PayrollResult::factory()->forCompany($otherCompany)->create([
@@ -133,6 +144,35 @@ test('monthly payroll trends aggregate exact active-company values in chronologi
         ->assertDontSee('400.00');
 });
 
+test('monthly payroll trends sum canonical minutes before converting to hours', function () {
+    $company = Company::factory()->create();
+
+    PayrollResult::factory()->forCompany($company)->count(2)->create([
+        'date' => '2026-01-15',
+        'ordinary_hours' => 0.02,
+        'extra_25_hours' => 0.02,
+        'ordinary_minutes' => 1,
+        'extra_25_minutes' => 1,
+    ]);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+    $this->actingAs($super);
+    session(['active_company_id' => $company->id]);
+
+    Livewire::test(SuperAdmin::class)
+        ->assertSeeInOrder([
+            'Enero de 2026',
+            'Registros de resultado',
+            '2',
+            'Horas ordinarias',
+            '0.03',
+            'Horas extras',
+            '0.03',
+        ])
+        ->assertDontSee('0.04');
+});
+
 test('monthly payroll trend date filters include both result-date boundaries', function () {
     $company = Company::factory()->create();
     PayrollResult::factory()->forCompany($company)->createMany([
@@ -140,11 +180,15 @@ test('monthly payroll trend date filters include both result-date boundaries', f
             'date' => '2026-03-01',
             'ordinary_hours' => 1.25,
             'extra_25_hours' => 1,
+            'ordinary_minutes' => 75,
+            'extra_25_minutes' => 60,
         ],
         [
             'date' => '2026-03-31',
             'ordinary_hours' => 2.50,
             'extra_50_hours' => 2,
+            'ordinary_minutes' => 150,
+            'extra_50_minutes' => 120,
         ],
         [
             'date' => '2026-02-28',
@@ -213,6 +257,11 @@ test('sparse one-month payroll history exposes stable semantic exact values', fu
         'extra_50_hours' => 2,
         'extra_75_hours' => 3,
         'extra_100_hours' => 4,
+        'ordinary_minutes' => 435,
+        'extra_25_minutes' => 60,
+        'extra_50_minutes' => 120,
+        'extra_75_minutes' => 180,
+        'extra_100_minutes' => 240,
     ]);
 
     $super = User::factory()->create(['company_id' => null]);

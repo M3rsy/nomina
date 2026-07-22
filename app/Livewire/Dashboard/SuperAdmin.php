@@ -118,11 +118,11 @@ class SuperAdmin extends Component
             ->when($this->from, fn ($q) => $q->whereDate('date', '>=', $this->from))
             ->when($this->to, fn ($q) => $q->whereDate('date', '<=', $this->to))
             ->selectRaw('date, count(*) as entries')
-            ->selectRaw('coalesce(sum(ordinary_hours), 0) as ordinary_hours')
-            ->selectRaw('coalesce(sum(extra_25_hours), 0) as extra_25_hours')
-            ->selectRaw('coalesce(sum(extra_50_hours), 0) as extra_50_hours')
-            ->selectRaw('coalesce(sum(extra_75_hours), 0) as extra_75_hours')
-            ->selectRaw('coalesce(sum(extra_100_hours), 0) as extra_100_hours')
+            ->selectRaw('coalesce(sum(ordinary_minutes), 0) as ordinary_minutes')
+            ->selectRaw('coalesce(sum(extra_25_minutes), 0) as extra_25_minutes')
+            ->selectRaw('coalesce(sum(extra_50_minutes), 0) as extra_50_minutes')
+            ->selectRaw('coalesce(sum(extra_75_minutes), 0) as extra_75_minutes')
+            ->selectRaw('coalesce(sum(extra_100_minutes), 0) as extra_100_minutes')
             ->groupBy('date')
             ->orderBy('date')
             ->get();
@@ -135,20 +135,24 @@ class SuperAdmin extends Component
                 'month' => $month,
                 'label' => ucfirst($totals->date->locale('es')->translatedFormat('F \\d\\e Y')),
                 'entries' => 0,
-                'ordinary_hours' => 0.0,
-                'extra_hours' => 0.0,
+                'ordinary_minutes' => 0,
+                'extra_minutes' => 0,
             ];
             $months[$month]['entries'] += (int) $totals->entries;
-            $months[$month]['ordinary_hours'] += (float) $totals->ordinary_hours;
-            $months[$month]['extra_hours'] += (float) $totals->extra_25_hours
-                + (float) $totals->extra_50_hours
-                + (float) $totals->extra_75_hours
-                + (float) $totals->extra_100_hours;
+            $months[$month]['ordinary_minutes'] += (int) $totals->ordinary_minutes;
+            $months[$month]['extra_minutes'] += (int) $totals->extra_25_minutes
+                + (int) $totals->extra_50_minutes
+                + (int) $totals->extra_75_minutes
+                + (int) $totals->extra_100_minutes;
         }
 
         $maxEntries = max(array_column($months, 'entries') ?: [1]);
         foreach ($months as &$monthTotals) {
+            $monthTotals['ordinary_hours'] = $monthTotals['ordinary_minutes'] / 60;
+            $monthTotals['extra_hours'] = $monthTotals['extra_minutes'] / 60;
             $monthTotals['bar_width'] = round($monthTotals['entries'] / $maxEntries * 100, 2);
+
+            unset($monthTotals['ordinary_minutes'], $monthTotals['extra_minutes']);
         }
         unset($monthTotals);
 

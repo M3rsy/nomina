@@ -83,7 +83,12 @@ class CompanyAdmin extends Component
             ->latest('start_date')
             ->limit(10)
             ->withCount('payrollResults')
-            ->withSum('payrollResults', 'ordinary_hours')
+            ->withSum('payrollResults', 'worked_minutes')
+            ->withSum('payrollResults', 'ordinary_minutes')
+            ->withSum('payrollResults', 'extra_25_minutes')
+            ->withSum('payrollResults', 'extra_50_minutes')
+            ->withSum('payrollResults', 'extra_75_minutes')
+            ->withSum('payrollResults', 'extra_100_minutes')
             ->get()
             ->map(fn (PayPeriod $period) => [
                 'id' => $period->id,
@@ -92,9 +97,12 @@ class CompanyAdmin extends Component
                 'end_date' => $period->end_date,
                 'status' => $period->status,
                 'results_count' => $period->payroll_results_count,
-                'ordinary_hours' => $period->payroll_results_sum_ordinary_hours ?? 0,
-                'extra_hours' => $period->payrollResults->sum(fn ($r) => $r->extra_25_hours + $r->extra_50_hours + $r->extra_75_hours + $r->extra_100_hours),
-                'worked_hours' => $period->payrollResults->sum('worked_hours'),
+                'ordinary_hours' => (int) $period->payroll_results_sum_ordinary_minutes / 60,
+                'extra_hours' => ((int) $period->payroll_results_sum_extra_25_minutes
+                    + (int) $period->payroll_results_sum_extra_50_minutes
+                    + (int) $period->payroll_results_sum_extra_75_minutes
+                    + (int) $period->payroll_results_sum_extra_100_minutes) / 60,
+                'worked_hours' => (int) $period->payroll_results_sum_worked_minutes / 60,
             ])
             ->values();
 
