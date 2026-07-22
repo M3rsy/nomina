@@ -95,6 +95,13 @@ class Index extends Component
     {
         $this->authorize('viewAny', UploadedFile::class);
 
+        $payPeriodId = request()->query('pay_period_id', $this->pay_period_id);
+        $payPeriodId = match (true) {
+            is_int($payPeriodId) && $payPeriodId > 0 => $payPeriodId,
+            is_string($payPeriodId) && ctype_digit($payPeriodId) => (int) $payPeriodId,
+            default => null,
+        };
+
         $statusFilter = array_key_exists($this->status, self::STATUS_OPTIONS)
             && $this->status !== 'all'
             ? $this->status
@@ -116,8 +123,8 @@ class Index extends Component
             ->when($statusFilter, function ($query, string $statusFilter) {
                 $query->where('status', $statusFilter);
             })
-            ->when($this->pay_period_id, function ($query) {
-                $query->where('pay_period_id', $this->pay_period_id);
+            ->when($payPeriodId, function ($query) use ($payPeriodId) {
+                $query->where('pay_period_id', $payPeriodId);
             })
             ->when($this->from, function ($query) {
                 $query->whereDate('created_at', '>=', $this->from);
