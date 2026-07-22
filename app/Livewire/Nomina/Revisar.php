@@ -249,10 +249,9 @@ class Revisar extends Component
         app(RawMarkMutationGuard::class)->mutate(
             $rawMark,
             function (RawMark $lockedMark) use ($newEventAt, $validated): void {
-                // Imports belong to their file period; manual facts belong to their selected work date.
                 $periodDate = CarbonImmutable::instance($newEventAt)->startOfDay();
 
-                if ($lockedMark->source === RawMark::SOURCE_MANUAL && $lockedMark->employee_id !== null) {
+                if ($lockedMark->employee_id !== null) {
                     $employee = Employee::withoutCompanyScope()
                         ->withTrashed()
                         ->find($lockedMark->employee_id);
@@ -262,10 +261,11 @@ class Revisar extends Component
                     }
                 }
 
-                $isWithinPeriod = $periodDate->betweenIncluded(
-                    $this->payPeriod->start_date->startOfDay(),
-                    $this->payPeriod->end_date->startOfDay(),
-                );
+                $isWithinPeriod = PayPeriod::withoutCompanyScope()
+                    ->where('company_id', $lockedMark->company_id)
+                    ->whereDate('start_date', '<=', $periodDate->toDateString())
+                    ->whereDate('end_date', '>=', $periodDate->toDateString())
+                    ->exists();
                 $revisions = $lockedMark->metadata['revisions'] ?? [];
                 $revisions[] = [
                     'action' => 'edit_event_at',
