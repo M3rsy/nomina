@@ -128,7 +128,7 @@ class PayrollExcelExporter
     {
         $results = PayrollResult::withoutCompanyScope()
             ->where('pay_period_id', $payPeriod->id)
-            ->with('employee')
+            ->with(['employee' => fn ($query) => $query->withTrashed()])
             ->orderBy('employee_id')
             ->orderBy('date')
             ->get();
@@ -138,8 +138,8 @@ class PayrollExcelExporter
         foreach ($results as $result) {
             $employee = $result->employee;
 
-            $sheet->setCellValue("A{$row}", $employee?->external_id ?? '');
-            $sheet->setCellValue("B{$row}", $employee?->full_name ?? '');
+            $sheet->setCellValue("A{$row}", $result->employee_external_id ?: ($employee?->external_id ?? ''));
+            $sheet->setCellValue("B{$row}", $result->employee_name ?: ($employee?->full_name ?? ''));
 
             if ($result->entry_at !== null) {
                 $sheet->setCellValue("C{$row}", $result->entry_at->toDateTimeString());

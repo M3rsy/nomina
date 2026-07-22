@@ -27,7 +27,9 @@ test('payroll result belongs to company, pay period and employee', function () {
         ->and($result->payPeriod->id)->toBe($payPeriod->id)
         ->and($result->employee->id)->toBe($employee->id)
         ->and($result->date->format('Y-m-d'))->toBe('2026-01-15')
-        ->and($result->ordinary_hours)->toEqual(8.0);
+        ->and($result->ordinary_hours)->toEqual(8.0)
+        ->and($result->employee_external_id)->toBe($employee->external_id)
+        ->and($result->employee_name)->toBe($employee->full_name);
 });
 
 test('payroll results are scoped by current company', function () {
