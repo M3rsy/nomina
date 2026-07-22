@@ -245,16 +245,27 @@ class Revisar extends Component
         ]);
 
         $newEventAt = Carbon::parse($validated['editEventAt']);
-        $payPeriodStart = $this->payPeriod->start_date;
-        $payPeriodEnd = $this->payPeriod->end_date;
-
-        $isWithinPeriod = $newEventAt->betweenIncluded($payPeriodStart, $payPeriodEnd);
-        $newStatus = $isWithinPeriod ? 'corrected' : 'out_of_period';
-        $notes = $isWithinPeriod ? null : 'Editado fuera del período de nómina';
 
         app(RawMarkMutationGuard::class)->mutate(
             $rawMark,
-            function (RawMark $lockedMark) use ($newEventAt, $newStatus, $notes, $validated): void {
+            function (RawMark $lockedMark) use ($newEventAt, $validated): void {
+                // Imports belong to their file period; manual facts belong to their selected work date.
+                $periodDate = CarbonImmutable::instance($newEventAt)->startOfDay();
+
+                if ($lockedMark->source === RawMark::SOURCE_MANUAL && $lockedMark->employee_id !== null) {
+                    $employee = Employee::withoutCompanyScope()
+                        ->withTrashed()
+                        ->find($lockedMark->employee_id);
+
+                    if ($employee !== null) {
+                        $periodDate = app(ShiftOccurrenceResolver::class)->workDateFor($employee, $newEventAt);
+                    }
+                }
+
+                $isWithinPeriod = $periodDate->betweenIncluded(
+                    $this->payPeriod->start_date->startOfDay(),
+                    $this->payPeriod->end_date->startOfDay(),
+                );
                 $revisions = $lockedMark->metadata['revisions'] ?? [];
                 $revisions[] = [
                     'action' => 'edit_event_at',
@@ -267,8 +278,8 @@ class Revisar extends Component
 
                 $lockedMark->update([
                     'event_at' => $newEventAt,
-                    'status' => $newStatus,
-                    'notes' => $notes,
+                    'status' => $isWithinPeriod ? 'corrected' : 'out_of_period',
+                    'notes' => $isWithinPeriod ? null : 'Editado fuera del período de nómina',
                     'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
                 ]);
             },
