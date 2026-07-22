@@ -81,6 +81,8 @@ class FileValidator
         foreach ($records as $record) {
             $status = 'valid';
             $notes = null;
+            $workDate = null;
+            $workDateIsLocked = false;
 
             $employee = $employees->get($record->employee_external_id);
             if ($employee === null) {
@@ -88,9 +90,14 @@ class FileValidator
                 $notes = 'Empleado no encontrado';
             }
 
-            if ($status === 'valid' && ($record->event_at->lt($payPeriod->start_date) || $record->event_at->gt($payPeriod->end_date))) {
-                $status = 'out_of_period';
-                $notes = 'Fuera del período';
+            if ($status === 'valid') {
+                $workDate = $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at);
+                $workDateIsLocked = $this->workDateIsLocked($employee, $workDate);
+
+                if (! $workDateIsLocked && ($workDate->lt($payPeriod->start_date) || $workDate->gt($payPeriod->end_date))) {
+                    $status = 'out_of_period';
+                    $notes = 'Fuera del período';
+                }
             }
 
             $key = $record->employee_external_id.'|'.$record->event_at->toDateTimeString();
@@ -100,7 +107,7 @@ class FileValidator
             }
             $seen[$key] = true;
 
-            if ($status === 'valid' && $this->belongsToLockedWorkDate($employee, $record->event_at)) {
+            if ($status === 'valid' && $workDateIsLocked) {
                 $status = 'invalid';
                 $notes = 'La fecha laboral pertenece a un período bloqueado.';
             }
@@ -133,14 +140,12 @@ class FileValidator
         $uploadedFile->save();
     }
 
-    private function belongsToLockedWorkDate(Employee $employee, CarbonInterface $eventAt): bool
+    private function workDateIsLocked(Employee $employee, CarbonInterface $workDate): bool
     {
-        $workDate = $this->shiftOccurrenceResolver->workDateFor($employee, $eventAt)->toDateString();
-
         return PayPeriod::withoutCompanyScope()
             ->where('company_id', $employee->company_id)
-            ->whereDate('start_date', '<=', $workDate)
-            ->whereDate('end_date', '>=', $workDate)
+            ->whereDate('start_date', '<=', $workDate->toDateString())
+            ->whereDate('end_date', '>=', $workDate->toDateString())
             ->lockForUpdate()
             ->get(['status'])
             ->contains(fn (PayPeriod $period): bool => in_array(
