@@ -155,20 +155,20 @@ class PayrollExcelExporter
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            $sheet->setCellValue("E{$row}", $result->worked_hours);
+            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($result->worked_minutes));
             $sheet->getStyle("E{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("F{$row}", $result->ordinary_hours);
+            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($result->ordinary_minutes));
             $sheet->getStyle("F{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("G{$row}", $result->extra_25_hours);
-            $sheet->setCellValue("H{$row}", $result->extra_50_hours);
-            $sheet->setCellValue("I{$row}", $result->extra_75_hours);
-            $sheet->setCellValue("J{$row}", $result->extra_100_hours);
+            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($result->extra_25_minutes));
+            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($result->extra_50_minutes));
+            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($result->extra_75_minutes));
+            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($result->extra_100_minutes));
 
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
@@ -178,6 +178,11 @@ class PayrollExcelExporter
 
             $row++;
         }
+    }
+
+    private function hoursFromMinutes(int $minutes): float
+    {
+        return $minutes / 60;
     }
 
     private function applyHeaderStyle(Worksheet $sheet): void

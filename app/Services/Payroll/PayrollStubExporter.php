@@ -108,7 +108,7 @@ class PayrollStubExporter
     }
 
     /**
-     * @return array<string, float|int>
+     * @return array<string, int>
      */
     private function writeDataRows(Worksheet $sheet, PayPeriod $payPeriod, Employee $employee): array
     {
@@ -120,12 +120,12 @@ class PayrollStubExporter
             ->get();
 
         $totals = [
-            'worked_hours' => 0.0,
-            'ordinary_hours' => 0.0,
-            'extra_25_hours' => 0.0,
-            'extra_50_hours' => 0.0,
-            'extra_75_hours' => 0.0,
-            'extra_100_hours' => 0.0,
+            'worked_minutes' => 0,
+            'ordinary_minutes' => 0,
+            'extra_25_minutes' => 0,
+            'extra_50_minutes' => 0,
+            'extra_75_minutes' => 0,
+            'extra_100_minutes' => 0,
         ];
 
         $row = 9;
@@ -148,20 +148,20 @@ class PayrollStubExporter
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            $sheet->setCellValue("E{$row}", $result->worked_hours);
+            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($result->worked_minutes));
             $sheet->getStyle("E{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("F{$row}", $result->ordinary_hours);
+            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($result->ordinary_minutes));
             $sheet->getStyle("F{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("G{$row}", $result->extra_25_hours);
-            $sheet->setCellValue("H{$row}", $result->extra_50_hours);
-            $sheet->setCellValue("I{$row}", $result->extra_75_hours);
-            $sheet->setCellValue("J{$row}", $result->extra_100_hours);
+            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($result->extra_25_minutes));
+            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($result->extra_50_minutes));
+            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($result->extra_75_minutes));
+            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($result->extra_100_minutes));
 
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
@@ -172,12 +172,12 @@ class PayrollStubExporter
             $sheet->setCellValue("K{$row}", $result->is_absence ? 'Sí' : 'No');
             $sheet->setCellValue("L{$row}", $result->is_justified ? 'Sí' : 'No');
 
-            $totals['worked_hours'] += (float) $result->worked_hours;
-            $totals['ordinary_hours'] += (float) $result->ordinary_hours;
-            $totals['extra_25_hours'] += (float) $result->extra_25_hours;
-            $totals['extra_50_hours'] += (float) $result->extra_50_hours;
-            $totals['extra_75_hours'] += (float) $result->extra_75_hours;
-            $totals['extra_100_hours'] += (float) $result->extra_100_hours;
+            $totals['worked_minutes'] += $result->worked_minutes;
+            $totals['ordinary_minutes'] += $result->ordinary_minutes;
+            $totals['extra_25_minutes'] += $result->extra_25_minutes;
+            $totals['extra_50_minutes'] += $result->extra_50_minutes;
+            $totals['extra_75_minutes'] += $result->extra_75_minutes;
+            $totals['extra_100_minutes'] += $result->extra_100_minutes;
 
             $row++;
         }
@@ -186,7 +186,7 @@ class PayrollStubExporter
     }
 
     /**
-     * @param  array<string, float|int>  $totals
+     * @param  array<string, int>  $totals
      */
     private function writeTotalsRow(Worksheet $sheet, array $totals): void
     {
@@ -194,12 +194,12 @@ class PayrollStubExporter
         $totalsRow = $lastRow + 1;
 
         $sheet->setCellValue("A{$totalsRow}", 'TOTAL');
-        $sheet->setCellValue("E{$totalsRow}", $totals['worked_hours']);
-        $sheet->setCellValue("F{$totalsRow}", $totals['ordinary_hours']);
-        $sheet->setCellValue("G{$totalsRow}", $totals['extra_25_hours']);
-        $sheet->setCellValue("H{$totalsRow}", $totals['extra_50_hours']);
-        $sheet->setCellValue("I{$totalsRow}", $totals['extra_75_hours']);
-        $sheet->setCellValue("J{$totalsRow}", $totals['extra_100_hours']);
+        $sheet->setCellValue("E{$totalsRow}", $this->hoursFromMinutes($totals['worked_minutes']));
+        $sheet->setCellValue("F{$totalsRow}", $this->hoursFromMinutes($totals['ordinary_minutes']));
+        $sheet->setCellValue("G{$totalsRow}", $this->hoursFromMinutes($totals['extra_25_minutes']));
+        $sheet->setCellValue("H{$totalsRow}", $this->hoursFromMinutes($totals['extra_50_minutes']));
+        $sheet->setCellValue("I{$totalsRow}", $this->hoursFromMinutes($totals['extra_75_minutes']));
+        $sheet->setCellValue("J{$totalsRow}", $this->hoursFromMinutes($totals['extra_100_minutes']));
 
         $sheet->getStyle("A{$totalsRow}")->getFont()->setBold(true);
         $sheet->getStyle("E{$totalsRow}:J{$totalsRow}")
@@ -211,6 +211,11 @@ class PayrollStubExporter
         $sheet->getStyle("G{$totalsRow}:J{$totalsRow}")
             ->getNumberFormat()
             ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
+    }
+
+    private function hoursFromMinutes(int $minutes): float
+    {
+        return $minutes / 60;
     }
 
     private function applyHeaderStyle(Worksheet $sheet): void
