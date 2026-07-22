@@ -28,7 +28,7 @@ class Index extends Component
         'employee_revision' => 'Cambios en empleados',
         'schedule_assignment' => 'Asignaciones de jornada',
         'mark_revision' => 'Revisiones de marcas',
-        'overtime_decision' => 'Decisiones de horas extra',
+        'overtime_decision' => 'Autorizaciones de horas extra',
         'attendance_exception' => 'Excepciones de asistencia',
         'payroll_state' => 'Estados de nómina',
     ];
@@ -172,7 +172,7 @@ class Index extends Component
                     $label = $decision->decision === OvertimeDecision::APPROVED ? 'aprobó' : 'rechazó';
                     $entries[] = new AuditEntry(
                         'overtime_decision',
-                        'Decisión de hora extra',
+                        'Autorización de hora extra',
                         Carbon::parse($decision->created_at),
                         $decision->company_id,
                         $decision->company?->name ?? 'Desconocida',

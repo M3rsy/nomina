@@ -315,6 +315,8 @@ test('attendance assignments decisions and exceptions appear with exact audit co
 
     Livewire::actingAs($admin)->test(Index::class)
         ->assertViewHas('entries', fn ($entries) => $entries->total() === 3)
+        ->assertSee('Autorizaciones de horas extra')
+        ->assertSee('Autorización de hora extra')
         ->assertSee('Guardia nocturna v2')
         ->assertSee('Cambio de puesto nocturno')
         ->assertSee('30 min')
