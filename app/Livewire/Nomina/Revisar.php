@@ -864,6 +864,23 @@ class Revisar extends Component
             return;
         }
 
+        if ($employee === null) {
+            $this->addError('manualMarkEmployeeId', 'Debe seleccionar el caso incompleto que desea corregir.');
+
+            return;
+        }
+
+        $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, $workDate);
+        $observedMark = $occurrence->marks->first();
+
+        if ($occurrence->status !== ShiftOccurrence::MISSING_PAIR
+            || $occurrence->marks->count() !== 1
+            || $observedMark?->source === RawMark::SOURCE_MANUAL) {
+            $this->addError('manualMarkWorkDate', 'Solo puede completarse un par incompleto que ya contiene una marca observada.');
+
+            return;
+        }
+
         $this->manualMarkEmployeeId = $employee?->id;
         $this->manualMarkWorkDate = $workDate;
         $this->showManualMarkModal = true;

@@ -55,9 +55,13 @@ class ManualRawMarkRecorder
 
             $before = $this->resolver->resolve($lockedEmployee, $date);
 
-            if (! in_array($before->status, [ShiftOccurrence::NO_MARKS, ShiftOccurrence::MISSING_PAIR], true)) {
+            $observedMark = $before->marks->first();
+
+            if ($before->status !== ShiftOccurrence::MISSING_PAIR
+                || $before->marks->count() !== 1
+                || $observedMark?->source === RawMark::SOURCE_MANUAL) {
                 throw ValidationException::withMessages([
-                    'work_date' => 'La fecha laboral no admite otra marca sin volver ambigua la jornada.',
+                    'work_date' => 'Solo puede completarse un par incompleto que ya contiene una marca observada.',
                 ]);
             }
 
@@ -93,11 +97,7 @@ class ManualRawMarkRecorder
             ]);
 
             $after = $this->resolver->resolve($lockedEmployee, $date);
-            $expectedStatus = $before->status === ShiftOccurrence::NO_MARKS
-                ? ShiftOccurrence::MISSING_PAIR
-                : ShiftOccurrence::RESOLVED;
-
-            if ($after->status !== $expectedStatus || ! $after->marks->contains('id', $mark->id)) {
+            if ($after->status !== ShiftOccurrence::RESOLVED || ! $after->marks->contains('id', $mark->id)) {
                 throw ValidationException::withMessages([
                     'event_at' => 'La fecha y hora no pertenecen a la jornada laboral seleccionada.',
                 ]);

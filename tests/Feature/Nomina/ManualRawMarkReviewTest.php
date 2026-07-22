@@ -24,12 +24,15 @@ test('records an exact audited manual clock fact from payroll review', function 
     $this->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->assertSee('Agregar marca manual')
+        ->assertDontSee('Agregar marca manual')
+        ->call('continueToReady')
+        ->assertSee('Agregar marca faltante')
         ->call('openManualMarkModal', $context['employee']->id, '2026-07-20')
         ->assertSet('showManualMarkModal', true)
         ->assertSet('manualMarkEmployeeId', $context['employee']->id)
         ->assertSet('manualMarkWorkDate', '2026-07-20')
         ->assertSee('Registrar hecho faltante')
+        ->assertSee('completar un par incompleto')
         ->assertSee('no modifica el archivo TXT/DAT')
         ->set('manualMarkEventAt', '2026-07-20T14:00:00')
         ->set('manualMarkReason', 'El reloj no registró la salida')
@@ -61,7 +64,7 @@ test('requires a reason and rejects employees outside the payroll company', func
     $this->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->call('openManualMarkModal')
+        ->call('openManualMarkModal', $context['employee']->id, '2026-07-20')
         ->set('manualMarkEmployeeId', $foreignEmployee->id)
         ->set('manualMarkWorkDate', '2026-07-20')
         ->set('manualMarkEventAt', '2026-07-20T14:00:00')
@@ -74,6 +77,18 @@ test('requires a reason and rejects employees outside the payroll company', func
         ->assertHasErrors('manualMarkReason');
 
     expect(RawMark::query()->where('source', RawMark::SOURCE_MANUAL)->count())->toBe(0);
+});
+
+test('does not offer a manual fact when no observed mark exists', function () {
+    $context = manualMarkReviewContext();
+    RawMark::query()->delete();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertDontSee('Agregar marca faltante')
+        ->call('openManualMarkModal', $context['employee']->id, '2026-07-20')
+        ->assertSet('showManualMarkModal', false)
+        ->assertHasErrors('manualMarkWorkDate');
 });
 
 test('shows recorder validation when the timestamp does not belong to the work date', function () {
