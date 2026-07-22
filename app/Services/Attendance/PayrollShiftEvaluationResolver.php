@@ -25,6 +25,28 @@ class PayrollShiftEvaluationResolver
         Employee $employee,
         CarbonInterface|string $workDate,
     ): PayrollShiftEvaluation {
+        $review = $this->review($payPeriod, $employee, $workDate);
+        $date = $review->occurrence->workDate;
+        $absence = JustifiedAbsence::withoutCompanyScope()
+            ->where('company_id', $payPeriod->company_id)
+            ->where('pay_period_id', $payPeriod->id)
+            ->where('employee_id', $employee->id)
+            ->whereDate('date', $date->toDateString())
+            ->first();
+
+        return $this->shiftEvaluator->evaluate(
+            $review->occurrence,
+            $review->analysis,
+            $review->currentDecisions,
+            $absence,
+        );
+    }
+
+    public function review(
+        PayPeriod $payPeriod,
+        Employee $employee,
+        CarbonInterface|string $workDate,
+    ): PayrollShiftReview {
         $date = CarbonImmutable::parse($workDate)->startOfDay();
 
         if ($employee->company_id !== $payPeriod->company_id
@@ -44,14 +66,9 @@ class PayrollShiftEvaluationResolver
             ->where('employee_id', $employee->id)
             ->whereDate('work_date', $date->toDateString())
             ->current()
+            ->with('decider')
             ->get();
-        $absence = JustifiedAbsence::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('date', $date->toDateString())
-            ->first();
 
-        return $this->shiftEvaluator->evaluate($occurrence, $analysis, $decisions, $absence);
+        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions);
     }
 }
