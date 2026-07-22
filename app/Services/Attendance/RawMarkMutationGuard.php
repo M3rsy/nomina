@@ -8,6 +8,7 @@ use App\Models\RawMark;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -53,17 +54,27 @@ class RawMarkMutationGuard
             $nextEventAt = $targetEventAt === null
                 ? CarbonImmutable::instance($lockedMark->event_at)
                 : CarbonImmutable::parse($targetEventAt);
-            $workDates = collect();
+            $affectedOccurrences = collect();
 
             if ($currentEmployee !== null) {
-                $workDates->push($this->resolver->workDateFor($currentEmployee, $lockedMark->event_at));
+                $affectedOccurrences->push([
+                    'employee' => $currentEmployee,
+                    'work_date' => $this->resolver->workDateFor($currentEmployee, $lockedMark->event_at),
+                ]);
             }
 
             if ($nextEmployee !== null) {
-                $workDates->push($this->resolver->workDateFor($nextEmployee, $nextEventAt));
+                $affectedOccurrences->push([
+                    'employee' => $nextEmployee,
+                    'work_date' => $this->resolver->workDateFor($nextEmployee, $nextEventAt),
+                ]);
             }
 
-            $workDates = $workDates
+            $affectedOccurrences = $affectedOccurrences
+                ->unique(fn (array $context): string => $context['employee']->id.'|'.$context['work_date']->toDateString())
+                ->values();
+            $workDates = $affectedOccurrences
+                ->pluck('work_date')
                 ->map(fn (CarbonImmutable $date): string => $date->toDateString())
                 ->unique()
                 ->values();
@@ -93,7 +104,56 @@ class RawMarkMutationGuard
                 ]);
             }
 
-            return $mutation($lockedMark);
+            $result = $mutation($lockedMark);
+            $lockedMark->refresh();
+
+            $this->assertManualPairIntegrity($affectedOccurrences, $lockedMark, $nextEmployee);
+
+            return $result;
         });
+    }
+
+    /** @param  Collection<int, array{employee: Employee, work_date: CarbonImmutable}>  $affectedOccurrences */
+    private function assertManualPairIntegrity(
+        Collection $affectedOccurrences,
+        RawMark $mutatedMark,
+        ?Employee $nextEmployee,
+    ): void {
+        foreach ($affectedOccurrences as $context) {
+            $occurrence = $this->resolver->resolve($context['employee'], $context['work_date']);
+            $manualCount = $occurrence->marks
+                ->where('source', RawMark::SOURCE_MANUAL)
+                ->count();
+
+            if ($manualCount > 0
+                && ($occurrence->status !== ShiftOccurrence::RESOLVED
+                    || $occurrence->marks->count() !== 2
+                    || $manualCount !== 1)) {
+                $this->rejectInvalidManualPair();
+            }
+        }
+
+        if ($mutatedMark->source !== RawMark::SOURCE_MANUAL
+            || ! in_array($mutatedMark->status, ['valid', 'corrected'], true)) {
+            return;
+        }
+
+        if ($nextEmployee === null) {
+            $this->rejectInvalidManualPair();
+        }
+
+        $workDate = $this->resolver->workDateFor($nextEmployee, $mutatedMark->event_at);
+        $occurrence = $this->resolver->resolve($nextEmployee, $workDate);
+
+        if (! $occurrence->marks->contains('id', $mutatedMark->id)) {
+            $this->rejectInvalidManualPair();
+        }
+    }
+
+    private function rejectInvalidManualPair(): never
+    {
+        throw ValidationException::withMessages([
+            'raw_mark' => 'Una marca manual auditada debe permanecer emparejada con una sola marca observada.',
+        ]);
     }
 }
