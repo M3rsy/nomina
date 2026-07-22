@@ -58,24 +58,64 @@ class PayrollRules
      */
     public function normalizedOvertimeBands(mixed $rawBands): array
     {
+        if ($rawBands === null || $rawBands === []) {
+            return $this->defaultOvertimeBands();
+        }
+
+        return $this->parseOvertimeBands($rawBands) ?? $this->defaultOvertimeBands();
+    }
+
+    public function hasCompleteRateBandCoverage(mixed $rawBands): bool
+    {
+        if ($rawBands === null || $rawBands === []) {
+            return true;
+        }
+
+        $bands = $this->parseOvertimeBands($rawBands);
+
+        if ($bands === null) {
+            return false;
+        }
+
+        for ($minute = 0; $minute < 1440; $minute++) {
+            $matches = 0;
+
+            foreach ($bands as $band) {
+                $comparableMinute = $minute < $band['start'] ? $minute + 1440 : $minute;
+
+                if ($comparableMinute >= $band['start'] && $comparableMinute < $band['end']) {
+                    $matches++;
+                }
+            }
+
+            if ($matches !== 1) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function parseOvertimeBands(mixed $rawBands): ?array
+    {
         $source = $this->extractBandList($rawBands);
 
         if (empty($source)) {
-            return $this->defaultOvertimeBands();
+            return null;
         }
 
         $bands = [];
 
         foreach ($source as $band) {
             if (! is_array($band)) {
-                return $this->defaultOvertimeBands();
+                return null;
             }
 
             $start = $this->parseBandBoundary($band['start'] ?? $band['start_minutes'] ?? $band['from'] ?? null);
             $end = $this->parseBandBoundary($band['end'] ?? $band['end_minutes'] ?? $band['to'] ?? null);
 
             if ($start === null || $end === null) {
-                return $this->defaultOvertimeBands();
+                return null;
             }
 
             $percent = $this->parseBandPercent(
@@ -91,9 +131,13 @@ class PayrollRules
                 $percent = $this->inferPercentFromLabel((string) ($band['label'] ?? $band['name'] ?? ''));
             }
 
+            if ($percent === null) {
+                return null;
+            }
+
             $bucket = $this->bucketFromPercent($percent);
             if ($bucket === null) {
-                return $this->defaultOvertimeBands();
+                return null;
             }
 
             if ($end <= $start) {
@@ -109,7 +153,7 @@ class PayrollRules
         }
 
         if (empty($bands)) {
-            return $this->defaultOvertimeBands();
+            return null;
         }
 
         usort(
@@ -255,6 +299,6 @@ class PayrollRules
 
     private function defaultOvertimeBands(): array
     {
-        return $this->normalizedOvertimeBands(self::DEFAULT_BANDS);
+        return $this->parseOvertimeBands(self::DEFAULT_BANDS) ?? [];
     }
 }

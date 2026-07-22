@@ -24,6 +24,21 @@ class AttendanceShiftAnalyzer
             if ($occurrence->status === ShiftOccurrence::NO_MARKS
                 && $occurrence->scheduledStart !== null
                 && $occurrence->scheduledEnd !== null) {
+                if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
+                    return new AttendanceShiftAnalysis(
+                        AttendanceShiftAnalysis::INVALID_RATE_BANDS,
+                        $occurrence->workDate,
+                        null,
+                        null,
+                        0,
+                        0,
+                        new BandSplit,
+                        collect(),
+                        collect(),
+                        $isHoliday,
+                    );
+                }
+
                 $scheduledMinutes = $this->minutes($occurrence->scheduledStart, $occurrence->scheduledEnd);
                 $scheduledRates = $this->ratesFor(
                     $occurrence,
@@ -58,6 +73,21 @@ class AttendanceShiftAnalyzer
                 $entry,
                 $exit,
                 0,
+                0,
+                new BandSplit,
+                collect(),
+                collect(),
+                $isHoliday,
+            );
+        }
+
+        if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
+            return new AttendanceShiftAnalysis(
+                AttendanceShiftAnalysis::INVALID_RATE_BANDS,
+                $occurrence->workDate,
+                $entry,
+                $exit,
+                $this->minutes($entry, $exit),
                 0,
                 new BandSplit,
                 collect(),
@@ -188,6 +218,13 @@ class AttendanceShiftAnalyzer
         $revisions = $mark?->metadata['revisions'] ?? [];
 
         return hash('sha256', json_encode($revisions, JSON_THROW_ON_ERROR));
+    }
+
+    private function hasCompleteRateBandCoverage(ShiftOccurrence $occurrence, bool $isHoliday): bool
+    {
+        return $isHoliday
+            || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY
+            || $this->rules->hasCompleteRateBandCoverage($occurrence->schedule?->banding_json);
     }
 
     private function ratesFor(

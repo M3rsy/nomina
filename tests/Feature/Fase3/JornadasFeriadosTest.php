@@ -185,6 +185,22 @@ test('company admin gets validation error for invalid overtime band JSON', funct
         ->assertHasErrors(['schedules.1.banding_json']);
 });
 
+test('company admin cannot save overtime bands with gaps or overlaps', function (string $bands) {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.banding_json', $bands)
+        ->call('save')
+        ->assertHasErrors(['schedules.1.banding_json']);
+})->with([
+    'gap from 12:00 to 14:00' => '[{"start":"00:00","end":"06:00","extra_percent":75},{"start":"06:00","end":"12:00","extra_percent":0},{"start":"14:00","end":"18:00","extra_percent":25},{"start":"18:00","end":"00:00","extra_percent":50}]',
+    'overlap from 12:00 to 14:00' => '[{"start":"00:00","end":"06:00","extra_percent":75},{"start":"06:00","end":"14:00","extra_percent":0},{"start":"12:00","end":"18:00","extra_percent":25},{"start":"18:00","end":"00:00","extra_percent":50}]',
+]);
+
 test('company admin can access feriados page of own company', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');

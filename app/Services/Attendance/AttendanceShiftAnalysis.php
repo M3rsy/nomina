@@ -10,6 +10,8 @@ readonly class AttendanceShiftAnalysis
 {
     public const INVALID_INTERVAL = 'invalid_interval';
 
+    public const INVALID_RATE_BANDS = 'invalid_rate_bands';
+
     /**
      * @param  Collection<int, AttendanceSegment>  $deficits
      * @param  Collection<int, AttendanceSegment>  $overtimeCandidates

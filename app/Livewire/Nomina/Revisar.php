@@ -991,6 +991,7 @@ class Revisar extends Component
             'missing_pair' => 'Falta la marca de entrada o salida',
             'missing_assignment' => 'El empleado no tiene una jornada asignada',
             'missing_schedule' => 'La jornada asignada no define este día',
+            'invalid_rate_bands' => 'Las bandas salariales no cubren las 24 horas correctamente',
             default => 'La asistencia necesita revisión',
         };
     }
