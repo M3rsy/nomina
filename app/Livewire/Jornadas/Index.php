@@ -9,6 +9,7 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\PayrollRules;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -57,6 +58,8 @@ class Index extends Component
         ['label' => 'Extra 75%', 'start' => '00:00', 'end' => '06:00', 'rate' => '+75%', 'color' => 'bg-amber-100 text-amber-700 border-amber-200'],
     ];
 
+    public bool $requiresProfileMigration = false;
+
     public array $technicalReadinessItems = [
         'La jornada ordinaria vigente es 06:00-14:00 y se completa con 25%, 50% y 75% en la lógica de cálculo.',
         'Domingos y feriados se tratan como jornada 100% extra en el motor de nómina.',
@@ -93,6 +96,11 @@ class Index extends Component
         $this->loadSchedules();
     }
 
+    private function hasProfileHistoryTables(): bool
+    {
+        return Schema::hasTable('work_schedule_profiles') && Schema::hasTable('work_schedules') && Schema::hasColumn('work_schedules', 'work_schedule_profile_id');
+    }
+
     public function openCreateProfile(): void
     {
         $this->authorize('create', WorkSchedule::class);
@@ -116,6 +124,12 @@ class Index extends Component
         $companyId = current_company_id();
 
         if ($companyId === null) {
+            return;
+        }
+
+        if (! $this->hasProfileHistoryTables()) {
+            $this->addError('jornadas_profiles', 'No están aplicadas aún las migraciones de jornadas. Ejecutá `php artisan migrate --force` y volvé a cargar esta pantalla.');
+
             return;
         }
 
@@ -163,6 +177,24 @@ class Index extends Component
             return;
         }
 
+        $this->requiresProfileMigration = ! $this->hasProfileHistoryTables();
+
+        if ($this->requiresProfileMigration) {
+            $this->profiles = [['id' => null, 'name' => 'Jornada general', 'version' => 1]];
+            $this->selectedProfileId = null;
+
+            $existing = WorkSchedule::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->orderBy('day_of_week')
+                ->get()
+                ->keyBy('day_of_week');
+
+            $this->loadSchedulesFromExisting($existing);
+            $this->loadHistoricalContext((int) $companyId);
+
+            return;
+        }
+
         $activeProfiles = WorkScheduleProfile::withoutCompanyScope()
             ->where('company_id', $companyId)
             ->where('is_active', true)
@@ -206,6 +238,35 @@ class Index extends Component
             6 => 'Sábado',
         ];
 
+        $this->loadSchedulesFromRows($existing, $defaults, $dayNames);
+
+        $this->loadHistoricalContext((int) $companyId);
+    }
+
+    private function loadSchedulesFromExisting($existing): void
+    {
+        $defaults = collect(Company::defaultWorkSchedules())->keyBy('day_of_week');
+
+        $dayNames = [
+            0 => 'Domingo',
+            1 => 'Lunes',
+            2 => 'Martes',
+            3 => 'Miércoles',
+            4 => 'Jueves',
+            5 => 'Viernes',
+            6 => 'Sábado',
+        ];
+
+        $this->loadSchedulesFromRows($existing, $defaults, $dayNames);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, \App\Models\WorkSchedule>|array<int, \App\Models\WorkSchedule>  $existing
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $defaults
+     * @param  array<int, string>  $dayNames
+     */
+    private function loadSchedulesFromRows($existing, $defaults, array $dayNames): void
+    {
         $rows = [];
 
         foreach ($dayNames as $day => $name) {
@@ -229,8 +290,6 @@ class Index extends Component
         $this->originalSchedules = collect($rows)
             ->keyBy('day_of_week')
             ->toArray();
-
-        $this->loadHistoricalContext((int) $companyId);
     }
 
     public function save(): void
@@ -240,6 +299,12 @@ class Index extends Component
         $companyId = current_company_id();
 
         if ($companyId === null) {
+            return;
+        }
+
+        if (! $this->hasProfileHistoryTables()) {
+            $this->addError('jornadas_profiles', 'No están aplicadas aún las migraciones de jornadas. Ejecutá `php artisan migrate --force` y volvé a cargar esta pantalla.');
+
             return;
         }
 

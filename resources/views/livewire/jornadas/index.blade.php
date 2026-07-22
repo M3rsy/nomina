@@ -36,6 +36,19 @@
             </section>
         @endif
 
+        @if ($requiresProfileMigration)
+            <section class="rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900 shadow-sm">
+                <p class="font-semibold">Faltan migraciones de jornadas</p>
+                <p class="mt-2 text-sm">No existe aún la tabla <code>work_schedule_profiles</code> en la base actual.</p>
+                <p class="mt-1 text-sm">
+                    Ejecutá <code>php artisan migrate --force</code> para completar la migración y habilitar perfiles/versiones.
+                </p>
+                @error('jornadas_profiles')
+                    <p class="mt-2 text-sm font-semibold text-amber-900">{{ $message }}</p>
+                @enderror
+            </section>
+        @endif
+
         @if ($showHistoricalImpactWarning)
             <section class="rounded-3xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
                 <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -84,16 +97,19 @@
                     <div class="flex flex-wrap items-end gap-2">
                         <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
                             Plantilla
-                            <select wire:model.live="selectedProfileId" class="mt-1 block rounded-xl border-slate-300 text-sm">
+                            <select wire:model.live="selectedProfileId" class="mt-1 block rounded-xl border-slate-300 text-sm" @disabled($requiresProfileMigration)>
                                 @forelse ($profiles as $profile)
                                     <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
                                 @empty
-                                    <option value="">Jornada general · sin guardar</option>
+                                     <option value="">Jornada general · sin guardar</option>
                                 @endforelse
                             </select>
                         </label>
                         @can('work_schedules.manage')
-                            <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Nueva plantilla</button>
+                            <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" @disabled($requiresProfileMigration)>Nueva plantilla</button>
+                            @if ($requiresProfileMigration)
+                                <p class="text-xs text-slate-500">No se puede crear o versionar plantillas hasta aplicar migraciones pendientes.</p>
+                            @endif
                         @endcan
                     </div>
                 </header>
@@ -209,11 +225,12 @@
                                 @error('changeReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
                             </label>
                         @endif
-                        <button
-                            type="button"
-                            wire:click="save"
-                            wire:loading.attr="disabled"
-                            wire:loading.class="cursor-not-allowed opacity-70"
+                         <button
+                             type="button"
+                             wire:click="save"
+                             @disabled($requiresProfileMigration)
+                             wire:loading.attr="disabled"
+                             wire:loading.class="cursor-not-allowed opacity-70"
                             wire:target="save,confirmHistoricalSave"
                             class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-slate-800 disabled:opacity-70"
                         >

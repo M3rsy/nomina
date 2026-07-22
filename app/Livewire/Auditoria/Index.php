@@ -13,6 +13,7 @@ use App\Models\RawMark;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -78,6 +79,7 @@ class Index extends Component
         return view('livewire.auditoria.index', [
             'entries' => $paginator,
             'types' => self::TYPES,
+            'hasScheduleAssignmentTable' => $this->hasEmployeeScheduleAssignmentsTable(),
         ]);
     }
 
@@ -136,7 +138,7 @@ class Index extends Component
                 });
         }
 
-        if (in_array('schedule_assignment', $types, true)) {
+        if (in_array('schedule_assignment', $types, true) && $this->hasEmployeeScheduleAssignmentsTable()) {
             EmployeeScheduleAssignment::withoutCompanyScope()
                 ->with(['company', 'employee', 'profile', 'assigner'])
                 ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
@@ -442,6 +444,11 @@ class Index extends Component
     {
         return (! $this->from || $date->gte(Carbon::parse($this->from)->startOfDay()))
             && (! $this->to || $date->lte(Carbon::parse($this->to)->endOfDay()));
+    }
+
+    private function hasEmployeeScheduleAssignmentsTable(): bool
+    {
+        return Schema::hasTable('employee_schedule_assignments');
     }
 
     private function applyFilters(array $entries): array
