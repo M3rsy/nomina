@@ -94,9 +94,9 @@ class AttendanceShiftAnalyzer
             );
         }
 
-        // Payroll is minute-based: normalize the pair once so later partitions cannot discard seconds repeatedly.
-        $minuteEntry = $entry->startOfMinute();
-        $minuteExit = $exit->startOfMinute();
+        // Quantize the observed interval once into complete elapsed minutes anchored at the entry.
+        $workedMinutes = $this->minutes($entry, $exit);
+        $payableEnd = $entry->addMinutes($workedMinutes);
 
         if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
             return new AttendanceShiftAnalysis(
@@ -104,7 +104,7 @@ class AttendanceShiftAnalyzer
                 $occurrence->workDate,
                 $entry,
                 $exit,
-                $this->minutes($minuteEntry, $minuteExit),
+                $workedMinutes,
                 0,
                 new BandSplit,
                 collect(),
@@ -121,74 +121,91 @@ class AttendanceShiftAnalyzer
         $overtimeCandidates = collect();
 
         if ($scheduledStart !== null && $scheduledEnd !== null) {
-            $overlapStart = $minuteEntry->max($scheduledStart);
-            $overlapEnd = $minuteExit->min($scheduledEnd);
-            $scheduledMinutes = $this->minutes($overlapStart, $overlapEnd);
-            $scheduledRates = $this->ratesFor($occurrence, $overlapStart, $overlapEnd, false, $isHoliday);
+            $preShiftMinutes = 0;
+            $postShiftMinutes = 0;
+
+            for ($offset = 0; $offset < $workedMinutes; $offset++) {
+                $minuteStart = $entry->addMinutes($offset);
+
+                if ($minuteStart->lt($scheduledStart)) {
+                    $preShiftMinutes++;
+                } elseif ($minuteStart->lt($scheduledEnd)) {
+                    $scheduledMinutes++;
+                } else {
+                    $postShiftMinutes++;
+                }
+            }
+
+            $scheduledObservedStart = $entry->addMinutes($preShiftMinutes);
+            $scheduledObservedEnd = $scheduledObservedStart->addMinutes($scheduledMinutes);
+            $scheduledRates = $this->ratesFor(
+                $occurrence,
+                $scheduledObservedStart,
+                $scheduledObservedEnd,
+                false,
+                $isHoliday,
+            );
             $fingerprint = $this->fingerprint($occurrence, $isHoliday);
+            $scheduledDuration = $this->minutes($scheduledStart, $scheduledEnd);
+            $missingScheduledMinutes = max(0, $scheduledDuration - $scheduledMinutes);
+            $lateMinutes = min(
+                $missingScheduledMinutes,
+                $scheduledObservedStart->gt($scheduledStart)
+                    ? $this->minutes($scheduledStart, $scheduledObservedStart)
+                    : 0,
+            );
+            $earlyMinutes = $missingScheduledMinutes - $lateMinutes;
 
-            if ($minuteEntry->gt($scheduledStart)) {
-                $deficitEnd = $minuteEntry->min($scheduledEnd);
-
-                if ($this->minutes($scheduledStart, $deficitEnd) > 0) {
-                    $deficits->push(new AttendanceSegment(
-                        'late_arrival',
-                        $scheduledStart,
-                        $deficitEnd,
-                        $fingerprint,
-                        $this->ratesFor($occurrence, $scheduledStart, $deficitEnd, false, $isHoliday),
-                    ));
-                }
+            if ($lateMinutes > 0) {
+                $deficitEnd = $scheduledStart->addMinutes($lateMinutes);
+                $deficits->push(new AttendanceSegment(
+                    'late_arrival',
+                    $scheduledStart,
+                    $deficitEnd,
+                    $fingerprint,
+                    $this->ratesFor($occurrence, $scheduledStart, $deficitEnd, false, $isHoliday),
+                ));
             }
 
-            if ($minuteExit->lt($scheduledEnd)) {
-                $deficitStart = $minuteExit->max($scheduledStart);
-
-                if ($this->minutes($deficitStart, $scheduledEnd) > 0) {
-                    $deficits->push(new AttendanceSegment(
-                        'early_departure',
-                        $deficitStart,
-                        $scheduledEnd,
-                        $fingerprint,
-                        $this->ratesFor($occurrence, $deficitStart, $scheduledEnd, false, $isHoliday),
-                    ));
-                }
+            if ($earlyMinutes > 0) {
+                $deficitStart = $scheduledEnd->subMinutes($earlyMinutes);
+                $deficits->push(new AttendanceSegment(
+                    'early_departure',
+                    $deficitStart,
+                    $scheduledEnd,
+                    $fingerprint,
+                    $this->ratesFor($occurrence, $deficitStart, $scheduledEnd, false, $isHoliday),
+                ));
             }
 
-            if ($minuteEntry->lt($scheduledStart)) {
-                $candidateEnd = $minuteExit->min($scheduledStart);
-
-                if ($this->minutes($minuteEntry, $candidateEnd) > 0) {
-                    $overtimeCandidates->push(new AttendanceSegment(
-                        'pre_shift',
-                        $minuteEntry,
-                        $candidateEnd,
-                        $fingerprint,
-                        $this->ratesFor($occurrence, $minuteEntry, $candidateEnd, true, $isHoliday),
-                    ));
-                }
+            if ($preShiftMinutes > 0) {
+                $candidateEnd = $entry->addMinutes($preShiftMinutes);
+                $overtimeCandidates->push(new AttendanceSegment(
+                    'pre_shift',
+                    $entry,
+                    $candidateEnd,
+                    $fingerprint,
+                    $this->ratesFor($occurrence, $entry, $candidateEnd, true, $isHoliday),
+                ));
             }
 
-            if ($minuteExit->gt($scheduledEnd)) {
-                $candidateStart = $minuteEntry->max($scheduledEnd);
-
-                if ($this->minutes($candidateStart, $minuteExit) > 0) {
-                    $overtimeCandidates->push(new AttendanceSegment(
-                        'post_shift',
-                        $candidateStart,
-                        $minuteExit,
-                        $fingerprint,
-                        $this->ratesFor($occurrence, $candidateStart, $minuteExit, true, $isHoliday),
-                    ));
-                }
+            if ($postShiftMinutes > 0) {
+                $candidateStart = $payableEnd->subMinutes($postShiftMinutes);
+                $overtimeCandidates->push(new AttendanceSegment(
+                    'post_shift',
+                    $candidateStart,
+                    $payableEnd,
+                    $fingerprint,
+                    $this->ratesFor($occurrence, $candidateStart, $payableEnd, true, $isHoliday),
+                ));
             }
-        } elseif ($this->minutes($minuteEntry, $minuteExit) > 0) {
+        } elseif ($workedMinutes > 0) {
             $overtimeCandidates->push(new AttendanceSegment(
                 'non_working',
-                $minuteEntry,
-                $minuteExit,
+                $entry,
+                $payableEnd,
                 $this->fingerprint($occurrence, $isHoliday),
-                $this->ratesFor($occurrence, $minuteEntry, $minuteExit, true, $isHoliday),
+                $this->ratesFor($occurrence, $entry, $payableEnd, true, $isHoliday),
             ));
         }
 
@@ -197,7 +214,7 @@ class AttendanceShiftAnalyzer
             workDate: $occurrence->workDate,
             entryAt: $entry,
             exitAt: $exit,
-            workedMinutes: $this->minutes($minuteEntry, $minuteExit),
+            workedMinutes: $workedMinutes,
             scheduledMinutes: $scheduledMinutes,
             scheduledRates: $scheduledRates,
             deficits: $deficits,

@@ -53,11 +53,27 @@ test('partitions second-bearing marks once into scheduled and candidate minutes'
     expect($analysis->workedMinutes)->toBe(510)
         ->and($analysis->scheduledMinutes)->toBe(480)
         ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
-        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 14:00:00')
-        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 14:30:00')
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 14:00:30')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 14:30:30')
         ->and($candidate->minutes)->toBe(30)
         ->and($candidate->rateMinutes->extra25Minutes)->toBe(30)
         ->and($analysis->scheduledMinutes + $candidate->minutes)->toBe($analysis->workedMinutes);
+});
+
+test('never creates an unworked minute from second-bearing marks', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 14:00:59',
+        exitAt: '2026-07-20 14:30:00',
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(29)
+        ->and($analysis->scheduledMinutes)->toBe(0)
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 14:00:59')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 14:29:59')
+        ->and($candidate->minutes)->toBe(29)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(29);
 });
 
 test('detects a complete post-shift overtime candidate', function () {
