@@ -179,6 +179,23 @@ test('credits the configured scheduled minutes for a justified full-day absence'
         ->and($evaluation->payableRates->ordinaryMinutes)->toBe(480);
 });
 
+test('preserves scheduled rate bands for a justified overnight absence', function () {
+    [$occurrence, $analysis] = payrollShiftWithoutMarks(
+        scheduledStart: '18:00',
+        scheduledEnd: '06:00',
+    );
+    $absence = (new JustifiedAbsence)->forceFill(['reason' => 'permission']);
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
+
+    expect($evaluation->status)->toBe('processable')
+        ->and($evaluation->scheduledMinutes)->toBe(720)
+        ->and($evaluation->recognizedMinutes)->toBe(720)
+        ->and($evaluation->payableRates->ordinaryMinutes)->toBe(0)
+        ->and($evaluation->payableRates->extra50Minutes)->toBe(360)
+        ->and($evaluation->payableRates->extra75Minutes)->toBe(360);
+});
+
 test('skips a non-working date with no observed marks', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks(isWorkingDay: false);
 
@@ -266,22 +283,32 @@ function payrollAttendanceException(AttendanceSegment $deficit, string $decision
     ]);
 }
 
-function payrollShiftWithoutMarks(bool $isWorkingDay = true): array
-{
+function payrollShiftWithoutMarks(
+    bool $isWorkingDay = true,
+    string $scheduledStart = '06:00',
+    string $scheduledEnd = '14:00',
+): array {
     $date = CarbonImmutable::parse('2026-07-20')->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
         'id' => 10,
         'is_working_day' => $isWorkingDay,
         'base_ordinary_hours' => 8,
-        'start_time' => '06:00',
-        'end_time' => '14:00',
+        'start_time' => $scheduledStart,
+        'end_time' => $scheduledEnd,
     ]);
+    $start = $date->setTimeFromTimeString($scheduledStart);
+    $end = $date->setTimeFromTimeString($scheduledEnd);
+
+    if ($end->lte($start)) {
+        $end = $end->addDay();
+    }
+
     $occurrence = new ShiftOccurrence(
         $date,
         (new EmployeeScheduleAssignment)->forceFill(['id' => 20]),
         $schedule,
-        $date->setTime(6, 0),
-        $date->setTime(14, 0),
+        $start,
+        $end,
         collect(),
         ShiftOccurrence::NO_MARKS,
     );

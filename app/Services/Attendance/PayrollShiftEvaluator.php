@@ -39,12 +39,15 @@ class PayrollShiftEvaluator
                 );
             }
 
-            $scheduledMinutes = $occurrence->scheduledStart !== null && $occurrence->scheduledEnd !== null
-                ? (int) floor($occurrence->scheduledStart->diffInSeconds($occurrence->scheduledEnd) / 60)
+            $hasScheduledInterval = $occurrence->scheduledStart !== null && $occurrence->scheduledEnd !== null;
+            $scheduledMinutes = $hasScheduledInterval
+                ? $analysis->scheduledMinutes
                 : (int) round((float) $occurrence->schedule->base_ordinary_hours * 60);
             $isJustified = $absence !== null;
             $payableRates = $isJustified
-                ? new BandSplit(ordinaryMinutes: $scheduledMinutes)
+                ? ($hasScheduledInterval
+                    ? $analysis->scheduledRates
+                    : new BandSplit(ordinaryMinutes: $scheduledMinutes))
                 : new BandSplit;
 
             return new PayrollShiftEvaluation(
