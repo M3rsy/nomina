@@ -28,6 +28,7 @@ readonly class PayrollShiftEvaluation
         public int $recognizedMinutes = 0,
         public int $detectedOvertimeMinutes = 0,
         public int $approvedOvertimeMinutes = 0,
+        public int $excusedDeficitMinutes = 0,
         public BandSplit $payableRates = new BandSplit,
         public bool $isAbsence = false,
         public bool $isJustified = false,

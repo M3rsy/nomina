@@ -9,6 +9,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
@@ -109,6 +110,48 @@ test('processor persists approved overtime in exact minutes and decimal hours', 
         ->and($result->extra_25_minutes)->toBe(30)
         ->and((float) $result->extra_25_hours)->toBe(0.5)
         ->and($payPeriod->fresh()->status)->toBe('processed');
+});
+
+test('processor credits an exact granted attendance deficit without changing observed time', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $employee = processorEmployee($company);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+
+    foreach (['2026-01-05 06:15:00', '2026-01-05 14:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]);
+    }
+
+    app(CurrentCompany::class)->set($company);
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-01-05');
+    $deficit = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->deficits->sole();
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $exception = app(AttendanceExceptionRecorder::class)->decide(
+        $payPeriod,
+        $employee,
+        '2026-01-05',
+        $deficit->key,
+        'granted',
+        'Demora autorizada por supervisión',
+        $actor,
+    );
+
+    app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+    $result = PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->sole();
+
+    expect($result->entry_at->toDateTimeString())->toBe('2026-01-05 06:15:00')
+        ->and($result->worked_minutes)->toBe(465)
+        ->and($result->scheduled_minutes)->toBe(480)
+        ->and($result->recognized_minutes)->toBe(480)
+        ->and($result->ordinary_minutes)->toBe(480)
+        ->and($result->metadata)->toBe([
+            'attendance_exception_ids' => [$exception->id],
+            'excused_deficit_minutes' => 15,
+        ]);
 });
 
 test('processor rejects an approval made stale by a corrected mark', function () {
