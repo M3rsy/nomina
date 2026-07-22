@@ -820,6 +820,19 @@
                         <span>Aplicar a todas las marcas sin empleado de este mismo externo</span>
                     </label>
 
+                    <label for="assign_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la asignación</span>
+                        <textarea
+                            id="assign_reason"
+                            wire:model="assignReason"
+                            rows="3"
+                            maxlength="500"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá cómo se verificó la identidad del empleado"
+                        ></textarea>
+                        @error('assignReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
                         <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Guardar</button>

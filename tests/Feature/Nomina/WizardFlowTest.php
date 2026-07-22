@@ -220,6 +220,28 @@ test('editing a raw mark requires a reason and records the applied values', func
         ->and($revision['at'])->not->toBeEmpty();
 });
 
+test('closing the edit modal resets its correction state', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $rawMark = RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'event_at' => '2026-01-05 06:00:00',
+        'status' => 'valid',
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openEditRawMark', $rawMark->id)
+        ->set('editReason', 'Motivo transitorio')
+        ->set('editWarning', 'Advertencia transitoria')
+        ->call('closeEditModal')
+        ->assertSet('showEditModal', false)
+        ->assertSet('editRawMarkId', null)
+        ->assertSet('editEventAt', '')
+        ->assertSet('editReason', '')
+        ->assertSet('editWarning', null);
+});
+
 test('correcting a raw mark status requires a reason and records the applied values', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();

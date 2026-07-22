@@ -79,6 +79,8 @@ class Revisar extends Component
 
     public bool $assignApplyAll = false;
 
+    public string $assignReason = '';
+
     public bool $showAbsencesModal = false;
 
     public ?int $absenceEmployeeId = null;
@@ -213,7 +215,10 @@ class Revisar extends Component
 
     public function closeEditModal(): void
     {
-        $this->closeEditModal();
+        $this->showEditModal = false;
+        $this->editRawMarkId = null;
+        $this->editEventAt = '';
+        $this->editReason = '';
         $this->editWarning = null;
         $this->resetErrorBag();
     }
@@ -359,6 +364,7 @@ class Revisar extends Component
         $this->assignRawMarkId = $rawMark->id;
         $this->assignEmployeeId = $rawMark->employee_id;
         $this->assignApplyAll = false;
+        $this->assignReason = '';
         $this->showAssignModal = true;
     }
 
@@ -368,6 +374,7 @@ class Revisar extends Component
         $this->assignRawMarkId = null;
         $this->assignEmployeeId = null;
         $this->assignApplyAll = false;
+        $this->assignReason = '';
         $this->resetErrorBag();
     }
 
@@ -385,15 +392,19 @@ class Revisar extends Component
 
         $this->authorize('assign', $rawMark);
 
+        $this->assignReason = trim($this->assignReason);
+
         $validated = $this->validate([
             'assignEmployeeId' => ['required', 'integer', Rule::exists('employees', 'id')->where(function ($query) {
                 $query->where('company_id', $this->payPeriod->company_id);
             })],
             'assignApplyAll' => ['boolean'],
+            'assignReason' => ['required', 'string', 'max:500'],
         ]);
 
         $employeeId = (int) $validated['assignEmployeeId'];
         $applyAll = (bool) $validated['assignApplyAll'];
+        $reason = $validated['assignReason'];
         $employee = $this->findPeriodEmployee($employeeId);
 
         if ($employee === null) {
@@ -402,8 +413,8 @@ class Revisar extends Component
             return;
         }
 
-        DB::transaction(function () use ($rawMark, $employee, $applyAll): void {
-            $this->assignEmployeeToRawMark($rawMark, $employee);
+        DB::transaction(function () use ($rawMark, $employee, $applyAll, $reason): void {
+            $this->assignEmployeeToRawMark($rawMark, $employee, $reason);
 
             if ($applyAll) {
                 $rawMarks = RawMark::withoutCompanyScope()
@@ -418,15 +429,12 @@ class Revisar extends Component
                         continue;
                     }
 
-                    $this->assignEmployeeToRawMark($mark, $employee);
+                    $this->assignEmployeeToRawMark($mark, $employee, $reason);
                 }
             }
         });
 
-        $this->showAssignModal = false;
-        $this->assignRawMarkId = null;
-        $this->assignEmployeeId = null;
-        $this->assignApplyAll = false;
+        $this->closeAssignModal();
     }
 
     public function openCorrectRawMark(int $id): void
@@ -1133,15 +1141,16 @@ class Revisar extends Component
             ->find($id);
     }
 
-    private function assignEmployeeToRawMark(RawMark $rawMark, Employee $employee): void
+    private function assignEmployeeToRawMark(RawMark $rawMark, Employee $employee, string $reason): void
     {
         app(RawMarkMutationGuard::class)->mutate(
             $rawMark,
-            function (RawMark $lockedMark) use ($employee): void {
+            function (RawMark $lockedMark) use ($employee, $reason): void {
                 $revisions = $lockedMark->metadata['revisions'] ?? [];
                 $revisions[] = [
                     'action' => 'assign_employee',
                     'user_id' => Auth::id(),
+                    'reason' => $reason,
                     'previous_employee_id' => $lockedMark->employee_id,
                     'new_employee_id' => $employee->id,
                     'at' => now()->toDateTimeString(),
