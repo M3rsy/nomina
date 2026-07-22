@@ -49,7 +49,7 @@ test('procesar page renders payroll results grouped by employee', function () {
         'exit_at' => Carbon::parse('2026-01-05 17:00:00'),
         'worked_hours' => 9.0,
         'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
+        'extra_25_hours' => 0.5,
     ]);
 
     $this->actingAs($admin);
@@ -67,10 +67,11 @@ test('procesar summary card shows totals for employees and hours', function () {
     PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
         'date' => '2026-01-05',
         'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
+        'extra_25_hours' => 0.5,
         'extra_50_hours' => 0,
         'extra_75_hours' => 0,
         'extra_100_hours' => 0,
+        'extra_25_minutes' => 30,
     ]);
 
     $this->actingAs($admin);
@@ -78,10 +79,14 @@ test('procesar summary card shows totals for employees and hours', function () {
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
         ->assertViewHas('summary', function ($summary) {
-            return $summary['total_employees'] === 1
-                && $summary['total_records'] === 1
-                && $summary['ordinary_hours'] === 8.0
-                && $summary['extra_25_hours'] === 1;
+            expect($summary)->toMatchArray([
+                'total_employees' => 1,
+                'total_records' => 1,
+                'ordinary_hours' => 8.0,
+                'extra_25_hours' => 0.5,
+            ]);
+
+            return true;
         });
 });
 
