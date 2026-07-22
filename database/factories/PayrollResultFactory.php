@@ -24,12 +24,34 @@ class PayrollResultFactory extends Factory
             'date' => fake()->date(),
             'entry_at' => null,
             'exit_at' => null,
+            'employee_external_id' => function (array $attributes) {
+                $employee = Employee::find($attributes['employee_id']);
+
+                return $employee?->external_id ?? (string) fake()->randomNumber(8);
+            },
+            'employee_name' => function (array $attributes) {
+                $employee = Employee::find($attributes['employee_id']);
+
+                return $employee
+                    ? trim($employee->first_name.' '.$employee->last_name)
+                    : fake()->name();
+            },
             'worked_hours' => 0.0,
             'ordinary_hours' => 0.0,
             'extra_25_hours' => 0,
             'extra_50_hours' => 0,
             'extra_75_hours' => 0,
             'extra_100_hours' => 0,
+            'worked_minutes' => 0,
+            'scheduled_minutes' => 0,
+            'recognized_minutes' => 0,
+            'detected_overtime_minutes' => 0,
+            'approved_overtime_minutes' => 0,
+            'ordinary_minutes' => 0,
+            'extra_25_minutes' => 0,
+            'extra_50_minutes' => 0,
+            'extra_75_minutes' => 0,
+            'extra_100_minutes' => 0,
             'is_absence' => false,
             'is_justified' => false,
             'unjustified' => false,

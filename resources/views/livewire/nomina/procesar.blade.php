@@ -52,7 +52,7 @@
         <div class="bg-white p-4 rounded shadow">
             <div class="text-sm text-gray-500">Horas extras</div>
             <div class="text-xl font-bold">
-                {{ $summary['extra_25_hours'] + $summary['extra_50_hours'] + $summary['extra_75_hours'] + $summary['extra_100_hours'] }}
+                {{ number_format($summary['extra_25_hours'] + $summary['extra_50_hours'] + $summary['extra_75_hours'] + $summary['extra_100_hours'], 2) }}
             </div>
         </div>
     </div>
@@ -93,12 +93,12 @@
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->date->format('d/m/Y') }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->entry_at?->format('d/m/Y h:i A') }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->exit_at?->format('d/m/Y h:i A') }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->worked_hours, 2) }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->ordinary_hours, 2) }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->extra_25_hours }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->extra_50_hours }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->extra_75_hours }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->extra_100_hours }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->worked_minutes / 60, 2) }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->ordinary_minutes / 60, 2) }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_25_minutes / 60, 2) }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_50_minutes / 60, 2) }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_75_minutes / 60, 2) }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_100_minutes / 60, 2) }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">
                             @if ($result->is_absence)
                                 @if ($result->is_justified)

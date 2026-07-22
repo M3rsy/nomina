@@ -56,6 +56,14 @@
                     <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-600">Sin filtros activos</span>
                 @endif
             </div>
+
+            @if (! $hasScheduleAssignmentTable && in_array($type, ['all', 'schedule_assignment'], true))
+                <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    No se está mostrando el tipo "Asignaciones de jornada" porque la tabla
+                    <span class="font-semibold">employee_schedule_assignments</span> no existe en esta base.
+                    Ejecutá la migración correspondiente para recuperar ese historial en auditoría.
+                </div>
+            @endif
         </section>
 
         <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">

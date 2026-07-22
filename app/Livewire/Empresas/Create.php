@@ -3,6 +3,8 @@
 namespace App\Livewire\Empresas;
 
 use App\Models\Company;
+use App\Services\Attendance\DefaultWorkScheduleProvisioner;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -15,7 +17,7 @@ class Create extends Component
 
     public bool $is_active = true;
 
-    public function save(): void
+    public function save(DefaultWorkScheduleProvisioner $scheduleProvisioner): void
     {
         $this->authorize('create', Company::class);
 
@@ -29,7 +31,11 @@ class Create extends Component
             'legal_id.max' => 'El RTN no puede exceder 50 caracteres.',
         ]);
 
-        Company::create($validated);
+        DB::transaction(function () use ($scheduleProvisioner, $validated): void {
+            $company = Company::create($validated);
+
+            $scheduleProvisioner->provision($company);
+        });
 
         $this->redirect('/empresas', navigate: true);
     }

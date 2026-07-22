@@ -26,6 +26,22 @@ test('split 14:00 to 18:00 yields four extra 25 hours', function () {
         ->and($split->extra75Hours())->toEqual(0.0);
 });
 
+test('preserves a half hour as thirty exact minutes', function () {
+    $split = $this->splitter->split(Carbon::parse('2026-10-07 14:00:00'), Carbon::parse('2026-10-07 14:30:00'));
+
+    expect($split->extra25Minutes)->toBe(30)
+        ->and($split->totalMinutes())->toBe(30)
+        ->and($split->extra25Hours())->toBe(0.5);
+});
+
+test('keeps whole-minute totals when seconds cross a rate boundary', function () {
+    $split = $this->splitter->split(Carbon::parse('2026-10-07 13:59:30'), Carbon::parse('2026-10-07 14:00:30'));
+
+    expect($split->ordinaryMinutes)->toBe(1)
+        ->and($split->extra25Minutes)->toBe(0)
+        ->and($split->totalMinutes())->toBe(1);
+});
+
 test('split 18:00 to 23:00 yields five extra 50 hours', function () {
     $split = $this->splitter->split(Carbon::parse('2026-10-07 18:00:00'), Carbon::parse('2026-10-07 23:00:00'));
 
@@ -96,6 +112,7 @@ test('split supports wrapped bands that reach into next day', function () {
 
     $split = $this->splitter->split(Carbon::parse('2026-10-07 22:00:00'), Carbon::parse('2026-10-08 04:00:00'), $bands);
 
-    expect($split->extra50Hours())->toBe(2.0)
-        ->and($split->extra25Hours())->toBe(3.0);
+    expect($split->extra50Hours())->toBe(3.0)
+        ->and($split->extra25Hours())->toBe(3.0)
+        ->and($split->totalHours())->toBe(6.0);
 });

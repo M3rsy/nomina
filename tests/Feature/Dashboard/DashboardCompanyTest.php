@@ -83,6 +83,38 @@ test('company admin sees only own company stats', function () {
         });
 });
 
+test('company dashboard derives payroll totals from canonical minutes', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'processed']);
+
+    PayrollResult::factory()
+        ->forCompany($company)
+        ->forPayPeriod($payPeriod)
+        ->forEmployee($employee)
+        ->count(2)
+        ->create([
+            'worked_hours' => 0.03,
+            'ordinary_hours' => 0.02,
+            'extra_25_hours' => 0.02,
+            'worked_minutes' => 2,
+            'ordinary_minutes' => 1,
+            'extra_25_minutes' => 1,
+        ]);
+
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    Livewire::actingAs($admin)
+        ->test(CompanyAdmin::class)
+        ->assertSet('payPeriods', function (array $periods): bool {
+            return count($periods) === 1
+                && abs($periods[0]['worked_hours'] - (4 / 60)) < 0.000001
+                && abs($periods[0]['ordinary_hours'] - (2 / 60)) < 0.000001
+                && abs($periods[0]['extra_hours'] - (2 / 60)) < 0.000001;
+        });
+});
+
 test('company admin date filter excludes out of range payrolls', function () {
     $company = Company::factory()->create();
 

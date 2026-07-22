@@ -8,10 +8,26 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use LogicException;
 
 class UploadedFile extends Model
 {
     use BelongsToCompany, HasFactory, SoftDeletes;
+
+    private const IMMUTABLE_EVIDENCE_FIELDS = [
+        'company_id',
+        'pay_period_id',
+        'original_name',
+        'stored_name',
+        'disk',
+        'path',
+        'mime',
+        'extension',
+        'size_bytes',
+        'encoding',
+        'sha256',
+        'user_id',
+    ];
 
     protected $fillable = [
         'company_id',
@@ -37,6 +53,15 @@ class UploadedFile extends Model
             'validation_summary' => 'array',
             'deleted_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function (self $uploadedFile): void {
+            if ($uploadedFile->isDirty(self::IMMUTABLE_EVIDENCE_FIELDS)) {
+                throw new LogicException('Uploaded attendance evidence is immutable after creation.');
+            }
+        });
     }
 
     public function company(): BelongsTo

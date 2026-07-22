@@ -33,9 +33,16 @@ test('saveAssign assigns a single employee to a raw mark and corrects status', f
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->call('openAssignModal', $rawMark->id)
         ->set('assignEmployeeId', $employee->id)
+        ->call('saveAssign')
+        ->assertHasErrors(['assignReason' => 'required']);
+
+    expect($rawMark->fresh()->employee_id)->toBeNull();
+
+    $component
+        ->set('assignReason', 'Código verificado contra el legajo del empleado')
         ->call('saveAssign')
         ->assertHasNoErrors();
 
@@ -49,8 +56,10 @@ test('saveAssign assigns a single employee to a raw mark and corrects status', f
     expect($revisions)->toHaveCount(1);
     expect($revisions[0]['action'])->toBe('assign_employee');
     expect($revisions[0]['user_id'])->toBe($admin->id);
+    expect($revisions[0]['reason'])->toBe('Código verificado contra el legajo del empleado');
     expect($revisions[0]['previous_employee_id'])->toBeNull();
     expect($revisions[0]['new_employee_id'])->toBe($employee->id);
+    expect($revisions[0]['at'])->not->toBeEmpty();
 });
 
 test('assignApplyAll assigns employee to every raw mark with same external id and null employee', function () {
@@ -95,6 +104,7 @@ test('assignApplyAll assigns employee to every raw mark with same external id an
         ->call('openAssignModal', $targetMark->id)
         ->set('assignEmployeeId', $employee->id)
         ->set('assignApplyAll', true)
+        ->set('assignReason', 'Código externo verificado para todas las marcas')
         ->call('saveAssign')
         ->assertHasNoErrors();
 
@@ -133,6 +143,7 @@ test('cannot assign employee from another company to raw mark', function () {
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->call('openAssignModal', $rawMark->id)
         ->set('assignEmployeeId', $employeeB->id)
+        ->set('assignReason', 'Intento de asignación cruzada')
         ->call('saveAssign')
         ->assertHasErrors('assignEmployeeId');
 

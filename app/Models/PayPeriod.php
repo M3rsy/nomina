@@ -15,6 +15,14 @@ class PayPeriod extends Model
 {
     use BelongsToCompany, HasFactory, SoftDeletes;
 
+    public const ATTENDANCE_LOCKED_STATUSES = [
+        'processing',
+        'processed',
+        'approved',
+        'exported',
+        'cancelled',
+    ];
+
     public const UPLOADABLE_STATUSES = [
         'draft',
         'uploaded',
@@ -74,6 +82,16 @@ class PayPeriod extends Model
     public function payrollResults(): HasMany
     {
         return $this->hasMany(PayrollResult::class);
+    }
+
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class);
+    }
+
+    public function attendanceExceptions(): HasMany
+    {
+        return $this->hasMany(AttendanceException::class);
     }
 
     public function isActive(): bool

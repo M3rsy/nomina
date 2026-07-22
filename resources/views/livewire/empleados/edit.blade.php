@@ -11,22 +11,16 @@
         <form wire:submit="save" class="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
             <div class="space-y-5">
                 @if ($isSuperAdmin)
-                    <label for="company_id" class="block space-y-1.5">
+                    <div class="block space-y-1.5">
                         <span class="text-sm font-semibold text-slate-800">Empresa</span>
-                        <select
-                            id="company_id"
-                            wire:model="company_id"
-                            class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                        >
-                            <option value="">Seleccione...</option>
-                            @foreach ($companies as $company)
-                                <option value="{{ $company->id }}">{{ $company->name }}</option>
-                            @endforeach
-                        </select>
+                        <p class="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700">
+                            {{ $employee->company->name }}
+                        </p>
+                        <p class="text-xs text-slate-500">La empresa forma parte del historial del empleado y no puede cambiarse desde esta edición.</p>
                         @error('company_id')
                             <p id="company_id-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
                         @enderror
-                    </label>
+                    </div>
                 @endif
 
                 <div class="grid gap-5 sm:grid-cols-2">
@@ -133,6 +127,52 @@
                         @enderror
                     </label>
                 </div>
+
+                <section class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
+                    <div class="mb-4">
+                        <h2 class="text-base font-bold text-slate-900">Jornada asignada</h2>
+                        <p class="mt-1 text-sm text-slate-600">Una nueva asignación conserva el historial y comienza en la fecha indicada.</p>
+                    </div>
+
+                    @if ($scheduleAssignments->isNotEmpty())
+                        <div class="mb-4 space-y-2">
+                            @foreach ($scheduleAssignments as $assignment)
+                                <div class="rounded-xl border border-indigo-100 bg-white px-3 py-2 text-sm text-slate-700">
+                                    <span class="font-semibold text-slate-900">{{ $assignment->profile?->name ?? 'Jornada no disponible' }}</span>
+                                    · {{ $assignment->effective_from->format('d/m/Y') }}–{{ $assignment->effective_to?->format('d/m/Y') ?? 'actual' }}
+                                    <span class="block text-xs text-slate-500">{{ $assignment->reason }}</span>
+                                </div>
+                            @endforeach
+                        </div>
+                    @else
+                        <p class="mb-4 text-sm font-medium text-amber-800">Este empleado todavía no tiene una jornada asignada.</p>
+                    @endif
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <label for="schedule_profile_id" class="block space-y-1.5">
+                            <span class="text-sm font-semibold text-slate-800">Nueva jornada</span>
+                            <select id="schedule_profile_id" wire:model="schedule_profile_id" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                                <option value="">Mantener la jornada actual</option>
+                                @foreach ($scheduleProfiles as $profile)
+                                    <option value="{{ $profile->id }}">{{ $profile->name }} · v{{ $profile->version }}</option>
+                                @endforeach
+                            </select>
+                            @error('schedule_profile_id') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                        </label>
+
+                        <label for="schedule_effective_from" class="block space-y-1.5">
+                            <span class="text-sm font-semibold text-slate-800">Vigente desde</span>
+                            <input id="schedule_effective_from" type="date" wire:model="schedule_effective_from" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                            @error('schedule_effective_from') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                        </label>
+                    </div>
+
+                    <label for="schedule_reason" class="mt-4 block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Motivo del cambio</span>
+                        <input id="schedule_reason" type="text" wire:model="schedule_reason" maxlength="255" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('schedule_reason') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                    </label>
+                </section>
 
                 <label for="notes" class="block space-y-1.5">
                     <span class="text-sm font-semibold text-slate-800">Notas</span>

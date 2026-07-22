@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\User;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -113,16 +114,24 @@ class SuperAdmin extends Component
 
     private function monthlyPayrollTrends(int $companyId): array
     {
+        $minuteColumns = [
+            'ordinary_minutes' => 'ordinary_hours',
+            'extra_25_minutes' => 'extra_25_hours',
+            'extra_50_minutes' => 'extra_50_hours',
+            'extra_75_minutes' => 'extra_75_hours',
+            'extra_100_minutes' => 'extra_100_hours',
+        ];
+
+        $selects = ['date', 'count(*) as entries'];
+        foreach ($minuteColumns as $minuteColumn => $hourColumn) {
+            $selects[] = $this->minuteAggregateExpression($minuteColumn, $hourColumn);
+        }
+
         $dailyTotals = PayrollResult::withoutCompanyScope()
             ->where('company_id', $companyId)
             ->when($this->from, fn ($q) => $q->whereDate('date', '>=', $this->from))
             ->when($this->to, fn ($q) => $q->whereDate('date', '<=', $this->to))
-            ->selectRaw('date, count(*) as entries')
-            ->selectRaw('coalesce(sum(ordinary_hours), 0) as ordinary_hours')
-            ->selectRaw('coalesce(sum(extra_25_hours), 0) as extra_25_hours')
-            ->selectRaw('coalesce(sum(extra_50_hours), 0) as extra_50_hours')
-            ->selectRaw('coalesce(sum(extra_75_hours), 0) as extra_75_hours')
-            ->selectRaw('coalesce(sum(extra_100_hours), 0) as extra_100_hours')
+            ->selectRaw(implode(', ', $selects))
             ->groupBy('date')
             ->orderBy('date')
             ->get();
@@ -135,23 +144,40 @@ class SuperAdmin extends Component
                 'month' => $month,
                 'label' => ucfirst($totals->date->locale('es')->translatedFormat('F \\d\\e Y')),
                 'entries' => 0,
-                'ordinary_hours' => 0.0,
-                'extra_hours' => 0.0,
+                'ordinary_minutes' => 0,
+                'extra_minutes' => 0,
             ];
             $months[$month]['entries'] += (int) $totals->entries;
-            $months[$month]['ordinary_hours'] += (float) $totals->ordinary_hours;
-            $months[$month]['extra_hours'] += (float) $totals->extra_25_hours
-                + (float) $totals->extra_50_hours
-                + (float) $totals->extra_75_hours
-                + (float) $totals->extra_100_hours;
+            $months[$month]['ordinary_minutes'] += (int) $totals->ordinary_minutes;
+            $months[$month]['extra_minutes'] += (int) $totals->extra_25_minutes
+                + (int) $totals->extra_50_minutes
+                + (int) $totals->extra_75_minutes
+                + (int) $totals->extra_100_minutes;
         }
 
         $maxEntries = max(array_column($months, 'entries') ?: [1]);
         foreach ($months as &$monthTotals) {
+            $monthTotals['ordinary_hours'] = $monthTotals['ordinary_minutes'] / 60;
+            $monthTotals['extra_hours'] = $monthTotals['extra_minutes'] / 60;
             $monthTotals['bar_width'] = round($monthTotals['entries'] / $maxEntries * 100, 2);
+
+            unset($monthTotals['ordinary_minutes'], $monthTotals['extra_minutes']);
         }
         unset($monthTotals);
 
         return array_values($months);
+    }
+
+    private function minuteAggregateExpression(string $minuteColumn, string $hourColumn): string
+    {
+        if (Schema::hasColumn('payroll_results', $minuteColumn)) {
+            return "coalesce(sum({$minuteColumn}), 0) as {$minuteColumn}";
+        }
+
+        if (Schema::hasColumn('payroll_results', $hourColumn)) {
+            return "coalesce(sum(round({$hourColumn} * 60)), 0) as {$minuteColumn}";
+        }
+
+        return "0 as {$minuteColumn}";
     }
 }
