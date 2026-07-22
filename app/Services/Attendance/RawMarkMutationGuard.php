@@ -128,14 +128,8 @@ class RawMarkMutationGuard
     ): void {
         foreach ($affectedOccurrences as $context) {
             $occurrence = $this->resolver->resolve($context['employee'], $context['work_date']);
-            $manualCount = $occurrence->marks
-                ->where('source', RawMark::SOURCE_MANUAL)
-                ->count();
 
-            if ($manualCount > 0
-                && ($occurrence->status !== ShiftOccurrence::RESOLVED
-                    || $occurrence->marks->count() !== 2
-                    || $manualCount !== 1)) {
+            if (! $occurrence->satisfiesManualPairInvariant()) {
                 $this->rejectInvalidManualPair();
             }
         }

@@ -45,4 +45,14 @@ class ShiftOccurrence
     {
         return $this->status === self::RESOLVED ? $this->marks->last() : null;
     }
+
+    public function satisfiesManualPairInvariant(): bool
+    {
+        $manualCount = $this->marks
+            ->where('source', RawMark::SOURCE_MANUAL)
+            ->count();
+
+        return $manualCount === 0
+            || ($this->status === self::RESOLVED && $this->marks->count() === 2 && $manualCount === 1);
+    }
 }
