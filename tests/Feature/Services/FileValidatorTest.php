@@ -7,6 +7,7 @@ use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\FileValidator;
@@ -30,7 +31,7 @@ test('validator marks duplicate records by employee and event time', function ()
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
     ]);
-    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $employee = Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
 
     $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
         'status' => 'pending',
@@ -46,6 +47,7 @@ test('validator marks duplicate records by employee and event time', function ()
 
     expect($report->counts['duplicate'])->toBe(1);
     expect($report->counts['valid'])->toBe(1);
+    expect(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-01-19'))->toBe(1);
     expect(RawMark::where('uploaded_file_id', $uploadedFile->id)->where('status', 'duplicate')->exists())->toBeTrue();
     expect(RawMark::where('uploaded_file_id', $uploadedFile->id)->where('status', 'valid')->exists())->toBeTrue();
 });
@@ -132,6 +134,7 @@ test('validator accepts a next-day exit whose overnight work date is inside the 
 
     expect($report->counts['valid'])->toBe(2)
         ->and($report->counts['out_of_period'])->toBe(0)
+        ->and(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-07-20'))->toBe(2)
         ->and(RawMark::where('uploaded_file_id', $uploadedFile->id)->pluck('status')->all())
         ->toBe(['valid', 'valid'])
         ->and($occurrence->status)->toBe('resolved')

@@ -14,7 +14,10 @@ use Illuminate\Validation\ValidationException;
 
 class RawMarkMutationGuard
 {
-    public function __construct(private ShiftOccurrenceResolver $resolver) {}
+    public function __construct(
+        private ShiftOccurrenceResolver $resolver,
+        private AttendanceFactGenerationTracker $factGenerations,
+    ) {}
 
     public function mutate(
         RawMark $rawMark,
@@ -108,6 +111,10 @@ class RawMarkMutationGuard
             $lockedMark->refresh();
 
             $this->assertManualPairIntegrity($affectedOccurrences, $lockedMark, $nextEmployee);
+
+            foreach ($affectedOccurrences as $context) {
+                $this->factGenerations->advance($context['employee'], $context['work_date']);
+            }
 
             return $result;
         });

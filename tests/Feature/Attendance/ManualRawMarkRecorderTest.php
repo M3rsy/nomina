@@ -7,6 +7,7 @@ use App\Models\RawMark;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\ShiftOccurrence;
@@ -22,8 +23,11 @@ beforeEach(function () {
 test('completes an observed incomplete pair with one audited manual fact', function () {
     $context = manualMarkContext();
     $recorder = app(ManualRawMarkRecorder::class);
+    $factGenerations = app(AttendanceFactGenerationTracker::class);
 
     $entry = observedMark($context, '2026-07-20 06:00:00');
+    expect($factGenerations->current($context['employee'], '2026-07-20'))->toBe(0);
+
     $exit = $recorder->record(
         $context['period'], $context['employee'], '2026-07-20', '2026-07-20 14:00:00',
         'El reloj no registró la salida', $context['actor'],
@@ -31,6 +35,7 @@ test('completes an observed incomplete pair with one audited manual fact', funct
     $resolved = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
 
     expect($resolved->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($resolved->factGeneration)->toBe(1)
         ->and($resolved->marks->pluck('id')->all())->toBe([$entry->id, $exit->id])
         ->and($exit->source)->toBe(RawMark::SOURCE_MANUAL)
         ->and($exit->uploaded_file_id)->toBeNull()
