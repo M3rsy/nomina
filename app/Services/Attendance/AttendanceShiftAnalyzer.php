@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Models\RawMark;
 use App\Services\Payroll\BandSplit;
 use App\Services\Payroll\BandSplitter;
 use App\Services\PayrollRules;
@@ -175,9 +176,18 @@ class AttendanceShiftAnalyzer
             $isHoliday ? 'holiday' : 'regular',
             $occurrence->entryMark()?->id,
             $occurrence->entryMark()?->event_at?->toIso8601String(),
+            $this->markRevisionGeneration($occurrence->entryMark()),
             $occurrence->exitMark()?->id,
             $occurrence->exitMark()?->event_at?->toIso8601String(),
+            $this->markRevisionGeneration($occurrence->exitMark()),
         ]));
+    }
+
+    private function markRevisionGeneration(?RawMark $mark): string
+    {
+        $revisions = $mark?->metadata['revisions'] ?? [];
+
+        return hash('sha256', json_encode($revisions, JSON_THROW_ON_ERROR));
     }
 
     private function ratesFor(
