@@ -8,6 +8,7 @@ use App\Models\PayrollResult;
 use App\Models\User;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -48,6 +49,36 @@ test('approve changes pay period status from processed to approved', function ()
     expect($payPeriod->status)->toBe('approved')
         ->and($payPeriod->metadata['approved_at'])->not->toBeNull()
         ->and($payPeriod->metadata['approved_by'])->toBe($admin->id);
+});
+
+test('approve cannot overwrite a period reopened before the transition lock', function () {
+    [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Procesar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $armed = true;
+
+    DB::connection()->beforeStartingTransaction(function () use (&$armed, &$raceTriggered, $payPeriod): void {
+        if (! $armed || $raceTriggered) {
+            return;
+        }
+
+        $raceTriggered = true;
+
+        DB::table('pay_periods')
+            ->where('id', $payPeriod->id)
+            ->update(['status' => 'validating']);
+    });
+
+    $component->call('approve')->assertHasNoErrors();
+    $armed = false;
+
+    expect($raceTriggered)->toBeTrue()
+        ->and($payPeriod->fresh()->status)->toBe('validating')
+        ->and($payPeriod->fresh()->payrollResults()->count())->toBe(1);
 });
 
 test('approve opens confirmation modal first', function () {
@@ -104,4 +135,16 @@ test('locked is true after approving', function () {
         ->call('approve');
 
     $component->assertSet('locked', true);
+});
+
+test('excel export is exposed only after payroll approval', function () {
+    [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
+        ->assertDontSee('Generar Excel')
+        ->call('approve')
+        ->assertSee('Generar Excel');
 });
