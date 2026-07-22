@@ -96,6 +96,11 @@ class Company extends Model
         return $this->hasMany(OvertimeDecision::class);
     }
 
+    public function attendanceExceptions(): HasMany
+    {
+        return $this->hasMany(AttendanceException::class);
+    }
+
     public function holidays(): HasMany
     {
         return $this->hasMany(Holiday::class);
