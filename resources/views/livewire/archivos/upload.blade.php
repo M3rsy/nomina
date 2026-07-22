@@ -79,12 +79,12 @@
                                         </svg>
                                     </span>
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold leading-6 text-slate-900">Arrastrá el archivo aquí o tocá el botón para abrir el selector</p>
+                                        <p class="text-sm font-semibold leading-6 text-slate-900">Subí el archivo de asistencia aquí o tocá el botón para abrir el selector</p>
                                         <p class="mt-1 text-xs text-slate-500">GLG*.txt o ATTLOG *.dat · máximo 5 MB</p>
                                     </div>
                                 </div>
                                 <span class="inline-flex h-10 shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition group-hover:border-indigo-300 group-hover:bg-indigo-50 group-hover:text-indigo-700">
-                                    Seleccionar archivo
+                                    Elegir archivo
                                 </span>
                             </div>
                         </label>
@@ -95,9 +95,10 @@
                             wire:model="upload"
                             accept=".txt,.dat"
                             required
+                            aria-label="Seleccionar archivo de marcas"
                             aria-describedby="attendance-file-contract @error('upload') upload-error @enderror"
                             @error('upload') aria-invalid="true" @else aria-invalid="false" @enderror
-                            class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                            class="sr-only"
                         >
 
                         <p wire:loading wire:target="upload" role="status" aria-live="polite" class="px-4 pb-4 pt-3 text-sm font-medium text-indigo-700">Cargando el archivo seleccionado...</p>
