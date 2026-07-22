@@ -42,6 +42,15 @@ test('imported raw mark evidence cannot change after creation', function () {
     }
 });
 
+test('attendance marks cannot be physically deleted', function () {
+    $mark = RawMark::factory()->create();
+
+    expect(fn () => $mark->delete())
+        ->toThrow(LogicException::class, 'Attendance records must be deleted logically.');
+
+    expect(RawMark::withoutCompanyScope()->whereKey($mark)->exists())->toBeTrue();
+});
+
 test('uploaded source identity cannot change after creation', function () {
     $file = UploadedFile::factory()->create([
         'path' => 'uploads/original.txt',

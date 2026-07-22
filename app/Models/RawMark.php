@@ -54,6 +54,10 @@ class RawMark extends Model
                 throw new LogicException('Attendance source evidence is immutable after creation.');
             }
         });
+
+        static::deleting(function (): never {
+            throw new LogicException('Attendance records must be deleted logically.');
+        });
     }
 
     public function company(): BelongsTo

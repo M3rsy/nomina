@@ -103,9 +103,31 @@ test('an overnight exit remains editable while every affected period is open', f
         ->and($this->exit->fresh()->status)->toBe('corrected');
 });
 
+test('an imported overnight exit remains valid in its starting pay period', function () {
+    $this->lockedPeriod->update(['status' => 'validating']);
+    $this->exit->update(['status' => 'deleted']);
+    $lockedFile = UploadedFile::query()->where('pay_period_id', $this->lockedPeriod->id)->firstOrFail();
+    $importedExit = RawMark::factory()->forCompany($this->company)->forPayPeriod($this->lockedPeriod)
+        ->forUploadedFile($lockedFile)->forEmployee($this->employee)->create([
+            'event_at' => '2026-07-21 06:00:00',
+            'status' => 'valid',
+        ]);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $this->lockedPeriod])
+        ->set('editRawMarkId', $importedExit->id)
+        ->set('editEventAt', '2026-07-21 06:15:00')
+        ->set('editReason', 'La salida observada ocurrió quince minutos después')
+        ->call('saveEditRawMark')
+        ->assertHasNoErrors();
+
+    expect($importedExit->fresh()->event_at->toDateTimeString())->toBe('2026-07-21 06:15:00')
+        ->and($importedExit->fresh()->status)->toBe('corrected')
+        ->and($importedExit->fresh()->notes)->toBeNull();
+});
+
 test('a corrected manual overnight exit remains valid in its starting pay period', function () {
     $this->lockedPeriod->update(['status' => 'validating']);
-    $this->exit->delete();
+    $this->exit->update(['status' => 'deleted']);
 
     $manualExit = app(ManualRawMarkRecorder::class)->record(
         $this->lockedPeriod,
