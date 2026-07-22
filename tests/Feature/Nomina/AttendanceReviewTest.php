@@ -57,7 +57,9 @@ test('shows exact attendance deficits without changing the observed marks', func
         ->assertSee('Llegada tardía')
         ->assertSee('06:00 → 06:15')
         ->assertSee('15 min · 0,25 h')
-        ->assertSee('Sin excepción · se descuenta');
+        ->assertSee('Sin excepción · se descuenta')
+        ->assertSee('Conceder excepción')
+        ->assertSee('Revocar excepción');
 });
 
 test('shows the current audited attendance exception and its reason', function () {
@@ -84,6 +86,168 @@ test('shows the current audited attendance exception and its reason', function (
         ->assertSee('Demora autorizada por supervisión')
         ->assertSee($context['actor']->email);
 });
+
+test('grants the complete server-calculated attendance deficit with a mandatory reason', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $deficit = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->deficits
+        ->sole();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            $deficit->key,
+            AttendanceException::GRANTED,
+        )
+        ->assertSet('showAttendanceExceptionModal', true)
+        ->assertSet('attendanceDeficitSummary', '06:00 → 06:15 · 15 min')
+        ->assertSee('Conceder excepción completa')
+        ->assertSee('no puede modificarse parcialmente')
+        ->set('attendanceExceptionReason', 'Ingreso autorizado por supervisión')
+        ->call('saveAttendanceException')
+        ->assertHasNoErrors()
+        ->assertSet('showAttendanceExceptionModal', false)
+        ->assertSee('Excepción concedida')
+        ->assertSee('Ingreso autorizado por supervisión');
+
+    $exception = AttendanceException::query()->sole();
+
+    expect($exception->decision)->toBe(AttendanceException::GRANTED)
+        ->and($exception->deficit_key)->toBe($deficit->key)
+        ->and($exception->minutes)->toBe(15)
+        ->and($exception->rate_minutes['ordinary'])->toBe(15)
+        ->and($exception->decided_by)->toBe($context['actor']->id);
+});
+
+test('revokes a granted attendance exception without changing the deficit snapshot', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $deficit = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->deficits
+        ->sole();
+    $granted = app(AttendanceExceptionRecorder::class)->decide(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+        $deficit->key,
+        AttendanceException::GRANTED,
+        'Demora autorizada',
+        $context['actor'],
+    );
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            $deficit->key,
+            AttendanceException::REVOKED,
+        )
+        ->assertSet('showAttendanceExceptionModal', true)
+        ->set('attendanceExceptionReason', 'La autorización fue anulada')
+        ->call('saveAttendanceException')
+        ->assertHasNoErrors()
+        ->assertSee('Excepción revocada')
+        ->assertSee('La autorización fue anulada');
+
+    $current = AttendanceException::query()->current()->sole();
+
+    expect(AttendanceException::query()->count())->toBe(2)
+        ->and($current->decision)->toBe(AttendanceException::REVOKED)
+        ->and($current->supersedes_id)->toBe($granted->id)
+        ->and($current->deficit_key)->toBe($deficit->key)
+        ->and($current->minutes)->toBe(15);
+});
+
+test('requires a reason and rejects an attendance deficit key that is not current', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $deficit = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->deficits
+        ->sole();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            $deficit->key,
+            AttendanceException::GRANTED,
+        )
+        ->call('saveAttendanceException')
+        ->assertHasErrors(['attendanceExceptionReason' => 'required'])
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            str_repeat('0', 64),
+            AttendanceException::GRANTED,
+        )
+        ->assertSet('showAttendanceExceptionModal', false)
+        ->assertHasErrors('attendanceDeficitKey')
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            $deficit->key,
+            AttendanceException::REVOKED,
+        )
+        ->assertSet('showAttendanceExceptionModal', false)
+        ->assertHasErrors('attendanceExceptionDecision')
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-19',
+            $deficit->key,
+            AttendanceException::GRANTED,
+        )
+        ->assertSet('showAttendanceExceptionModal', false)
+        ->assertHasErrors('attendanceDeficitKey');
+
+    expect(AttendanceException::query()->count())->toBe(0);
+});
+
+test('does not allow attendance exceptions while the period is locked', function (string $status) {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $deficit = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])
+        ->sole()
+        ->analysis
+        ->deficits
+        ->sole();
+    $context['period']->update(['status' => $status]);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']->fresh()])
+        ->call(
+            'openAttendanceException',
+            $context['employee']->id,
+            '2026-07-20',
+            $deficit->key,
+            AttendanceException::GRANTED,
+        )
+        ->assertSet('showAttendanceExceptionModal', false)
+        ->set('attendanceExceptionEmployeeId', $context['employee']->id)
+        ->set('attendanceExceptionWorkDate', '2026-07-20')
+        ->set('attendanceDeficitKey', $deficit->key)
+        ->set('attendanceExceptionDecision', AttendanceException::GRANTED)
+        ->set('attendanceExceptionReason', 'Intento fuera de estado')
+        ->call('saveAttendanceException');
+
+    expect(AttendanceException::query()->count())->toBe(0);
+})->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
 test('shows the current audited decision and its reason', function () {
     $context = attendanceReviewPageFixture();

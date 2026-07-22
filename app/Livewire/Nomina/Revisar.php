@@ -2,11 +2,13 @@
 
 namespace App\Livewire\Nomina;
 
+use App\Models\AttendanceException;
 use App\Models\Employee;
 use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
@@ -95,6 +97,20 @@ class Revisar extends Component
     public string $overtimeDecisionReason = '';
 
     public string $overtimeCandidateSummary = '';
+
+    public bool $showAttendanceExceptionModal = false;
+
+    public ?int $attendanceExceptionEmployeeId = null;
+
+    public string $attendanceExceptionWorkDate = '';
+
+    public string $attendanceDeficitKey = '';
+
+    public string $attendanceExceptionDecision = '';
+
+    public string $attendanceExceptionReason = '';
+
+    public string $attendanceDeficitSummary = '';
 
     public bool $locked = false;
 
@@ -485,7 +501,7 @@ class Revisar extends Component
             return;
         }
 
-        $employee = $this->findOvertimeEmployee($employeeId);
+        $employee = $this->findPeriodEmployee($employeeId);
 
         if ($employee === null) {
             $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
@@ -546,7 +562,7 @@ class Revisar extends Component
         ], [
             'overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.',
         ]);
-        $employee = $this->findOvertimeEmployee((int) $validated['overtimeDecisionEmployeeId']);
+        $employee = $this->findPeriodEmployee((int) $validated['overtimeDecisionEmployeeId']);
 
         if ($employee === null) {
             $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
@@ -569,6 +585,124 @@ class Revisar extends Component
         $this->loadReadinessBlockers();
 
         session()->flash('success', "Tramo completo {$decision} y registrado en el historial.");
+    }
+
+    public function openAttendanceException(
+        int $employeeId,
+        string $workDate,
+        string $deficitKey,
+        string $decision,
+    ): void {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $this->closeAttendanceExceptionModal();
+
+        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REVOKED], true)) {
+            $this->addError('attendanceExceptionDecision', 'La decisión debe conceder o revocar la excepción completa.');
+
+            return;
+        }
+
+        if (validator(['work_date' => $workDate], ['work_date' => ['required', 'date_format:Y-m-d']])->fails()) {
+            $this->addError('attendanceDeficitKey', 'La fecha laboral del déficit no es válida.');
+
+            return;
+        }
+
+        $employee = $this->findPeriodEmployee($employeeId);
+
+        if ($employee === null) {
+            $this->addError('attendanceExceptionEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        try {
+            $review = app(PayrollShiftEvaluationResolver::class)
+                ->review($this->payPeriod, $employee, $workDate);
+        } catch (InvalidArgumentException) {
+            $this->addError('attendanceDeficitKey', 'El déficit no pertenece a este período.');
+
+            return;
+        }
+        $deficit = $review->analysis->deficits->firstWhere('key', $deficitKey);
+
+        if ($deficit === null) {
+            $this->addError('attendanceDeficitKey', 'El déficit ya no coincide con las marcas vigentes.');
+
+            return;
+        }
+
+        $currentException = $review->exceptionFor($deficit);
+
+        if ($decision === AttendanceException::REVOKED
+            && $currentException?->decision !== AttendanceException::GRANTED) {
+            $this->addError('attendanceExceptionDecision', 'Solo puede revocar una excepción concedida.');
+
+            return;
+        }
+
+        $this->attendanceExceptionEmployeeId = $employee->id;
+        $this->attendanceExceptionWorkDate = $review->analysis->workDate->toDateString();
+        $this->attendanceDeficitKey = $deficit->key;
+        $this->attendanceExceptionDecision = $decision;
+        $this->attendanceDeficitSummary = $deficit->start->format('H:i')
+            .' → '.$deficit->end->format('H:i')
+            .' · '.$deficit->minutes.' min';
+        $this->showAttendanceExceptionModal = true;
+    }
+
+    public function closeAttendanceExceptionModal(): void
+    {
+        $this->showAttendanceExceptionModal = false;
+        $this->attendanceExceptionEmployeeId = null;
+        $this->attendanceExceptionWorkDate = '';
+        $this->attendanceDeficitKey = '';
+        $this->attendanceExceptionDecision = '';
+        $this->attendanceExceptionReason = '';
+        $this->attendanceDeficitSummary = '';
+        $this->resetErrorBag();
+    }
+
+    public function saveAttendanceException(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $validated = $this->validate([
+            'attendanceExceptionEmployeeId' => ['required', 'integer'],
+            'attendanceExceptionWorkDate' => ['required', 'date_format:Y-m-d'],
+            'attendanceDeficitKey' => ['required', 'string', 'size:64'],
+            'attendanceExceptionDecision' => ['required', Rule::in([AttendanceException::GRANTED, AttendanceException::REVOKED])],
+            'attendanceExceptionReason' => ['required', 'string', 'max:500'],
+        ], [
+            'attendanceExceptionReason.required' => 'Debe indicar el motivo de la excepción.',
+        ]);
+        $employee = $this->findPeriodEmployee((int) $validated['attendanceExceptionEmployeeId']);
+
+        if ($employee === null) {
+            $this->addError('attendanceExceptionEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        app(AttendanceExceptionRecorder::class)->decide(
+            $this->payPeriod,
+            $employee,
+            $validated['attendanceExceptionWorkDate'],
+            $validated['attendanceDeficitKey'],
+            $validated['attendanceExceptionDecision'],
+            $validated['attendanceExceptionReason'],
+            Auth::user(),
+        );
+
+        $decision = $validated['attendanceExceptionDecision'] === AttendanceException::GRANTED ? 'concedida' : 'revocada';
+        $this->closeAttendanceExceptionModal();
+
+        session()->flash('success', "Excepción completa {$decision} y registrada en el historial.");
     }
 
     public function continueToReady(): void
@@ -814,7 +948,7 @@ class Revisar extends Component
         return RawMark::find($id);
     }
 
-    private function findOvertimeEmployee(?int $id): ?Employee
+    private function findPeriodEmployee(?int $id): ?Employee
     {
         if ($id === null) {
             return null;
