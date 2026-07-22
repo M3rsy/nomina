@@ -204,7 +204,7 @@
                             </p>
                         </div>
                         <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas observadas</p>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
                             <p class="mt-1 font-bold text-slate-900">
                                 {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
                             </p>
@@ -303,7 +303,7 @@
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">Tiempo programado no cubierto</p>
                 <h2 class="mt-1 text-xl font-black text-slate-950">Excepciones de asistencia</h2>
                 <p class="mt-1 max-w-3xl text-sm text-slate-600">
-                    La marca observada no se modifica. Sin una excepción concedida, el déficit se descuenta del tiempo reconocido.
+                    Las marcas de asistencia no se modifican. Sin una excepción concedida, el déficit se descuenta del tiempo reconocido.
                 </p>
             </div>
             <p class="text-sm font-semibold text-slate-700">
@@ -330,7 +330,7 @@
                             </p>
                         </div>
                         <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas observadas</p>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
                             <p class="mt-1 font-bold text-slate-900">
                                 {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
                             </p>
@@ -628,7 +628,7 @@
                 </h2>
                 <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{{ $attendanceDeficitSummary }}</p>
                 <p class="mt-3 text-sm text-slate-600">
-                    El déficit fue calculado por el sistema y no puede modificarse parcialmente. La marca observada seguirá mostrando la hora real.
+                    El déficit fue calculado por el sistema y no puede modificarse parcialmente. La marca de asistencia seguirá mostrando la hora real.
                 </p>
 
                 <form wire:submit.prevent="saveAttendanceException" class="mt-4 space-y-4">
@@ -720,7 +720,7 @@
                             wire:model="editReason"
                             rows="3"
                             class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                            placeholder="Explicá por qué la marca observada es incorrecta"
+                            placeholder="Explicá por qué la marca de asistencia es incorrecta"
                         ></textarea>
                         @error('editReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
@@ -778,7 +778,7 @@
                             wire:model="deleteReason"
                             rows="3"
                             class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                            placeholder="Explicá por qué esta marca observada no debe utilizarse"
+                            placeholder="Explicá por qué esta marca de asistencia no debe utilizarse"
                         ></textarea>
                         @error('deleteReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>

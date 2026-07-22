@@ -23,7 +23,7 @@ beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('shows exact server-calculated overtime candidates beside observed and scheduled time', function () {
+test('shows exact server-calculated overtime candidates beside attendance and scheduled time', function () {
     $context = attendanceReviewPageFixture();
     $this->actingAs($context['actor']);
 
@@ -34,7 +34,8 @@ test('shows exact server-calculated overtime candidates beside observed and sche
         ->assertSee('María Guardia')
         ->assertSee('Jornada asignada')
         ->assertSee('06:00 → 14:00')
-        ->assertSee('Marcas observadas')
+        ->assertSee('Marcas de asistencia')
+        ->assertDontSee('Marcas observadas')
         ->assertSee('06:00 → 14:30')
         ->assertSee('Salida posterior')
         ->assertSee('30 min · 0,50 h')
@@ -44,14 +45,14 @@ test('shows exact server-calculated overtime candidates beside observed and sche
         ->assertSee('Rechazar completo');
 });
 
-test('shows exact attendance deficits without changing the observed marks', function () {
+test('shows exact attendance deficits without changing attendance marks', function () {
     $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
     $this->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
         ->assertViewHas('deficitReviews', fn ($reviews) => $reviews->count() === 1)
         ->assertSee('Excepciones de asistencia')
-        ->assertSee('La marca observada no se modifica')
+        ->assertSee('Las marcas de asistencia no se modifican')
         ->assertSee('María Guardia')
         ->assertSee('06:15 → 14:00')
         ->assertSee('Llegada tardía')
