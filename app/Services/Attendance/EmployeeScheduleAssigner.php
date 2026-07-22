@@ -63,11 +63,14 @@ class EmployeeScheduleAssigner
             $effectiveTo = $next === null
                 ? null
                 : CarbonImmutable::instance($next->effective_from)->subDay();
+            // Adjacent schedules define the midpoint boundaries that partition overnight marks.
+            $affectedFrom = $from->subDay();
+            $affectedTo = $effectiveTo?->addDay();
             $affectedPeriods = PayPeriod::withoutCompanyScope()
                 ->withTrashed()
                 ->where('company_id', $lockedEmployee->company_id)
-                ->whereDate('end_date', '>=', $from->toDateString())
-                ->when($effectiveTo !== null, fn ($query) => $query->whereDate('start_date', '<=', $effectiveTo->toDateString()))
+                ->whereDate('end_date', '>=', $affectedFrom->toDateString())
+                ->when($affectedTo !== null, fn ($query) => $query->whereDate('start_date', '<=', $affectedTo->toDateString()))
                 ->lockForUpdate()
                 ->get(['id', 'status']);
 
