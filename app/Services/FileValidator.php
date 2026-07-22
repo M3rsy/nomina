@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Parsers\RawMarkPayload;
 use Carbon\CarbonInterface;
@@ -14,7 +15,10 @@ use Illuminate\Support\Facades\DB;
 
 class FileValidator
 {
-    public function __construct(private ShiftOccurrenceResolver $shiftOccurrenceResolver) {}
+    public function __construct(
+        private ShiftOccurrenceResolver $shiftOccurrenceResolver,
+        private AttendanceFactGenerationTracker $factGenerations,
+    ) {}
 
     /**
      * @param  Collection<int, RawMarkPayload>  $records
@@ -126,6 +130,10 @@ class FileValidator
                     'notes' => $notes,
                     'employee_id' => $employee?->id,
                 ]);
+
+            if ($status === 'valid') {
+                $this->factGenerations->advance($employee, $workDate);
+            }
         }
 
         $uploadedFile->status = $this->computeFileStatus($validCount, $issueCount);

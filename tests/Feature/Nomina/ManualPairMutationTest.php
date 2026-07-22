@@ -9,6 +9,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\ShiftOccurrence;
@@ -66,6 +67,7 @@ test('cannot edit a manual fact into an occurrence that already has two observed
     $resolver = app(ShiftOccurrenceResolver::class);
 
     expect($this->manualExit->fresh()->event_at->toDateTimeString())->toBe('2026-07-20 14:00:00')
+        ->and(app(AttendanceFactGenerationTracker::class)->current($this->employee, '2026-07-20'))->toBe(1)
         ->and($resolver->resolve($this->employee, '2026-07-20')->status)->toBe(ShiftOccurrence::RESOLVED)
         ->and($resolver->resolve($this->employee, '2026-07-27')->status)->toBe(ShiftOccurrence::RESOLVED);
 });
@@ -117,6 +119,8 @@ test('can reassign a manual fact when both affected occurrences remain valid', f
     $resolver = app(ShiftOccurrenceResolver::class);
 
     expect($this->manualExit->fresh()->employee_id)->toBe($this->otherEmployee->id)
+        ->and(app(AttendanceFactGenerationTracker::class)->current($this->employee, '2026-07-20'))->toBe(2)
+        ->and(app(AttendanceFactGenerationTracker::class)->current($this->otherEmployee, '2026-07-20'))->toBe(1)
         ->and($resolver->resolve($this->employee, '2026-07-20')->status)->toBe(ShiftOccurrence::MISSING_PAIR)
         ->and($resolver->resolve($this->otherEmployee, '2026-07-20')->status)->toBe(ShiftOccurrence::RESOLVED);
 });

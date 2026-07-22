@@ -15,6 +15,8 @@ use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollShiftEvaluation;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use App\Services\Attendance\RawMarkMutationGuard;
+use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
 use Database\Seeders\PermissionRoleSeeder;
@@ -175,6 +177,38 @@ test('an old approval stays stale after attendance facts change without changing
 
     expect($candidate->key)->not->toBe($context['candidate_key'])
         ->and($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
+        ->and($evaluation->blockers->pluck('code')->all())->toBe(['pending_overtime_candidate']);
+});
+
+test('deleting an intervening attendance fact cannot reactivate an old approval', function () {
+    $context = overtimeDecisionFixture();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        OvertimeDecision::APPROVED, 'Servicio confirmado originalmente', $context['actor'],
+    );
+    $thirdMark = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($context['exit_mark']->uploadedFile)->forEmployee($context['employee'])->create([
+            'event_at' => '2026-07-20 12:00:00',
+            'status' => 'valid',
+        ]);
+
+    expect(app(ShiftOccurrenceResolver::class)->resolve(
+        $context['employee'],
+        '2026-07-20',
+    )->status)->toBe(ShiftOccurrence::AMBIGUOUS);
+
+    app(RawMarkMutationGuard::class)->mutate(
+        $thirdMark,
+        fn (RawMark $lockedMark) => $lockedMark->update(['status' => 'deleted']),
+    );
+
+    $evaluation = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+    );
+
+    expect($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
         ->and($evaluation->blockers->pluck('code')->all())->toBe(['pending_overtime_candidate']);
 });
 

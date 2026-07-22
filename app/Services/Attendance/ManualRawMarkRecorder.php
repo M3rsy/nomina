@@ -15,7 +15,10 @@ use Illuminate\Validation\ValidationException;
 
 class ManualRawMarkRecorder
 {
-    public function __construct(private ShiftOccurrenceResolver $resolver) {}
+    public function __construct(
+        private ShiftOccurrenceResolver $resolver,
+        private AttendanceFactGenerationTracker $factGenerations,
+    ) {}
 
     public function record(
         PayPeriod $payPeriod,
@@ -102,6 +105,8 @@ class ManualRawMarkRecorder
                     'event_at' => 'La fecha y hora no pertenecen a la jornada laboral seleccionada.',
                 ]);
             }
+
+            $this->factGenerations->advance($lockedEmployee, $date);
 
             return $mark;
         });
