@@ -530,37 +530,50 @@ class Revisar extends Component
             'absenceReason' => ['required', Rule::in(['holiday', 'permission', 'day_off', 'other'])],
         ]);
 
-        $employee = Employee::withoutCompanyScope()
-            ->where('company_id', $this->payPeriod->company_id)
-            ->find($employeeId);
+        $saved = DB::transaction(function () use ($employeeId, $date, $reason, $notes): bool {
+            $payPeriod = $this->lockMutablePayPeriod();
 
-        if (! $employee) {
+            if ($payPeriod === null) {
+                return false;
+            }
+
+            $employee = Employee::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->find($employeeId);
+
+            if ($employee === null) {
+                return false;
+            }
+
+            $absence = JustifiedAbsence::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->where('pay_period_id', $payPeriod->id)
+                ->where('employee_id', $employeeId)
+                ->whereDate('date', $date)
+                ->first();
+            $attributes = [
+                'reason' => $reason,
+                'notes' => $notes ?: null,
+                'justified_by' => Auth::id(),
+            ];
+
+            if ($absence === null) {
+                JustifiedAbsence::withoutCompanyScope()->create([
+                    'company_id' => $payPeriod->company_id,
+                    'pay_period_id' => $payPeriod->id,
+                    'employee_id' => $employeeId,
+                    'date' => $date,
+                    ...$attributes,
+                ]);
+            } else {
+                $absence->update($attributes);
+            }
+
+            return true;
+        });
+
+        if (! $saved) {
             return;
-        }
-
-        $absence = JustifiedAbsence::withoutCompanyScope()
-            ->where('company_id', $this->payPeriod->company_id)
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->where('employee_id', $employeeId)
-            ->whereDate('date', $date)
-            ->first();
-
-        if ($absence) {
-            $absence->update([
-                'reason' => $reason,
-                'notes' => $notes ?: null,
-                'justified_by' => Auth::id(),
-            ]);
-        } else {
-            JustifiedAbsence::withoutCompanyScope()->create([
-                'company_id' => $this->payPeriod->company_id,
-                'pay_period_id' => $this->payPeriod->id,
-                'employee_id' => $employeeId,
-                'date' => $date,
-                'reason' => $reason,
-                'notes' => $notes ?: null,
-                'justified_by' => Auth::id(),
-            ]);
         }
 
         $this->closeAbsencesModal();
@@ -572,7 +585,22 @@ class Revisar extends Component
             return;
         }
 
-        $this->payPeriod->update(['status' => 'validating']);
+        $saved = DB::transaction(function (): bool {
+            $payPeriod = $this->lockMutablePayPeriod();
+
+            if ($payPeriod === null) {
+                return false;
+            }
+
+            $payPeriod->update(['status' => 'validating']);
+            $this->payPeriod = $payPeriod->refresh();
+
+            return true;
+        });
+
+        if (! $saved) {
+            return;
+        }
 
         session()->flash('success', 'Borrador guardado.');
     }
@@ -1185,11 +1213,22 @@ class Revisar extends Component
 
     private function moveToReady(): void
     {
-        if ($this->loadReadinessBlockers()) {
+        $moved = DB::transaction(function (): bool {
+            $payPeriod = $this->lockMutablePayPeriod();
+
+            if ($payPeriod === null || $this->loadReadinessBlockers($payPeriod)) {
+                return false;
+            }
+
+            $payPeriod->update(['status' => 'ready']);
+            $this->payPeriod = $payPeriod->refresh();
+
+            return true;
+        });
+
+        if (! $moved) {
             return;
         }
-
-        $this->payPeriod->update(['status' => 'ready']);
 
         $this->showReadyConfirm = false;
         $this->readyMessage = null;
@@ -1197,10 +1236,10 @@ class Revisar extends Component
         session()->flash('success', 'Período listo para procesar.');
     }
 
-    private function loadReadinessBlockers(): bool
+    private function loadReadinessBlockers(?PayPeriod $payPeriod = null): bool
     {
         $this->readinessBlockers = app(PayrollReadinessChecker::class)
-            ->blockers($this->payPeriod)
+            ->blockers($payPeriod ?? $this->payPeriod)
             ->values()
             ->all();
 
@@ -1210,5 +1249,21 @@ class Revisar extends Component
         }
 
         return $this->readinessBlockers !== [];
+    }
+
+    private function lockMutablePayPeriod(): ?PayPeriod
+    {
+        $payPeriod = PayPeriod::withoutCompanyScope()
+            ->whereKey($this->payPeriod->id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($payPeriod === null || in_array($payPeriod->status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true)) {
+            $this->locked = true;
+
+            return null;
+        }
+
+        return $payPeriod;
     }
 }

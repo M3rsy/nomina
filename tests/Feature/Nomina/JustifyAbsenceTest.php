@@ -15,6 +15,7 @@ use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -46,6 +47,34 @@ test('justifyAbsence creates a justified absence with reason and notes', functio
         ->and($absence->reason)->toBe('permission')
         ->and($absence->notes)->toBe('Personal matters')
         ->and($absence->justified_by)->toBe($admin->id);
+});
+
+test('justifyAbsence cannot write after the period becomes processed', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-11',
+        'status' => 'validating',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $disarmRace = simulateAbsenceProcessingRace($payPeriod, $raceTriggered);
+
+    $component
+        ->set('absenceReason', 'permission')
+        ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission')
+        ->assertHasNoErrors();
+    $disarmRace();
+
+    expect($raceTriggered)->toBeTrue();
+    expect($payPeriod->fresh()->status)->toBe('processed')
+        ->and(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->exists())->toBeFalse();
 });
 
 test('justifyAbsence upserts existing absence for same employee and date', function () {
@@ -297,4 +326,25 @@ function absenceEmployeeWithDefaultSchedule(Company $company): Employee
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada general');
 
     return $employee;
+}
+
+function simulateAbsenceProcessingRace(PayPeriod $payPeriod, bool &$triggered): Closure
+{
+    $armed = true;
+
+    DB::connection()->beforeStartingTransaction(function () use (&$armed, &$triggered, $payPeriod): void {
+        if (! $armed || $triggered) {
+            return;
+        }
+
+        $triggered = true;
+
+        DB::table('pay_periods')
+            ->where('id', $payPeriod->id)
+            ->update(['status' => 'processed']);
+    });
+
+    return function () use (&$armed): void {
+        $armed = false;
+    };
 }
