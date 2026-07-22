@@ -34,6 +34,11 @@ class EmployeeScheduleAssignment extends Model
         return $this->belongsTo(Employee::class);
     }
 
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
+    }
+
     public function profile(): BelongsTo
     {
         return $this->belongsTo(WorkScheduleProfile::class, 'work_schedule_profile_id');
