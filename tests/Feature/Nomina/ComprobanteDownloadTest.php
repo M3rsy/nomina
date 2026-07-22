@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -48,6 +49,21 @@ test('company admin can download comprobante for own employee', function () {
     $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     $response->assertHeader('content-disposition', 'attachment; filename="Comprobante '.$employee->external_id.' '.$payPeriod->slug.'.xlsx"');
 });
+
+test('comprobante is unavailable before the official payroll export', function (string $status) {
+    [$company, $payPeriod, $employee, $admin] = setupStubScenario();
+    $payPeriod->update(['status' => $status]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $this->get("/nomina/{$payPeriod->id}/empleado/{$employee->id}/comprobante")
+        ->assertStatus(Response::HTTP_CONFLICT);
+})->with([
+    'processed' => ['processed'],
+    'approved' => ['approved'],
+    'cancelled' => ['cancelled'],
+]);
 
 test('comprobante download rejects employee from another company', function () {
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();

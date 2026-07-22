@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -84,20 +85,34 @@ class Procesar extends Component
     {
         Gate::authorize('payroll.approve');
 
-        if ($this->payPeriod->status !== 'processed') {
+        [$approved, $freshPeriod] = DB::transaction(function (): array {
+            $lockedPeriod = PayPeriod::withoutCompanyScope()
+                ->lockForUpdate()
+                ->findOrFail($this->payPeriod->id);
+
+            if ($lockedPeriod->status !== 'processed') {
+                return [false, $lockedPeriod];
+            }
+
+            $metadata = $lockedPeriod->metadata ?? [];
+            $metadata['approved_at'] = now()->toDateTimeString();
+            $metadata['approved_by'] = Auth::id();
+
+            $lockedPeriod->update([
+                'status' => 'approved',
+                'metadata' => $metadata,
+            ]);
+
+            return [true, $lockedPeriod->refresh()];
+        });
+
+        $this->payPeriod = $freshPeriod;
+        $this->locked = in_array($freshPeriod->status, ['approved', 'exported', 'cancelled'], true);
+        $this->showApproveConfirm = false;
+
+        if (! $approved) {
             return;
         }
-
-        $metadata = $this->payPeriod->metadata ?? [];
-        $metadata['approved_at'] = now()->toDateTimeString();
-        $metadata['approved_by'] = Auth::id();
-
-        $this->payPeriod->status = 'approved';
-        $this->payPeriod->metadata = $metadata;
-        $this->payPeriod->save();
-
-        $this->locked = true;
-        $this->showApproveConfirm = false;
 
         session()->flash('success', 'Nómina aprobada correctamente.');
         $this->dispatch('close-approve-modal');
@@ -106,7 +121,7 @@ class Procesar extends Component
     public function canExport(): bool
     {
         return Gate::allows('payroll.export')
-            && in_array($this->payPeriod->status, ['processed', 'approved', 'exported'], true);
+            && in_array($this->payPeriod->status, ['approved', 'exported'], true);
     }
 
     public function canApprove(): bool
