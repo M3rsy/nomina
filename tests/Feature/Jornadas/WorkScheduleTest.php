@@ -43,6 +43,31 @@ test('company gets a versioned default profile with canonical schedule boundarie
         ->and($schedules[0]->end_time)->toBeNull();
 });
 
+test('rerunning the seeder does not mutate an existing schedule version', function () {
+    $company = Company::factory()->create();
+
+    $this->seed(WorkScheduleSeeder::class);
+
+    $profile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->sole();
+    $monday = $profile->workSchedules()->where('day_of_week', 1)->sole();
+    $monday->update([
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+        'notes' => 'Historical assigned version',
+    ]);
+
+    $this->seed(WorkScheduleSeeder::class);
+
+    $monday->refresh();
+
+    expect(substr($monday->start_time, 0, 5))->toBe('18:00')
+        ->and(substr($monday->end_time, 0, 5))->toBe('06:00')
+        ->and($monday->notes)->toBe('Historical assigned version')
+        ->and($profile->workSchedules()->count())->toBe(7);
+});
+
 test('profile versions retain independent schedule definitions', function () {
     $company = Company::factory()->create();
     $firstVersion = WorkScheduleProfile::factory()->forCompany($company)->create([
