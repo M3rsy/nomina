@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Empleados;
 
-use App\Models\Company;
 use App\Models\Employee;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
@@ -73,19 +72,12 @@ class Edit extends Component
         }
     }
 
-    public function updatedCompanyId(): void
-    {
-        $this->schedule_profile_id = $this->scheduleProfiles()->first()?->id;
-    }
-
     public function save(): void
     {
         $this->authorize('update', $this->employee);
 
-        $isSuperAdmin = auth()->user()->hasRole('super_admin');
-        $companyId = $isSuperAdmin ? ($this->company_id ?? $this->employee->company_id) : auth()->user()->company_id;
-        $requiresSchedule = $companyId !== $this->employee->company_id
-            || ! $this->employee->scheduleAssignments()->exists();
+        $companyId = $this->employee->company_id;
+        $requiresSchedule = ! $this->employee->scheduleAssignments()->exists();
         $assigningSchedule = $this->schedule_profile_id !== null;
 
         $rules = [
@@ -114,11 +106,7 @@ class Edit extends Component
             $rules['schedule_reason'] = ['required', 'string', 'max:255'];
         }
 
-        if ($isSuperAdmin) {
-            $rules['company_id'] = ['nullable', 'exists:companies,id'];
-        } else {
-            $rules['company_id'] = ['required', 'in:'.auth()->user()->company_id];
-        }
+        $rules['company_id'] = ['required', 'integer', Rule::in([$companyId])];
 
         $validated = $this->validate($rules, $this->messages());
 
@@ -155,7 +143,6 @@ class Edit extends Component
         $isSuperAdmin = auth()->user()->hasRole('super_admin');
 
         return view('livewire.empleados.edit', [
-            'companies' => $isSuperAdmin ? Company::orderBy('name')->get() : null,
             'isSuperAdmin' => $isSuperAdmin,
             'scheduleProfiles' => $this->scheduleProfiles(),
             'scheduleAssignments' => $this->employee->scheduleAssignments()
@@ -167,12 +154,8 @@ class Edit extends Component
 
     private function scheduleProfiles()
     {
-        $companyId = auth()->user()->hasRole('super_admin')
-            ? ($this->company_id ?? $this->employee->company_id)
-            : auth()->user()->company_id;
-
         return WorkScheduleProfile::withoutCompanyScope()
-            ->where('company_id', $companyId)
+            ->where('company_id', $this->employee->company_id)
             ->where('is_active', true)
             ->orderBy('name')
             ->orderByDesc('version')
@@ -189,7 +172,7 @@ class Edit extends Component
             'dni.regex' => 'La identidad debe contener solo números.',
             'sex.in' => 'El sexo debe ser M, F u O.',
             'expected_salary.decimal' => 'El salario esperado debe tener hasta 2 decimales.',
-            'company_id.in' => 'No está autorizado para editar empleados de esa empresa.',
+            'company_id.in' => 'La empresa del empleado no puede cambiarse porque forma parte de su historial.',
             'schedule_profile_id.required' => 'Seleccioná una jornada para el empleado.',
             'schedule_profile_id.exists' => 'La jornada seleccionada no está disponible para esta empresa.',
             'schedule_effective_from.required' => 'Ingresá desde qué fecha rige la jornada.',

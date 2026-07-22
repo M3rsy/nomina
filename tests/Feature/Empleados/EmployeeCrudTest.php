@@ -304,6 +304,38 @@ test('update employee audits sensitive fields', function () {
     expect($employee->revisions()->where('field', 'job_title')->where('new_value', 'Supervisor')->exists())->toBeTrue();
 });
 
+test('an employee cannot be transferred directly to another company', function () {
+    $companyA = Company::factory()->create(['name' => 'Empresa histórica']);
+    $companyB = Company::factory()->create(['name' => 'Empresa destino']);
+    $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create();
+    $superAdmin = User::factory()->create(['company_id' => null]);
+    $superAdmin->assignRole('super_admin');
+    $employee = Employee::factory()->forCompany($companyA)->create();
+
+    app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $profile,
+        '2026-07-01',
+        'Jornada inicial',
+        $superAdmin,
+    );
+
+    $this->actingAs($superAdmin);
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->assertSee('Empresa histórica')
+        ->assertDontSee('Empresa destino')
+        ->set('company_id', $companyB->id)
+        ->call('save')
+        ->assertHasErrors('company_id');
+
+    expect($employee->fresh()->company_id)->toBe($companyA->id)
+        ->and(fn () => $employee->fresh()->update(['company_id' => $companyB->id]))
+        ->toThrow(LogicException::class, 'Employee company is immutable after creation.');
+
+    expect($employee->fresh()->company_id)->toBe($companyA->id);
+});
+
 test('company admin assigns a new employee schedule from an effective date', function () {
     $company = Company::factory()->create();
     $dayProfile = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Diurna']);
