@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Services\Payroll\BandSplit;
 use Carbon\CarbonImmutable;
 use InvalidArgumentException;
 
@@ -16,6 +17,7 @@ readonly class AttendanceSegment
         public CarbonImmutable $start,
         public CarbonImmutable $end,
         public string $fingerprint,
+        public BandSplit $rateMinutes,
     ) {
         $seconds = $start->diffInSeconds($end);
 

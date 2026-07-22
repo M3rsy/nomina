@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Services\Payroll\BandSplit;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -20,6 +21,7 @@ readonly class AttendanceShiftAnalysis
         public ?CarbonImmutable $exitAt,
         public int $workedMinutes,
         public int $scheduledMinutes,
+        public BandSplit $scheduledRates,
         public Collection $deficits,
         public Collection $overtimeCandidates,
     ) {}
