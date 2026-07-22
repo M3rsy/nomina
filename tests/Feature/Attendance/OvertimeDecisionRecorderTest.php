@@ -12,6 +12,8 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
+use App\Services\Attendance\PayrollShiftEvaluation;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
 use Database\Seeders\PermissionRoleSeeder;
@@ -106,6 +108,51 @@ test('rejects a stale candidate key after an observed mark changes', function ()
     expect($candidate->key)->not->toBe($context['candidate_key'])
         ->and($decision->minutes)->toBe(45)
         ->and($decision->rate_minutes['extra25'])->toBe(45);
+});
+
+test('an old approval stays stale when a corrected mark returns to its original time', function () {
+    $context = overtimeDecisionFixture();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        OvertimeDecision::APPROVED, 'Servicio confirmado originalmente', $context['actor'],
+    );
+
+    $context['exit_mark']->update([
+        'event_at' => '2026-07-20 14:45:00',
+        'status' => 'corrected',
+        'metadata' => ['revisions' => [[
+            'action' => 'edit_event_at',
+            'old_event_at' => '2026-07-20 14:30:00',
+            'new_event_at' => '2026-07-20 14:45:00',
+        ]]],
+    ]);
+    $context['exit_mark']->update([
+        'event_at' => '2026-07-20 14:30:00',
+        'metadata' => ['revisions' => [
+            [
+                'action' => 'edit_event_at',
+                'old_event_at' => '2026-07-20 14:30:00',
+                'new_event_at' => '2026-07-20 14:45:00',
+            ],
+            [
+                'action' => 'edit_event_at',
+                'old_event_at' => '2026-07-20 14:45:00',
+                'new_event_at' => '2026-07-20 14:30:00',
+            ],
+        ]],
+    ]);
+
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
+    $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
+    $evaluation = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+    );
+
+    expect($candidate->key)->not->toBe($context['candidate_key'])
+        ->and($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
+        ->and($evaluation->blockers->pluck('code')->all())->toBe(['pending_overtime_candidate']);
 });
 
 test('requires an active marks manager from the same company', function () {
