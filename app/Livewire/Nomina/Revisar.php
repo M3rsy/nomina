@@ -257,7 +257,11 @@ class Revisar extends Component
                         ->find($lockedMark->employee_id);
 
                     if ($employee !== null) {
-                        $periodDate = app(ShiftOccurrenceResolver::class)->workDateFor($employee, $newEventAt);
+                        $periodDate = app(ShiftOccurrenceResolver::class)->workDateFor(
+                            $employee,
+                            $newEventAt,
+                            $lockedMark->id,
+                        );
                     }
                 }
 
