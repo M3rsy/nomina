@@ -57,4 +57,15 @@ readonly class BandSplit
     {
         return $this->totalMinutes() / 60;
     }
+
+    public function plus(self $other): self
+    {
+        return new self(
+            ordinaryMinutes: $this->ordinaryMinutes + $other->ordinaryMinutes,
+            extra25Minutes: $this->extra25Minutes + $other->extra25Minutes,
+            extra50Minutes: $this->extra50Minutes + $other->extra50Minutes,
+            extra75Minutes: $this->extra75Minutes + $other->extra75Minutes,
+            extra100Minutes: $this->extra100Minutes + $other->extra100Minutes,
+        );
+    }
 }
