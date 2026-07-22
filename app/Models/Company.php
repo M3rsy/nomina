@@ -91,6 +91,11 @@ class Company extends Model
         return $this->hasMany(WorkScheduleProfile::class);
     }
 
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class);
+    }
+
     public function holidays(): HasMany
     {
         return $this->hasMany(Holiday::class);

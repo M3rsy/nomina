@@ -64,4 +64,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(LoginAttempt::class);
     }
+
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class, 'decided_by');
+    }
 }

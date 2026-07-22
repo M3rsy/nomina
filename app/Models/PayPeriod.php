@@ -76,6 +76,11 @@ class PayPeriod extends Model
         return $this->hasMany(PayrollResult::class);
     }
 
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class);
+    }
+
     public function isActive(): bool
     {
         return ! $this->trashed() && in_array($this->status, ['draft', 'uploaded', 'ready'], true);
