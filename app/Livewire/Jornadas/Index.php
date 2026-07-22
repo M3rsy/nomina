@@ -2,9 +2,14 @@
 
 namespace App\Livewire\Jornadas;
 
+use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -16,6 +21,16 @@ class Index extends Component
 
     /** @var array<int, array<string, mixed>> */
     public array $originalSchedules = [];
+
+    public array $profiles = [];
+
+    public ?int $selectedProfileId = null;
+
+    public string $changeReason = '';
+
+    public bool $showCreateProfile = false;
+
+    public string $newProfileName = '';
 
     public bool $hasCompany = true;
 
@@ -70,6 +85,69 @@ class Index extends Component
         }
     }
 
+    public function updatedSelectedProfileId(): void
+    {
+        $this->showSuccess = false;
+        $this->changeReason = '';
+        $this->loadSchedules();
+    }
+
+    public function openCreateProfile(): void
+    {
+        $this->authorize('create', WorkSchedule::class);
+
+        $this->newProfileName = '';
+        $this->showCreateProfile = true;
+        $this->resetValidation('newProfileName');
+    }
+
+    public function cancelCreateProfile(): void
+    {
+        $this->newProfileName = '';
+        $this->showCreateProfile = false;
+        $this->resetValidation('newProfileName');
+    }
+
+    public function createProfile(): void
+    {
+        $this->authorize('create', WorkSchedule::class);
+
+        $companyId = current_company_id();
+
+        if ($companyId === null) {
+            return;
+        }
+
+        $validatedName = $this->validate([
+            'newProfileName' => ['required', 'string', 'max:120'],
+        ], [
+            'newProfileName.required' => 'Ingresá un nombre para la plantilla.',
+        ]);
+        $schedules = $this->validatedSchedules((int) $companyId);
+
+        $profile = DB::transaction(function () use ($companyId, $schedules, $validatedName): WorkScheduleProfile {
+            $profile = WorkScheduleProfile::withoutCompanyScope()->create([
+                'company_id' => $companyId,
+                'profile_key' => $this->uniqueProfileKey((int) $companyId, $validatedName['newProfileName']),
+                'name' => trim($validatedName['newProfileName']),
+                'version' => 1,
+                'is_active' => true,
+                'created_by' => auth()->id(),
+                'change_reason' => 'Creación de plantilla',
+            ]);
+
+            $this->createSchedules($profile, $schedules);
+
+            return $profile;
+        });
+
+        $this->selectedProfileId = $profile->id;
+        $this->newProfileName = '';
+        $this->showCreateProfile = false;
+        $this->showSuccess = true;
+        $this->loadSchedules();
+    }
+
     public function loadSchedules(): void
     {
         $companyId = current_company_id();
@@ -84,11 +162,38 @@ class Index extends Component
             return;
         }
 
+        $activeProfiles = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->orderByDesc('version')
+            ->get();
+
+        $this->profiles = $activeProfiles
+            ->map(fn (WorkScheduleProfile $profile): array => [
+                'id' => $profile->id,
+                'name' => $profile->name,
+                'version' => $profile->version,
+            ])
+            ->values()
+            ->all();
+
+        if (! $activeProfiles->contains('id', $this->selectedProfileId)) {
+            $this->selectedProfileId = $activeProfiles->first()?->id;
+        }
+
         $existing = WorkSchedule::withoutCompanyScope()
             ->where('company_id', $companyId)
+            ->when(
+                $this->selectedProfileId !== null,
+                fn ($query) => $query->where('work_schedule_profile_id', $this->selectedProfileId),
+                fn ($query) => $query->whereRaw('1 = 0'),
+            )
             ->orderBy('day_of_week')
             ->get()
             ->keyBy('day_of_week');
+
+        $defaults = collect(Company::defaultWorkSchedules())->keyBy('day_of_week');
 
         $dayNames = [
             0 => 'Domingo',
@@ -104,13 +209,16 @@ class Index extends Component
 
         foreach ($dayNames as $day => $name) {
             $schedule = $existing->get($day);
+            $default = $defaults->get($day, []);
 
             $rows[] = [
                 'id' => $schedule?->id,
                 'day_of_week' => $day,
                 'day_name' => $name,
-                'is_working_day' => (bool) ($schedule?->is_working_day ?? false),
-                'base_ordinary_hours' => (float) ($schedule?->base_ordinary_hours ?? 0),
+                'is_working_day' => (bool) ($schedule?->is_working_day ?? $default['is_working_day'] ?? false),
+                'base_ordinary_hours' => (float) ($schedule?->base_ordinary_hours ?? $default['base_ordinary_hours'] ?? 0),
+                'start_time' => $this->normalizeTime($schedule?->start_time ?? $default['start_time'] ?? null),
+                'end_time' => $this->normalizeTime($schedule?->end_time ?? $default['end_time'] ?? null),
                 'notes' => $schedule?->notes,
                 'banding_json' => $this->serializeBandingForInput($schedule?->banding_json),
             ];
@@ -140,22 +248,22 @@ class Index extends Component
             return;
         }
 
-        $validated = $this->validatedSchedules((int) $companyId);
-
-        foreach ($validated as $data) {
-            WorkSchedule::withoutCompanyScope()->updateOrCreate(
-                [
-                    'company_id' => $companyId,
-                    'day_of_week' => $data['day_of_week'],
-                ],
-                [
-                    'is_working_day' => $data['is_working_day'],
-                    'base_ordinary_hours' => $data['base_ordinary_hours'],
-                    'notes' => $data['notes'],
-                    'banding_json' => $data['banding_json'],
-                ]
-            );
+        if ($this->selectedProfileId !== null) {
+            $this->validate([
+                'changeReason' => ['required', 'string', 'max:500'],
+            ], [
+                'changeReason.required' => 'Ingresá el motivo de la nueva versión.',
+            ]);
         }
+
+        $validated = $this->validatedSchedules((int) $companyId);
+        $newProfile = DB::transaction(fn (): WorkScheduleProfile => $this->storeProfileVersion(
+            (int) $companyId,
+            $validated,
+        ));
+
+        $this->selectedProfileId = $newProfile->id;
+        $this->changeReason = '';
 
         $this->showSuccess = true;
         $this->showHistoricalImpactWarning = false;
@@ -221,6 +329,8 @@ class Index extends Component
             'schedules.*.day_of_week' => 'required|integer|min:0|max:6',
             'schedules.*.is_working_day' => 'required|boolean',
             'schedules.*.base_ordinary_hours' => 'required|numeric|min:0|max:24',
+            'schedules.*.start_time' => ['nullable', 'date_format:H:i'],
+            'schedules.*.end_time' => ['nullable', 'date_format:H:i'],
             'schedules.*.notes' => 'nullable|string|max:500',
             'schedules.*.banding_json' => [
                 'nullable',
@@ -238,15 +348,43 @@ class Index extends Component
             ],
         ]);
 
+        $errors = [];
+
+        foreach ($this->schedules as $index => $row) {
+            if (! (bool) $row['is_working_day']) {
+                continue;
+            }
+
+            if (blank($row['start_time'] ?? null)) {
+                $errors["schedules.$index.start_time"] = 'Ingresá la hora de inicio.';
+            }
+
+            if (blank($row['end_time'] ?? null)) {
+                $errors["schedules.$index.end_time"] = 'Ingresá la hora de fin.';
+            }
+
+            if (($row['start_time'] ?? null) === ($row['end_time'] ?? null)) {
+                $errors["schedules.$index.end_time"] = 'La hora de fin debe ser distinta de la hora de inicio.';
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
         return collect($this->schedules)
             ->map(function (array $row) use ($companyId): array {
+                $isWorkingDay = (bool) $row['is_working_day'];
+
                 return [
                     'company_id' => $companyId,
                     'day_of_week' => (int) $row['day_of_week'],
-                    'is_working_day' => (bool) $row['is_working_day'],
-                    'base_ordinary_hours' => (bool) $row['is_working_day']
+                    'is_working_day' => $isWorkingDay,
+                    'base_ordinary_hours' => $isWorkingDay
                         ? $this->normalizeBaseHours($row['base_ordinary_hours'])
                         : 0.0,
+                    'start_time' => $isWorkingDay ? $this->normalizeTime($row['start_time']) : null,
+                    'end_time' => $isWorkingDay ? $this->normalizeTime($row['end_time']) : null,
                     'notes' => $row['notes'] ?: null,
                     'banding_json' => $this->normalizeBandingJson($row['banding_json'] ?? null),
                 ];
@@ -295,6 +433,11 @@ class Index extends Component
             }
 
             if ($currentBase !== $originalBase) {
+                return true;
+            }
+
+            if ($this->normalizeTime($original['start_time'] ?? null) !== $this->normalizeTime($schedule['start_time'] ?? null)
+                || $this->normalizeTime($original['end_time'] ?? null) !== $this->normalizeTime($schedule['end_time'] ?? null)) {
                 return true;
             }
         }
@@ -387,6 +530,89 @@ class Index extends Component
         }
 
         return json_encode(array_values($bands));
+    }
+
+    private function storeProfileVersion(int $companyId, array $schedules): WorkScheduleProfile
+    {
+        $profile = $this->selectedProfileId === null
+            ? null
+            : WorkScheduleProfile::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->whereKey($this->selectedProfileId)
+                ->where('is_active', true)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+        if ($profile === null) {
+            $profileKey = 'general';
+            $name = 'Jornada general';
+            $version = 1;
+        } else {
+            $latestVersion = WorkScheduleProfile::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->where('profile_key', $profile->profile_key)
+                ->max('version');
+
+            WorkScheduleProfile::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->where('profile_key', $profile->profile_key)
+                ->where('is_active', true)
+                ->update(['is_active' => false]);
+
+            $profileKey = $profile->profile_key;
+            $name = $profile->name;
+            $version = ((int) $latestVersion) + 1;
+        }
+
+        $newProfile = WorkScheduleProfile::withoutCompanyScope()->create([
+            'company_id' => $companyId,
+            'profile_key' => $profileKey,
+            'name' => $name,
+            'version' => $version,
+            'is_active' => true,
+            'created_by' => auth()->id(),
+            'change_reason' => $profile === null ? 'Configuración inicial' : trim($this->changeReason),
+        ]);
+
+        $this->createSchedules($newProfile, $schedules);
+
+        return $newProfile;
+    }
+
+    private function createSchedules(WorkScheduleProfile $profile, array $schedules): void
+    {
+        foreach ($schedules as $schedule) {
+            WorkSchedule::withoutCompanyScope()->create([
+                ...$schedule,
+                'work_schedule_profile_id' => $profile->id,
+            ]);
+        }
+    }
+
+    private function uniqueProfileKey(int $companyId, string $name): string
+    {
+        $base = Str::slug($name) ?: 'jornada';
+        $candidate = $base;
+        $suffix = 2;
+
+        while (WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->where('profile_key', $candidate)
+            ->exists()) {
+            $candidate = "$base-$suffix";
+            $suffix++;
+        }
+
+        return $candidate;
+    }
+
+    private function normalizeTime(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return substr(trim($value), 0, 5);
     }
 
     public function render()

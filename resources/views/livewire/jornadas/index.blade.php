@@ -18,9 +18,9 @@
             <section class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800 shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <p class="font-semibold">Listo: configuración actualizada</p>
+                        <p class="font-semibold">Listo: versión guardada</p>
                         <p class="mt-1 text-emerald-700">
-                            Los cambios quedaron guardados y se recalcularán en el próximo proceso de nómina.
+                            La versión anterior conserva su historial y la nueva ya está disponible para asignar.
                         </p>
                     </div>
 
@@ -49,8 +49,7 @@
                         @endif
                         </p>
                         <p class="mt-2 text-sm text-amber-800">
-                            Si continúas, se guardarán de todas formas y deberás volver a correr los procesos de nómina
-                            para alinear los resultados afectados.
+                            Si continúas, se creará una versión nueva. Los resultados históricos conservarán la versión anterior.
                         </p>
                     </div>
 
@@ -60,7 +59,7 @@
                             wire:click="confirmHistoricalSave"
                             class="inline-flex items-center rounded-full border border-amber-300 bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
                         >
-                            Confirmar y guardar
+                            Confirmar y crear versión
                         </button>
 
                         <button
@@ -77,10 +76,38 @@
 
         <section class="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <article class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <header class="mb-4 flex flex-col gap-2">
-                    <h2 class="text-xl font-semibold text-slate-900">Plantilla semanal</h2>
-                    <p class="text-sm text-slate-600">Marca días laborables y completa el bloque base de horas ordinarias.</p>
+                <header class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <h2 class="text-xl font-semibold text-slate-900">Plantilla semanal</h2>
+                        <p class="text-sm text-slate-600">Define el horario real; una hora de fin menor indica que la jornada cruza medianoche.</p>
+                    </div>
+                    <div class="flex flex-wrap items-end gap-2">
+                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            Plantilla
+                            <select wire:model.live="selectedProfileId" class="mt-1 block rounded-xl border-slate-300 text-sm">
+                                @forelse ($profiles as $profile)
+                                    <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
+                                @empty
+                                    <option value="">Jornada general · sin guardar</option>
+                                @endforelse
+                            </select>
+                        </label>
+                        @can('work_schedules.manage')
+                            <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Nueva plantilla</button>
+                        @endcan
+                    </div>
                 </header>
+
+                @if ($showCreateProfile)
+                    <div class="mb-4 flex flex-col gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 sm:flex-row sm:items-end">
+                        <label class="flex-1 text-sm font-semibold text-indigo-950">Nombre de la nueva plantilla
+                            <input type="text" wire:model="newProfileName" class="mt-1 w-full rounded-xl border-indigo-200" placeholder="Ej. Guardia nocturna" />
+                            @error('newProfileName') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                        </label>
+                        <button type="button" wire:click="createProfile" class="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</button>
+                        <button type="button" wire:click="cancelCreateProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-indigo-700">Cancelar</button>
+                    </div>
+                @endif
 
                 <div class="overflow-hidden rounded-2xl border border-slate-200">
                     <div class="overflow-x-auto">
@@ -89,6 +116,8 @@
                                  <tr>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Día</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Laborable</th>
+                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Inicio</th>
+                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Fin</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Horas base</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Notas internas</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Bandas</th>
@@ -111,6 +140,13 @@
                                                 {{ $schedule['is_working_day'] ? 'Sí' : 'No' }}
                                             </label>
                                         </td>
+
+                                        @foreach (['start_time' => 'Inicio', 'end_time' => 'Fin'] as $field => $label)
+                                            <td class="px-4 py-3 align-top">
+                                                <input type="time" wire:model.live="schedules.{{ $index }}.{{ $field }}" @disabled(! $schedule['is_working_day']) aria-label="{{ $label }} de {{ $schedule['day_name'] }}" class="rounded-xl border-slate-300 text-sm disabled:bg-slate-100" />
+                                                @error("schedules.$index.$field") <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
+                                            </td>
+                                        @endforeach
 
                                         <td class="px-4 py-3 align-top">
                                             <input
@@ -165,8 +201,14 @@
                     </div>
                 </div>
 
-                <div class="mt-5 flex justify-end">
+                <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
                     @can('work_schedules.manage')
+                        @if ($selectedProfileId)
+                            <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de la nueva versión
+                                <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué cambia la jornada" />
+                                @error('changeReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                            </label>
+                        @endif
                         <button
                             type="button"
                             wire:click="save"
@@ -175,7 +217,7 @@
                             wire:target="save,confirmHistoricalSave"
                             class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-slate-800 disabled:opacity-70"
                         >
-                            <span wire:loading.remove wire:target="save">Guardar configuración</span>
+                            <span wire:loading.remove wire:target="save">{{ $selectedProfileId ? 'Crear nueva versión' : 'Guardar plantilla inicial' }}</span>
                             <span wire:loading wire:target="save" class="inline-flex items-center gap-2">
                                 <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
