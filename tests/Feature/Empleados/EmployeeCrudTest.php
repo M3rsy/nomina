@@ -5,6 +5,8 @@ use App\Livewire\Empleados\Edit;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
@@ -119,6 +121,7 @@ test('company admin create employee forces own company', function () {
 test('super admin can switch company and create employee', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($companyB)->create();
 
     $admin = User::factory()->create([
         'company_id' => null,
@@ -135,6 +138,8 @@ test('super admin can switch company and create employee', function () {
         ->set('first_name', 'Ana')
         ->set('last_name', 'López')
         ->set('dni', '1234567890123')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -145,6 +150,70 @@ test('super admin can switch company and create employee', function () {
 
     expect($employee)->not->toBeNull();
     expect($employee->first_name)->toBe('Ana');
+});
+
+test('company admin creates an employee with an effective schedule assignment', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'name' => 'Jornada diurna',
+    ]);
+    $admin = User::factory()->create([
+        'company_id' => $company->id,
+        'password' => Hash::make('password'),
+    ]);
+    $admin->assignRole('company_admin');
+
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->set('external_id', '7001')
+        ->set('first_name', 'María')
+        ->set('last_name', 'Ramos')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_effective_from', '2026-07-01')
+        ->set('schedule_reason', 'Asignación al ingresar')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $employee = Employee::query()->where('external_id', '7001')->firstOrFail();
+    $assignment = $employee->scheduleAssignments()->firstOrFail();
+
+    expect($assignment->work_schedule_profile_id)->toBe($profile->id)
+        ->and($assignment->effective_from->toDateString())->toBe('2026-07-01')
+        ->and($assignment->reason)->toBe('Asignación al ingresar')
+        ->and($assignment->assigned_by)->toBe($admin->id);
+});
+
+test('employee forms expose only active schedule profiles from the selected company', function () {
+    $company = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Jornada permitida']);
+    WorkScheduleProfile::factory()->forCompany($company)->create([
+        'name' => 'Jornada anterior',
+        'is_active' => false,
+    ]);
+    $foreignProfile = WorkScheduleProfile::factory()->forCompany($otherCompany)->create([
+        'name' => 'Jornada ajena',
+    ]);
+    $admin = User::factory()->create([
+        'company_id' => $company->id,
+        'password' => Hash::make('password'),
+    ]);
+    $admin->assignRole('company_admin');
+
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->assertSee('Jornada permitida')
+        ->assertDontSee('Jornada anterior')
+        ->assertDontSee('Jornada ajena')
+        ->set('external_id', '7002')
+        ->set('first_name', 'José')
+        ->set('last_name', 'Paz')
+        ->set('schedule_profile_id', $foreignProfile->id)
+        ->set('schedule_reason', 'Asignación inválida')
+        ->call('save')
+        ->assertHasErrors('schedule_profile_id');
 });
 
 test('duplicate external id within same company is rejected', function () {
@@ -172,6 +241,7 @@ test('duplicate external id within same company is rejected', function () {
 test('duplicate external id in other company is allowed', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create();
 
     $admin = User::factory()->create([
         'company_id' => $companyA->id,
@@ -188,6 +258,8 @@ test('duplicate external id in other company is allowed', function () {
         ->set('first_name', 'Luis')
         ->set('last_name', 'Martínez')
         ->set('dni', '1234567890123')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -211,6 +283,7 @@ test('update employee audits sensitive fields', function () {
         'expected_salary' => 10000,
         'job_title' => 'Operador',
     ]);
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
 
     $this->actingAs($admin);
 
@@ -218,6 +291,8 @@ test('update employee audits sensitive fields', function () {
         ->set('dni', '2222222222222')
         ->set('expected_salary', '15000')
         ->set('job_title', 'Supervisor')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -227,6 +302,41 @@ test('update employee audits sensitive fields', function () {
     expect($employee->revisions()->where('field', 'dni')->where('new_value', '2222222222222')->exists())->toBeTrue();
     expect($employee->revisions()->where('field', 'expected_salary')->where('new_value', '15000.00')->exists())->toBeTrue();
     expect($employee->revisions()->where('field', 'job_title')->where('new_value', 'Supervisor')->exists())->toBeTrue();
+});
+
+test('company admin assigns a new employee schedule from an effective date', function () {
+    $company = Company::factory()->create();
+    $dayProfile = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Diurna']);
+    $nightProfile = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Nocturna']);
+    $admin = User::factory()->create([
+        'company_id' => $company->id,
+        'password' => Hash::make('password'),
+    ]);
+    $admin->assignRole('company_admin');
+    $employee = Employee::factory()->forCompany($company)->create();
+    $initial = app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $dayProfile,
+        '2026-07-01',
+        'Turno inicial',
+        $admin,
+    );
+
+    $this->actingAs($admin);
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->set('schedule_profile_id', $nightProfile->id)
+        ->set('schedule_effective_from', '2026-07-20')
+        ->set('schedule_reason', 'Rotación nocturna')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $latest = $employee->scheduleAssignments()->latest('effective_from')->firstOrFail();
+
+    expect($initial->fresh()->effective_to?->toDateString())->toBe('2026-07-19')
+        ->and($latest->work_schedule_profile_id)->toBe($nightProfile->id)
+        ->and($latest->effective_from->toDateString())->toBe('2026-07-20')
+        ->and($latest->reason)->toBe('Rotación nocturna');
 });
 
 test('deactivate employee requires permission', function () {

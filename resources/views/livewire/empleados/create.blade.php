@@ -15,7 +15,7 @@
                         <span class="text-sm font-semibold text-slate-800">Empresa</span>
                         <select
                             id="company_id"
-                            wire:model="company_id"
+                            wire:model.live="company_id"
                             class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                         >
                             <option value="">Seleccione...</option>
@@ -133,6 +133,44 @@
                         @enderror
                     </label>
                 </div>
+
+                <section class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
+                    <div class="mb-4">
+                        <h2 class="text-base font-bold text-slate-900">Jornada asignada</h2>
+                        <p class="mt-1 text-sm text-slate-600">Define qué horario rige para este empleado y desde cuándo.</p>
+                    </div>
+
+                    @if ($scheduleProfiles->isEmpty())
+                        <p class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">
+                            Esta empresa todavía no tiene jornadas disponibles. Configuralas en Jornadas antes de crear el empleado.
+                        </p>
+                    @endif
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <label for="schedule_profile_id" class="block space-y-1.5">
+                            <span class="text-sm font-semibold text-slate-800">Jornada</span>
+                            <select id="schedule_profile_id" wire:model="schedule_profile_id" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                                <option value="">Seleccione...</option>
+                                @foreach ($scheduleProfiles as $profile)
+                                    <option value="{{ $profile->id }}">{{ $profile->name }} · v{{ $profile->version }}</option>
+                                @endforeach
+                            </select>
+                            @error('schedule_profile_id') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                        </label>
+
+                        <label for="schedule_effective_from" class="block space-y-1.5">
+                            <span class="text-sm font-semibold text-slate-800">Vigente desde</span>
+                            <input id="schedule_effective_from" type="date" wire:model="schedule_effective_from" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                            @error('schedule_effective_from') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                        </label>
+                    </div>
+
+                    <label for="schedule_reason" class="mt-4 block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Motivo de la asignación</span>
+                        <input id="schedule_reason" type="text" wire:model="schedule_reason" maxlength="255" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('schedule_reason') <p role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p> @enderror
+                    </label>
+                </section>
 
                 <label for="notes" class="block space-y-1.5">
                     <span class="text-sm font-semibold text-slate-800">Notas</span>
