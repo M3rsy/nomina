@@ -15,6 +15,7 @@ class PayrollProcessor
 {
     public function __construct(
         private PayrollShiftEvaluationResolver $evaluationResolver,
+        private PayPeriodRangeGuard $rangeGuard,
     ) {}
 
     public function processPayPeriod(PayPeriod $payPeriod): PayrollProcessReport
@@ -30,6 +31,13 @@ class PayrollProcessor
             if ($payPeriod->status !== 'ready') {
                 throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
             }
+
+            $this->rangeGuard->assertAvailable(
+                $payPeriod->company_id,
+                $payPeriod->start_date,
+                $payPeriod->end_date,
+                $payPeriod->id,
+            );
 
             $payPeriod->status = 'processing';
             $payPeriod->save();
