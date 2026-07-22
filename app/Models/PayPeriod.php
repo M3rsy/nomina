@@ -15,6 +15,14 @@ class PayPeriod extends Model
 {
     use BelongsToCompany, HasFactory, SoftDeletes;
 
+    public const ATTENDANCE_LOCKED_STATUSES = [
+        'processing',
+        'processed',
+        'approved',
+        'exported',
+        'cancelled',
+    ];
+
     public const UPLOADABLE_STATUSES = [
         'draft',
         'uploaded',

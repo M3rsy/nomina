@@ -2,6 +2,7 @@
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
@@ -65,4 +66,42 @@ test('an assignment requires a reason and a unique effective date', function () 
 
     expect(fn () => $assigner->assign($employee, $profile, '2026-07-01', 'Duplicada'))
         ->toThrow(ValidationException::class);
+});
+
+test('an assignment cannot change dates covered by a locked payroll period', function (string $status) {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profiles = WorkScheduleProfile::factory()->count(2)->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $current = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
+
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-27',
+        'status' => $status,
+    ]);
+
+    expect(fn () => $assigner->assign($employee, $profiles[1], '2026-07-15', 'Cambio retroactivo'))
+        ->toThrow(ValidationException::class)
+        ->and($current->fresh()->effective_to)->toBeNull()
+        ->and($employee->scheduleAssignments()->count())->toBe(1);
+})->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
+
+test('an assignment may start after a locked payroll period', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profiles = WorkScheduleProfile::factory()->count(2)->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $current = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
+
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-15',
+        'status' => 'exported',
+    ]);
+
+    $next = $assigner->assign($employee, $profiles[1], '2026-07-16', 'Cambio posterior');
+
+    expect($current->fresh()->effective_to?->toDateString())->toBe('2026-07-15')
+        ->and($next->effective_from->toDateString())->toBe('2026-07-16');
 });

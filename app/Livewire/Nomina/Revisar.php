@@ -893,7 +893,7 @@ class Revisar extends Component
             ->value('status');
 
         return $status === null
-            || in_array($status, ['processing', 'processed', 'approved', 'exported', 'cancelled'], true);
+            || in_array($status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true);
     }
 
     public function readinessBlockerLabel(string $code): string
