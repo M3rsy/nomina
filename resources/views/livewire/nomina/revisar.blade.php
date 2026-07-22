@@ -524,7 +524,7 @@
 
                                     <button
                                         type="button"
-                                        wire:click="markCorrected({{ $record->id }})"
+                                        wire:click="openCorrectRawMark({{ $record->id }})"
                                         @disabled($isBlocked)
                                         class="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
@@ -721,6 +721,18 @@
                         >
                     </label>
 
+                    <label for="edit_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la corrección</span>
+                        <textarea
+                            id="edit_reason"
+                            wire:model="editReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué la marca observada es incorrecta"
+                        ></textarea>
+                        @error('editReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
                     @if ($editWarning)
                         <p class="rounded-lg bg-amber-50 p-2 text-sm text-amber-900">{{ $editWarning }}</p>
                     @endif
@@ -734,15 +746,56 @@
         </div>
     @endif
 
+    @if ($showCorrectModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+                <h2 class="text-lg font-bold">Corregir estado de marca</h2>
+                <p class="mt-2 text-sm text-slate-600">La marca se validará como corregida sin modificar la evidencia del archivo original.</p>
+                <form wire:submit.prevent="markCorrected" class="mt-4 space-y-4">
+                    <label for="correct_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la corrección</span>
+                        <textarea
+                            id="correct_reason"
+                            wire:model="correctReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué el estado debe considerarse corregido"
+                        ></textarea>
+                        @error('correctReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2 pt-2">
+                        <button type="button" wire:click="closeCorrectModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Guardar corrección</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
     @if ($showDeleteModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
             <div class="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
                 <h2 class="text-lg font-bold">Eliminar marca</h2>
                 <p class="mt-2 text-sm text-slate-600">La marca se marcará como eliminada y se conserva su rastro en historial.</p>
-                <div class="mt-4 flex justify-end gap-2">
-                    <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                    <button type="button" wire:click="deleteRawMark" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar</button>
-                </div>
+                <form wire:submit.prevent="deleteRawMark" class="mt-4 space-y-4">
+                    <label for="delete_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la eliminación</span>
+                        <textarea
+                            id="delete_reason"
+                            wire:model="deleteReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué esta marca observada no debe utilizarse"
+                        ></textarea>
+                        @error('deleteReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar</button>
+                    </div>
+                </form>
             </div>
         </div>
     @endif

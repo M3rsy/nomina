@@ -55,11 +55,21 @@ class Revisar extends Component
 
     public string $editEventAt = '';
 
+    public string $editReason = '';
+
     public ?string $editWarning = null;
 
     public bool $showDeleteModal = false;
 
     public ?int $deleteRawMarkId = null;
+
+    public string $deleteReason = '';
+
+    public bool $showCorrectModal = false;
+
+    public ?int $correctRawMarkId = null;
+
+    public string $correctReason = '';
 
     public bool $showAssignModal = false;
 
@@ -196,15 +206,14 @@ class Revisar extends Component
 
         $this->editRawMarkId = $rawMark->id;
         $this->editEventAt = $rawMark->event_at->format('Y-m-d H:i:s');
+        $this->editReason = '';
         $this->editWarning = null;
         $this->showEditModal = true;
     }
 
     public function closeEditModal(): void
     {
-        $this->showEditModal = false;
-        $this->editRawMarkId = null;
-        $this->editEventAt = '';
+        $this->closeEditModal();
         $this->editWarning = null;
         $this->resetErrorBag();
     }
@@ -223,8 +232,11 @@ class Revisar extends Component
 
         $this->authorize('edit', $rawMark);
 
+        $this->editReason = trim($this->editReason);
+
         $validated = $this->validate([
             'editEventAt' => ['required', 'date'],
+            'editReason' => ['required', 'string', 'max:500'],
         ]);
 
         $newEventAt = Carbon::parse($validated['editEventAt']);
@@ -237,11 +249,12 @@ class Revisar extends Component
 
         app(RawMarkMutationGuard::class)->mutate(
             $rawMark,
-            function (RawMark $lockedMark) use ($newEventAt, $newStatus, $notes): void {
+            function (RawMark $lockedMark) use ($newEventAt, $newStatus, $notes, $validated): void {
                 $revisions = $lockedMark->metadata['revisions'] ?? [];
                 $revisions[] = [
                     'action' => 'edit_event_at',
                     'user_id' => Auth::id(),
+                    'reason' => $validated['editReason'],
                     'old_event_at' => $lockedMark->event_at->toDateTimeString(),
                     'new_event_at' => $newEventAt->toDateTimeString(),
                     'at' => now()->toDateTimeString(),
@@ -260,6 +273,7 @@ class Revisar extends Component
         $this->showEditModal = false;
         $this->editRawMarkId = null;
         $this->editEventAt = '';
+        $this->editReason = '';
     }
 
     public function openDeleteRawMark(int $id): void
@@ -277,6 +291,7 @@ class Revisar extends Component
         $this->authorize('delete', $rawMark);
 
         $this->deleteRawMarkId = $rawMark->id;
+        $this->deleteReason = '';
         $this->showDeleteModal = true;
     }
 
@@ -284,6 +299,8 @@ class Revisar extends Component
     {
         $this->showDeleteModal = false;
         $this->deleteRawMarkId = null;
+        $this->deleteReason = '';
+        $this->resetErrorBag();
     }
 
     public function deleteRawMark(): void
@@ -300,12 +317,19 @@ class Revisar extends Component
 
         $this->authorize('delete', $rawMark);
 
-        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark): void {
+        $this->deleteReason = trim($this->deleteReason);
+        $validated = $this->validate([
+            'deleteReason' => ['required', 'string', 'max:500'],
+        ]);
+
+        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark) use ($validated): void {
             $revisions = $lockedMark->metadata['revisions'] ?? [];
             $revisions[] = [
                 'action' => 'delete',
                 'user_id' => Auth::id(),
+                'reason' => $validated['deleteReason'],
                 'previous_status' => $lockedMark->status,
+                'new_status' => 'deleted',
                 'at' => now()->toDateTimeString(),
             ];
 
@@ -315,8 +339,7 @@ class Revisar extends Component
             ]);
         });
 
-        $this->showDeleteModal = false;
-        $this->deleteRawMarkId = null;
+        $this->closeDeleteModal();
     }
 
     public function openAssignModal(int $id): void
@@ -406,7 +429,7 @@ class Revisar extends Component
         $this->assignApplyAll = false;
     }
 
-    public function markCorrected(int $id): void
+    public function openCorrectRawMark(int $id): void
     {
         if ($this->isBlocked()) {
             return;
@@ -420,12 +443,46 @@ class Revisar extends Component
 
         $this->authorize('manage', $rawMark);
 
-        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark): void {
+        $this->correctRawMarkId = $rawMark->id;
+        $this->correctReason = '';
+        $this->showCorrectModal = true;
+    }
+
+    public function closeCorrectModal(): void
+    {
+        $this->showCorrectModal = false;
+        $this->correctRawMarkId = null;
+        $this->correctReason = '';
+        $this->resetErrorBag();
+    }
+
+    public function markCorrected(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $rawMark = $this->findRawMark($this->correctRawMarkId);
+
+        if (! $rawMark) {
+            return;
+        }
+
+        $this->authorize('manage', $rawMark);
+
+        $this->correctReason = trim($this->correctReason);
+        $validated = $this->validate([
+            'correctReason' => ['required', 'string', 'max:500'],
+        ]);
+
+        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark) use ($validated): void {
             $revisions = $lockedMark->metadata['revisions'] ?? [];
             $revisions[] = [
                 'action' => 'mark_corrected',
                 'user_id' => Auth::id(),
+                'reason' => $validated['correctReason'],
                 'previous_status' => $lockedMark->status,
+                'new_status' => 'corrected',
                 'at' => now()->toDateTimeString(),
             ];
 
@@ -434,6 +491,8 @@ class Revisar extends Component
                 'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
             ]);
         });
+
+        $this->closeCorrectModal();
     }
 
     public function openAbsencesModal(): void

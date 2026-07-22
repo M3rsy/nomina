@@ -61,6 +61,7 @@ test('an exit stored in the next period cannot change a locked overnight work da
     Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
         ->set('editRawMarkId', $this->exit->id)
         ->set('editEventAt', '2026-07-21 06:15:00')
+        ->set('editReason', 'Corregir la hora observada')
         ->call('saveEditRawMark')
         ->assertHasErrors(['raw_mark']);
 
@@ -78,6 +79,7 @@ test('an open mark cannot be moved into a locked overnight work date', function 
     Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
         ->set('editRawMarkId', $safeMark->id)
         ->set('editEventAt', '2026-07-21 05:45:00')
+        ->set('editReason', 'Corregir la hora observada')
         ->call('saveEditRawMark')
         ->assertHasErrors(['raw_mark']);
 
@@ -90,6 +92,7 @@ test('an overnight exit remains editable while every affected period is open', f
     Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
         ->set('editRawMarkId', $this->exit->id)
         ->set('editEventAt', '2026-07-21 06:15:00')
+        ->set('editReason', 'Corregir la hora observada')
         ->call('saveEditRawMark')
         ->assertHasNoErrors();
 
@@ -100,6 +103,7 @@ test('an overnight exit remains editable while every affected period is open', f
 test('an exit stored in the next period cannot be deleted from a locked overnight work date', function () {
     Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
         ->set('deleteRawMarkId', $this->exit->id)
+        ->set('deleteReason', 'La marca no corresponde a un hecho real')
         ->call('deleteRawMark')
         ->assertHasErrors(['raw_mark']);
 
@@ -108,7 +112,9 @@ test('an exit stored in the next period cannot be deleted from a locked overnigh
 
 test('an exit stored in the next period cannot be corrected for a locked overnight work date', function () {
     Livewire::test(Revisar::class, ['payPeriod' => $this->openPeriod])
-        ->call('markCorrected', $this->exit->id)
+        ->call('openCorrectRawMark', $this->exit->id)
+        ->set('correctReason', 'Validación manual del estado')
+        ->call('markCorrected')
         ->assertHasErrors(['raw_mark']);
 
     expect($this->exit->fresh()->status)->toBe('valid');

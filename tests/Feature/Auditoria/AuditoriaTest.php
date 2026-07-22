@@ -208,6 +208,25 @@ test('raw mark revisions appear in audit feed', function () {
                 [
                     'action' => 'edit_event_at',
                     'user_id' => $admin->id,
+                    'reason' => 'El reloj registró una hora incorrecta',
+                    'old_event_at' => '2026-01-05 06:00:00',
+                    'new_event_at' => '2026-01-05 06:15:00',
+                    'at' => now()->subMinute()->toDateTimeString(),
+                ],
+                [
+                    'action' => 'mark_corrected',
+                    'user_id' => $admin->id,
+                    'reason' => 'Validación contra reporte del supervisor',
+                    'previous_status' => 'unknown_employee',
+                    'new_status' => 'corrected',
+                    'at' => now()->subSeconds(30)->toDateTimeString(),
+                ],
+                [
+                    'action' => 'delete',
+                    'user_id' => $admin->id,
+                    'reason' => 'La marca no corresponde a un hecho real',
+                    'previous_status' => 'valid',
+                    'new_status' => 'deleted',
                     'at' => now()->toDateTimeString(),
                 ],
             ],
@@ -217,8 +236,14 @@ test('raw mark revisions appear in audit feed', function () {
     Livewire::actingAs($admin)
         ->test(Index::class)
         ->set('type', 'mark_revision')
+        ->assertSee('2026-01-05 06:00:00 a 2026-01-05 06:15:00')
+        ->assertSee('El reloj registró una hora incorrecta')
+        ->assertSee('unknown_employee a corrected')
+        ->assertSee('Validación contra reporte del supervisor')
+        ->assertSee('valid a deleted')
+        ->assertSee('La marca no corresponde a un hecho real')
         ->assertViewHas('entries', function ($entries) {
-            return $entries->total() === 1;
+            return $entries->total() === 3;
         });
 });
 
