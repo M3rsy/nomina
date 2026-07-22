@@ -344,6 +344,7 @@
                                 $deficitLabel = match ($deficit->kind) {
                                     'late_arrival' => 'Llegada tardía',
                                     'early_departure' => 'Salida anticipada',
+                                    'full_day_absence' => 'Jornada completa sin marcas',
                                     default => 'Déficit de asistencia',
                                 };
                                 $rateLabels = collect([
@@ -554,8 +555,8 @@
                     <p class="text-sm font-semibold text-slate-900">{{ $falta['employee']->full_name }}</p>
                     <p class="text-sm text-slate-600">
                         {{ $falta['date']->format('d/m/Y') }}
-                        @if ($falta['justified_absence'])
-                            — Justificada ({{ $falta['justified_absence']->reason }})
+                        @if ($falta['attendance_exception'])
+                            — Justificada ({{ $falta['attendance_exception']->reason }})
                         @else
                             — Sin justificar
                         @endif

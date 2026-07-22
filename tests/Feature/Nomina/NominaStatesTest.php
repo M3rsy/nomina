@@ -1,9 +1,9 @@
 <?php
 
 use App\Livewire\Nomina\Revisar;
+use App\Models\AttendanceException;
 use App\Models\Company;
 use App\Models\Employee;
-use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\RawMark;
@@ -140,7 +140,7 @@ test('justifyAbsence is no-op when pay period is locked', function (string $stat
         ->call('justifyAbsence', $employee->id, '2026-01-06', 'permission')
         ->assertHasNoErrors();
 
-    expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+    expect(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 })->with([
     'processing' => ['processing'],
     'processed' => ['processed'],

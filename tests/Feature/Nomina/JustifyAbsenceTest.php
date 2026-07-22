@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Nomina\Revisar;
+use App\Models\AttendanceException;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -23,7 +24,7 @@ beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('justifyAbsence creates a justified absence with reason and notes', function () {
+test('justifyAbsence grants an append-only full-day attendance exception', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-05',
@@ -40,30 +41,30 @@ test('justifyAbsence creates a justified absence with reason and notes', functio
         ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission', 'Personal matters')
         ->assertHasNoErrors();
 
-    $absence = JustifiedAbsence::withoutCompanyScope()
+    $exception = AttendanceException::withoutCompanyScope()
         ->where('company_id', $company->id)
         ->where('pay_period_id', $payPeriod->id)
         ->where('employee_id', $employee->id)
-        ->whereDate('date', '2026-01-05')
+        ->whereDate('work_date', '2026-01-05')
+        ->current()
         ->first();
 
-    expect($absence)->not->toBeNull()
-        ->and($absence->reason)->toBe('permission')
-        ->and($absence->notes)->toBe('Personal matters')
-        ->and($absence->justified_by)->toBe($admin->id)
-        ->and($absence->scheduled_start->format('Y-m-d H:i'))->toBe('2026-01-05 06:00')
-        ->and($absence->scheduled_end->format('Y-m-d H:i'))->toBe('2026-01-05 14:00')
-        ->and($absence->scheduled_minutes)->toBe(480)
-        ->and($absence->rate_minutes)->toBe([
+    expect($exception)->not->toBeNull()
+        ->and($exception->segment_kind)->toBe('full_day_absence')
+        ->and($exception->decision)->toBe(AttendanceException::GRANTED)
+        ->and($exception->reason)->toBe('permission: Personal matters')
+        ->and($exception->decided_by)->toBe($admin->id)
+        ->and($exception->starts_at->format('Y-m-d H:i'))->toBe('2026-01-05 06:00')
+        ->and($exception->ends_at->format('Y-m-d H:i'))->toBe('2026-01-05 14:00')
+        ->and($exception->minutes)->toBe(480)
+        ->and($exception->rate_minutes)->toBe([
             'ordinary' => 480,
             'extra25' => 0,
             'extra50' => 0,
             'extra75' => 0,
             'extra100' => 0,
         ])
-        ->and($absence->metadata['revisions'])->toHaveCount(1)
-        ->and($absence->metadata['revisions'][0]['old_values'])->toBeNull()
-        ->and($absence->metadata['revisions'][0]['new_values']['reason'])->toBe('permission');
+        ->and(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->exists())->toBeFalse();
 });
 
 test('justifyAbsence cannot write after the period becomes processed', function () {
@@ -91,10 +92,10 @@ test('justifyAbsence cannot write after the period becomes processed', function 
 
     expect($raceTriggered)->toBeTrue();
     expect($payPeriod->fresh()->status)->toBe('processed')
-        ->and(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->exists())->toBeFalse();
+        ->and(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->exists())->toBeFalse();
 });
 
-test('justifyAbsence upserts existing absence for same employee and date', function () {
+test('justifyAbsence leaves legacy absence data untouched and records a new exception', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-05',
@@ -123,18 +124,22 @@ test('justifyAbsence upserts existing absence for same employee and date', funct
         ->where('employee_id', $employee->id)
         ->whereDate('date', '2026-01-05')
         ->first();
+    $exception = AttendanceException::withoutCompanyScope()
+        ->where('pay_period_id', $payPeriod->id)
+        ->where('employee_id', $employee->id)
+        ->current()
+        ->first();
 
     expect($absence)->not->toBeNull()
-        ->and($absence->reason)->toBe('holiday')
-        ->and($absence->notes)->toBe('Updated note')
-        ->and($absence->justified_by)->toBe($admin->id)
-        ->and($absence->metadata['revisions'])->toHaveCount(1)
-        ->and($absence->metadata['revisions'][0]['old_values']['reason'])->toBe('other')
-        ->and($absence->metadata['revisions'][0]['old_values']['notes'])->toBe('Original note')
-        ->and($absence->metadata['revisions'][0]['new_values']['reason'])->toBe('holiday')
-        ->and($absence->metadata['revisions'][0]['new_values']['scheduled_minutes'])->toBe(480);
+        ->and($absence->reason)->toBe('other')
+        ->and($absence->notes)->toBe('Original note')
+        ->and($exception)->not->toBeNull()
+        ->and($exception->decision)->toBe(AttendanceException::GRANTED)
+        ->and($exception->reason)->toBe('holiday: Updated note')
+        ->and($exception->minutes)->toBe(480);
 
-    expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(1);
+    expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(1)
+        ->and(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(1);
 });
 
 test('a full day justification becomes stale when the assigned schedule changes', function () {
@@ -187,18 +192,18 @@ test('a full day justification becomes stale when the assigned schedule changes'
         ->assertHasNoErrors();
 
     $renewed = app(PayrollShiftEvaluationResolver::class)->resolve($payPeriod, $employee, '2026-01-05');
-    $absence = JustifiedAbsence::withoutCompanyScope()
+    $exceptions = AttendanceException::withoutCompanyScope()
         ->where('pay_period_id', $payPeriod->id)
         ->where('employee_id', $employee->id)
-        ->firstOrFail();
+        ->orderBy('id')
+        ->get();
 
     expect($renewed->isJustified)->toBeTrue()
         ->and($renewed->recognizedMinutes)->toBe(720)
         ->and($renewed->payableRates->extra50Minutes)->toBe(360)
         ->and($renewed->payableRates->extra75Minutes)->toBe(360)
-        ->and($absence->metadata['revisions'])->toHaveCount(2)
-        ->and($absence->metadata['revisions'][0]['new_values']['schedule_fingerprint'])
-        ->not->toBe($absence->metadata['revisions'][1]['new_values']['schedule_fingerprint']);
+        ->and($exceptions)->toHaveCount(2)
+        ->and($exceptions[0]->fingerprint)->not->toBe($exceptions[1]->fingerprint);
 });
 
 test('justifyAbsence validates reason against allowed values', function () {
@@ -215,7 +220,7 @@ test('justifyAbsence validates reason against allowed values', function () {
         ->call('justifyAbsence', $employee->id, '2026-01-05', 'invalid_reason')
         ->assertHasErrors('absenceReason');
 
-    expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+    expect(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 });
 
 test('justifyAbsence rejects employee from another company', function () {
@@ -233,7 +238,7 @@ test('justifyAbsence rejects employee from another company', function () {
         ->call('justifyAbsence', $employeeB->id, '2026-01-05', 'permission')
         ->assertHasNoErrors();
 
-    expect(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+    expect(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
 });
 
 test('detectFaltas lists working day without marks as falta', function () {
@@ -314,7 +319,7 @@ test('detectFaltas pairs justified absence with falta', function () {
             return $faltas->count() === 6
                 && $mondayFalta !== null
                 && $mondayFalta['employee']->id === $employee->id
-                && $mondayFalta['justified_absence'] !== null;
+                && $mondayFalta['attendance_exception'] !== null;
         });
 });
 

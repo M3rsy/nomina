@@ -3,7 +3,6 @@
 namespace App\Services\Attendance;
 
 use App\Models\AttendanceException;
-use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Services\Payroll\BandSplit;
 use Illuminate\Support\Collection;
@@ -18,7 +17,6 @@ class PayrollShiftEvaluator
         ShiftOccurrence $occurrence,
         AttendanceShiftAnalysis $analysis,
         Collection $currentDecisions,
-        ?JustifiedAbsence $absence = null,
         Collection $currentExceptions = new Collection,
     ): PayrollShiftEvaluation {
         if (! in_array($analysis->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
@@ -43,18 +41,15 @@ class PayrollShiftEvaluator
             $scheduledMinutes = $hasScheduledInterval
                 ? $analysis->scheduledMinutes
                 : (int) round((float) $occurrence->schedule->base_ordinary_hours * 60);
-            try {
-                $absenceSnapshot = FullDayAbsenceSnapshot::from($occurrence, $analysis);
-            } catch (\InvalidArgumentException) {
-                $absenceSnapshot = null;
-            }
-            $isJustified = $absence !== null
-                && $absenceSnapshot !== null
-                && $absenceSnapshot->matches($absence);
+            $deficit = $analysis->deficits->firstWhere('kind', 'full_day_absence');
+            $exception = $deficit === null
+                ? null
+                : $currentExceptions->keyBy('deficit_key')->get($deficit->key);
+            $isJustified = $deficit !== null
+                && $this->matchesException($exception, $deficit)
+                && $exception->decision === AttendanceException::GRANTED;
             $payableRates = $isJustified
-                ? ($hasScheduledInterval
-                    ? $analysis->scheduledRates
-                    : new BandSplit(ordinaryMinutes: $scheduledMinutes))
+                ? $deficit->rateMinutes
                 : new BandSplit;
 
             return new PayrollShiftEvaluation(
@@ -66,10 +61,10 @@ class PayrollShiftEvaluator
                 isAbsence: true,
                 isJustified: $isJustified,
                 unjustified: ! $isJustified,
+                excusedDeficitMinutes: $isJustified ? $deficit->minutes : 0,
                 metadata: $isJustified ? [
-                    'justified_absence_id' => $absence->id,
-                    'absence_reason' => $absence->reason,
-                    'absence_schedule_fingerprint' => $absence->schedule_fingerprint,
+                    'attendance_exception_ids' => [$exception->id],
+                    'excused_deficit_minutes' => $deficit->minutes,
                 ] : [],
             );
         }
