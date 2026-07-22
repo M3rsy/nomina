@@ -5,6 +5,7 @@ namespace App\Livewire\Auditoria;
 use App\Models\AttendanceException;
 use App\Models\EmployeeRevision;
 use App\Models\EmployeeScheduleAssignment;
+use App\Models\JustifiedAbsence;
 use App\Models\LoginAttempt;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
@@ -30,6 +31,7 @@ class Index extends Component
         'mark_revision' => 'Revisiones de marcas',
         'overtime_decision' => 'Autorizaciones de horas extra',
         'attendance_exception' => 'Excepciones de asistencia',
+        'full_day_absence' => 'Justificaciones de jornada completa',
         'payroll_state' => 'Estados de nómina',
     ];
 
@@ -209,6 +211,50 @@ class Index extends Component
                 });
         }
 
+        if (in_array('full_day_absence', $types, true)) {
+            JustifiedAbsence::withoutCompanyScope()
+                ->with(['company', 'employee'])
+                ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                ->whereNotNull('metadata')
+                ->limit(500)
+                ->get()
+                ->each(function (JustifiedAbsence $absence) use (&$entries): void {
+                    foreach ($absence->metadata['revisions'] ?? [] as $revision) {
+                        $at = $revision['at'] ?? null;
+
+                        if (! $at) {
+                            continue;
+                        }
+
+                        $createdAt = Carbon::parse($at);
+
+                        if (! $this->dateIsVisible($createdAt)) {
+                            continue;
+                        }
+
+                        $userId = $revision['user_id'] ?? null;
+                        $user = $userId ? User::find($userId) : null;
+                        $entries[] = new AuditEntry(
+                            'full_day_absence',
+                            'Justificación de jornada completa',
+                            $createdAt,
+                            $absence->company_id,
+                            $absence->company?->name ?? 'Desconocida',
+                            $userId,
+                            $user?->email,
+                            $this->describeFullDayAbsenceRevision($absence, $revision),
+                            [
+                                'justified_absence_id' => $absence->id,
+                                'employee_id' => $absence->employee_id,
+                                'action' => $revision['action'] ?? 'justify_full_day_absence',
+                                'old_values' => $revision['old_values'] ?? null,
+                                'new_values' => $revision['new_values'] ?? null,
+                            ],
+                        );
+                    }
+                });
+        }
+
         if (in_array('payroll_state', $types, true)) {
             PayPeriod::withoutCompanyScope()
                 ->with('company')
@@ -339,6 +385,57 @@ class Index extends Component
             'delete' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",
             default => "{$prefix}: acción ".($revision['action'] ?? 'desconocida').". Motivo: {$reason}",
         };
+    }
+
+    private function describeFullDayAbsenceRevision(JustifiedAbsence $absence, array $revision): string
+    {
+        $employee = $absence->employee?->full_name ?? "Empleado #{$absence->employee_id}";
+        $date = $absence->date->format('d/m/Y');
+        $oldValues = is_array($revision['old_values'] ?? null) ? $revision['old_values'] : null;
+        $newValues = is_array($revision['new_values'] ?? null) ? $revision['new_values'] : [];
+        $verb = $oldValues === null ? 'autorizó' : 'actualizó';
+
+        return "{$employee}: {$verb} la justificación de jornada completa del {$date}. "
+            .'Antes: '.$this->describeFullDayAbsenceValues($oldValues).'. '
+            .'Ahora: '.$this->describeFullDayAbsenceValues($newValues).'.';
+    }
+
+    private function describeFullDayAbsenceValues(?array $values): string
+    {
+        if ($values === null) {
+            return 'sin justificación previa';
+        }
+
+        $rates = collect([
+            'Ordinario' => $values['rate_minutes']['ordinary'] ?? 0,
+            '25%' => $values['rate_minutes']['extra25'] ?? 0,
+            '50%' => $values['rate_minutes']['extra50'] ?? 0,
+            '75%' => $values['rate_minutes']['extra75'] ?? 0,
+            '100%' => $values['rate_minutes']['extra100'] ?? 0,
+        ])->filter(fn ($minutes) => (int) $minutes > 0)
+            ->map(fn ($minutes, $label) => "{$label}: ".(int) $minutes.' min')
+            ->implode(', ');
+        $start = $this->formatAbsenceAuditDateTime($values['scheduled_start'] ?? null);
+        $end = $this->formatAbsenceAuditDateTime($values['scheduled_end'] ?? null);
+        $minutes = (int) ($values['scheduled_minutes'] ?? 0);
+        $reason = $values['reason'] ?? 'sin motivo registrado';
+        $notes = $values['notes'] ?? 'sin notas';
+        $fingerprint = $values['schedule_fingerprint'] ?? 'sin huella';
+
+        return "{$start} → {$end}, {$minutes} min ({$rates}), motivo {$reason}, notas: {$notes}, huella: {$fingerprint}";
+    }
+
+    private function formatAbsenceAuditDateTime(mixed $value): string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return 'sin horario';
+        }
+
+        try {
+            return Carbon::parse($value)->format('d/m/Y H:i');
+        } catch (\Throwable) {
+            return $value;
+        }
     }
 
     private function dateIsVisible(Carbon $date): bool

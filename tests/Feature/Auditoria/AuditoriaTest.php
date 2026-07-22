@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\EmployeeRevision;
 use App\Models\EmployeeScheduleAssignment;
+use App\Models\JustifiedAbsence;
 use App\Models\LoginAttempt;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
@@ -364,6 +365,95 @@ test('manual marks and payroll reopenings explain the factual audit event', func
         ->assertSee('reabierto')
         ->assertSee('Corregir una salida omitida')
         ->assertSee('4 resultados invalidados');
+});
+
+test('full day absence revisions expose exact schedule snapshots and remain tenant isolated', function () {
+    $company = Company::factory()->create();
+    $foreignCompany = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $employee = Employee::factory()->forCompany($company)->create([
+        'first_name' => 'María',
+        'last_name' => 'Guardia',
+    ]);
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $firstSnapshot = [
+        'reason' => 'permission',
+        'notes' => 'Cobertura diurna autorizada',
+        'justified_by' => $admin->id,
+        'schedule_fingerprint' => 'day-fingerprint',
+        'scheduled_start' => '2026-07-20T06:00:00-04:00',
+        'scheduled_end' => '2026-07-20T14:00:00-04:00',
+        'scheduled_minutes' => 480,
+        'rate_minutes' => ['ordinary' => 480, 'extra25' => 0, 'extra50' => 0, 'extra75' => 0, 'extra100' => 0],
+    ];
+    $secondSnapshot = [
+        'reason' => 'other',
+        'notes' => 'Reautorizada para guardia nocturna',
+        'justified_by' => $admin->id,
+        'schedule_fingerprint' => 'night-fingerprint',
+        'scheduled_start' => '2026-07-20T18:00:00-04:00',
+        'scheduled_end' => '2026-07-21T06:00:00-04:00',
+        'scheduled_minutes' => 720,
+        'rate_minutes' => ['ordinary' => 0, 'extra25' => 0, 'extra50' => 360, 'extra75' => 360, 'extra100' => 0],
+    ];
+
+    JustifiedAbsence::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+        'date' => '2026-07-20',
+        'reason' => 'other',
+        'notes' => $secondSnapshot['notes'],
+        'justified_by' => $admin->id,
+        'schedule_fingerprint' => $secondSnapshot['schedule_fingerprint'],
+        'scheduled_start' => $secondSnapshot['scheduled_start'],
+        'scheduled_end' => $secondSnapshot['scheduled_end'],
+        'scheduled_minutes' => $secondSnapshot['scheduled_minutes'],
+        'rate_minutes' => $secondSnapshot['rate_minutes'],
+        'metadata' => ['revisions' => [
+            [
+                'action' => 'justify_full_day_absence',
+                'user_id' => $admin->id,
+                'old_values' => null,
+                'new_values' => $firstSnapshot,
+                'at' => now()->subMinute()->toIso8601String(),
+            ],
+            [
+                'action' => 'justify_full_day_absence',
+                'user_id' => $admin->id,
+                'old_values' => $firstSnapshot,
+                'new_values' => $secondSnapshot,
+                'at' => now()->toIso8601String(),
+            ],
+        ]],
+    ]);
+
+    $foreignEmployee = Employee::factory()->forCompany($foreignCompany)->create();
+    $foreignPeriod = PayPeriod::factory()->forCompany($foreignCompany)->create();
+    JustifiedAbsence::factory()->forCompany($foreignCompany)->forPayPeriod($foreignPeriod)->forEmployee($foreignEmployee)->create([
+        'metadata' => ['revisions' => [[
+            'action' => 'justify_full_day_absence',
+            'user_id' => null,
+            'old_values' => null,
+            'new_values' => $firstSnapshot,
+            'at' => now()->toIso8601String(),
+        ]]],
+    ]);
+
+    Livewire::actingAs($admin)->test(Index::class)
+        ->set('type', 'full_day_absence')
+        ->assertViewHas('entries', fn ($entries) => $entries->total() === 2)
+        ->assertSee('Justificaciones de jornada completa')
+        ->assertSee('Justificación de jornada completa')
+        ->assertSee('María Guardia')
+        ->assertSee('sin justificación previa')
+        ->assertSee('06:00')
+        ->assertSee('14:00')
+        ->assertSee('480 min')
+        ->assertSee('18:00')
+        ->assertSee('720 min')
+        ->assertSee('50%: 360 min')
+        ->assertSee('75%: 360 min')
+        ->assertSee('day-fingerprint')
+        ->assertSee('night-fingerprint')
+        ->assertSee('Reautorizada para guardia nocturna');
 });
 
 test('new attendance audit types remain isolated by company', function (string $type, string $model) {
