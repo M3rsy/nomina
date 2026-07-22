@@ -4,9 +4,14 @@ namespace App\Services\Payroll;
 
 use App\Models\Employee;
 use App\Models\JustifiedAbsence;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
-use App\Models\RawMark;
+use App\Services\Attendance\AttendanceShiftAnalyzer;
+use App\Services\Attendance\PayrollShiftEvaluation;
+use App\Services\Attendance\PayrollShiftEvaluator;
+use App\Services\Attendance\ShiftOccurrenceResolver;
+use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -14,19 +19,26 @@ use InvalidArgumentException;
 class PayrollProcessor
 {
     public function __construct(
-        private PayrollCalculator $calculator,
-    ) {
-    }
+        private ShiftOccurrenceResolver $occurrenceResolver,
+        private AttendanceShiftAnalyzer $shiftAnalyzer,
+        private PayrollShiftEvaluator $shiftEvaluator,
+        private PayrollRules $rules,
+    ) {}
 
     public function processPayPeriod(PayPeriod $payPeriod): PayrollProcessReport
     {
-        if ($payPeriod->status !== 'ready') {
-            throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
-        }
-
         $report = new PayrollProcessReport;
 
         DB::transaction(function () use ($payPeriod, &$report) {
+            $payPeriod = PayPeriod::withoutCompanyScope()
+                ->whereKey($payPeriod->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($payPeriod->status !== 'ready') {
+                throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
+            }
+
             $payPeriod->status = 'processing';
             $payPeriod->save();
 
@@ -42,16 +54,15 @@ class PayrollProcessor
 
             for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
                 foreach ($employees as $employee) {
-                    $marks = $this->marksForDay($companyId, $payPeriod->id, $employee->id, $date);
-                    $absence = $this->absenceForDay($companyId, $payPeriod->id, $employee->id, $date);
+                    $result = $this->evaluate($payPeriod, $employee, $date);
 
-                    $result = $this->calculator->calculateForDay(
-                        $payPeriod->company,
-                        $employee,
-                        $date,
-                        $marks,
-                        $absence,
-                    );
+                    if ($result->status === PayrollShiftEvaluation::BLOCKED) {
+                        throw new PayrollProcessingBlocked([[
+                            'employee_id' => $employee->id,
+                            'work_date' => $date->toDateString(),
+                            'blockers' => $result->blockers->all(),
+                        ]]);
+                    }
 
                     if ($this->shouldSkip($result)) {
                         continue;
@@ -68,17 +79,9 @@ class PayrollProcessor
             $payPeriod->save();
         });
 
-        return $report;
-    }
+        $payPeriod->refresh();
 
-    private function marksForDay(int $companyId, int $payPeriodId, int $employeeId, CarbonImmutable $date): \Illuminate\Support\Collection
-    {
-        return RawMark::withoutCompanyScope()
-            ->where('company_id', $companyId)
-            ->where('pay_period_id', $payPeriodId)
-            ->where('employee_id', $employeeId)
-            ->whereDate('event_at', $date->toDateString())
-            ->get();
+        return $report;
     }
 
     private function absenceForDay(int $companyId, int $payPeriodId, int $employeeId, CarbonImmutable $date): ?JustifiedAbsence
@@ -91,21 +94,35 @@ class PayrollProcessor
             ->first();
     }
 
-    private function shouldSkip(PayrollDayResult $result): bool
+    private function evaluate(PayPeriod $payPeriod, Employee $employee, CarbonImmutable $date): PayrollShiftEvaluation
     {
-        // Non-working days without marks or absences produce a skip marker.
-        if (($result->metadata['skip'] ?? false) === true) {
-            return true;
-        }
+        $occurrence = $this->occurrenceResolver->resolve($employee, $date);
+        $analysis = $this->shiftAnalyzer->analyze(
+            $occurrence,
+            $this->rules->isHoliday($payPeriod->company, $date),
+        );
+        $decisions = OvertimeDecision::withoutCompanyScope()
+            ->where('company_id', $payPeriod->company_id)
+            ->where('pay_period_id', $payPeriod->id)
+            ->where('employee_id', $employee->id)
+            ->whereDate('work_date', $date->toDateString())
+            ->current()
+            ->get();
+        $absence = $this->absenceForDay($payPeriod->company_id, $payPeriod->id, $employee->id, $date);
 
-        return false;
+        return $this->shiftEvaluator->evaluate($occurrence, $analysis, $decisions, $absence);
+    }
+
+    private function shouldSkip(PayrollShiftEvaluation $result): bool
+    {
+        return $result->status === PayrollShiftEvaluation::SKIP;
     }
 
     private function storeResult(
         PayPeriod $payPeriod,
         Employee $employee,
         CarbonImmutable $date,
-        PayrollDayResult $result,
+        PayrollShiftEvaluation $result,
         string $rulesVersion,
         PayrollProcessReport $report,
     ): void {
@@ -123,16 +140,28 @@ class PayrollProcessor
             'date' => $date->toDateString(),
             'entry_at' => $result->entryAt,
             'exit_at' => $result->exitAt,
-            'worked_hours' => $result->workedHours,
-            'ordinary_hours' => $result->ordinaryHours,
-            'extra_25_hours' => $result->extra25Hours,
-            'extra_50_hours' => $result->extra50Hours,
-            'extra_75_hours' => $result->extra75Hours,
-            'extra_100_hours' => $result->extra100Hours,
+            'worked_hours' => $result->workedMinutes / 60,
+            'ordinary_hours' => $result->payableRates->ordinaryHours(),
+            'extra_25_hours' => $result->payableRates->extra25Hours(),
+            'extra_50_hours' => $result->payableRates->extra50Hours(),
+            'extra_75_hours' => $result->payableRates->extra75Hours(),
+            'extra_100_hours' => $result->payableRates->extra100Hours(),
+            'worked_minutes' => $result->workedMinutes,
+            'scheduled_minutes' => $result->scheduledMinutes,
+            'recognized_minutes' => $result->recognizedMinutes,
+            'detected_overtime_minutes' => $result->detectedOvertimeMinutes,
+            'approved_overtime_minutes' => $result->approvedOvertimeMinutes,
+            'ordinary_minutes' => $result->payableRates->ordinaryMinutes,
+            'extra_25_minutes' => $result->payableRates->extra25Minutes,
+            'extra_50_minutes' => $result->payableRates->extra50Minutes,
+            'extra_75_minutes' => $result->payableRates->extra75Minutes,
+            'extra_100_minutes' => $result->payableRates->extra100Minutes,
             'is_absence' => $result->isAbsence,
             'is_justified' => $result->isJustified,
             'unjustified' => $result->unjustified,
-            'notes' => $result->notes,
+            'notes' => $result->isJustified
+                ? 'Justified absence: scheduled minutes paid.'
+                : ($result->unjustified ? 'Unjustified absence on scheduled working day.' : null),
             'rules_version' => $rulesVersion,
             'metadata' => $result->metadata,
         ];
