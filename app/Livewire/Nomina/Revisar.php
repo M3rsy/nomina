@@ -14,6 +14,7 @@ use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Payroll\PayPeriodReopener;
@@ -226,7 +227,6 @@ class Revisar extends Component
         ]);
 
         $newEventAt = Carbon::parse($validated['editEventAt']);
-        $oldEventAt = $rawMark->event_at;
         $payPeriodStart = $this->payPeriod->start_date;
         $payPeriodEnd = $this->payPeriod->end_date;
 
@@ -234,21 +234,27 @@ class Revisar extends Component
         $newStatus = $isWithinPeriod ? 'corrected' : 'out_of_period';
         $notes = $isWithinPeriod ? null : 'Editado fuera del período de nómina';
 
-        $revisions = $rawMark->metadata['revisions'] ?? [];
-        $revisions[] = [
-            'action' => 'edit_event_at',
-            'user_id' => Auth::id(),
-            'old_event_at' => $oldEventAt->toDateTimeString(),
-            'new_event_at' => $newEventAt->toDateTimeString(),
-            'at' => now()->toDateTimeString(),
-        ];
+        app(RawMarkMutationGuard::class)->mutate(
+            $rawMark,
+            function (RawMark $lockedMark) use ($newEventAt, $newStatus, $notes): void {
+                $revisions = $lockedMark->metadata['revisions'] ?? [];
+                $revisions[] = [
+                    'action' => 'edit_event_at',
+                    'user_id' => Auth::id(),
+                    'old_event_at' => $lockedMark->event_at->toDateTimeString(),
+                    'new_event_at' => $newEventAt->toDateTimeString(),
+                    'at' => now()->toDateTimeString(),
+                ];
 
-        $rawMark->update([
-            'event_at' => $newEventAt,
-            'status' => $newStatus,
-            'notes' => $notes,
-            'metadata' => array_merge($rawMark->metadata ?? [], ['revisions' => $revisions]),
-        ]);
+                $lockedMark->update([
+                    'event_at' => $newEventAt,
+                    'status' => $newStatus,
+                    'notes' => $notes,
+                    'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
+                ]);
+            },
+            targetEventAt: $newEventAt,
+        );
 
         $this->showEditModal = false;
         $this->editRawMarkId = null;

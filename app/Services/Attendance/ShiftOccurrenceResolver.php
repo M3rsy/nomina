@@ -54,6 +54,29 @@ class ShiftOccurrenceResolver
         );
     }
 
+    public function workDateFor(Employee $employee, CarbonInterface|string $eventAt): CarbonImmutable
+    {
+        $instant = CarbonImmutable::parse($eventAt);
+        $calendarDate = $instant->startOfDay();
+
+        foreach ([$calendarDate->subDay(), $calendarDate, $calendarDate->addDay()] as $workDate) {
+            $assignment = $this->assignmentFor($employee, $workDate);
+            $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $workDate);
+
+            if ($schedule === null) {
+                continue;
+            }
+
+            [, , $windowStart, $windowEnd] = $this->bounds($employee, $workDate, $schedule);
+
+            if ($instant->gte($windowStart) && $instant->lt($windowEnd)) {
+                return $workDate;
+            }
+        }
+
+        return $calendarDate;
+    }
+
     private function assignmentFor(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
     {
         return EmployeeScheduleAssignment::withoutCompanyScope()
