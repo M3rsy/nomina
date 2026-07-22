@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Attendance\DefaultWorkScheduleProvisioner;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -12,7 +13,7 @@ class ProductionSeeder extends Seeder
 {
     use WithoutModelEvents;
 
-    public function run(): void
+    public function run(DefaultWorkScheduleProvisioner $scheduleProvisioner): void
     {
         // Create the canonical permission and role set first.
         $this->call(PermissionRoleSeeder::class);
@@ -27,6 +28,8 @@ class ProductionSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        $scheduleProvisioner->provision($company);
 
         // Create the initial super admin from environment values.
         $email = env('SUPER_ADMIN_EMAIL', 'admin@nomina.test');
