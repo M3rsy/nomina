@@ -89,10 +89,10 @@ test('reviewed overtime flows from readiness to exact payroll and export', funct
     }
 
     app(CurrentCompany::class)->set($company);
-    $pending = app(PayrollReadinessChecker::class)->blockers($payPeriod)->sole();
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-01-05');
     $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $pending = app(PayrollReadinessChecker::class)->blockers($payPeriod)->sole();
     app(OvertimeDecisionRecorder::class)->decide(
         $payPeriod,
         $employee,
@@ -171,6 +171,67 @@ test('processor credits an exact granted attendance deficit without changing obs
             'attendance_exception_ids' => [$exception->id],
             'excused_deficit_minutes' => 15,
         ]);
+});
+
+test('processor stores employee identity snapshot and keeps it stable in payroll export', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $employee = processorEmployee($company);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+
+    foreach (['2026-01-05 06:00:30', '2026-01-05 14:30:30'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]);
+    }
+
+    app(CurrentCompany::class)->set($company);
+    $pending = app(PayrollReadinessChecker::class)->blockers($payPeriod)->sole();
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-01-05');
+    $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    app(OvertimeDecisionRecorder::class)->decide(
+        $payPeriod,
+        $employee,
+        '2026-01-05',
+        $candidate->key,
+        'approved',
+        'Comprobante con identidad congelada',
+        $actor,
+    );
+
+    $employee->update([
+        'external_id' => 'E-100',
+        'first_name' => 'Original',
+        'last_name' => 'Employee',
+    ]);
+
+    app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+
+    $result = PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->sole();
+
+    $snapshotExternalId = $result->employee_external_id;
+    $snapshotName = $result->employee_name;
+
+    $employee->update([
+        'external_id' => 'E-999',
+        'first_name' => 'Renamed',
+        'last_name' => 'Worker',
+    ]);
+
+    $path = app(PayrollExcelExporter::class)->export($payPeriod->fresh());
+    $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
+
+    expect($result->employee_external_id)->toBe('E-100')
+        ->and($result->employee_name)->toBe('Original Employee')
+        ->and($snapshotExternalId)->toBe('E-100')
+        ->and($snapshotName)->toBe('Original Employee')
+        ->and($data[5][0])->toBe('E-100')
+        ->and($data[5][1])->toBe('Original Employee');
+
+    unlink($path);
 });
 
 test('processor rejects an approval made stale by a corrected mark', function () {

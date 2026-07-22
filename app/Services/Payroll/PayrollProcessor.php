@@ -109,6 +109,8 @@ class PayrollProcessor
             'pay_period_id' => $payPeriod->id,
             'employee_id' => $employee->id,
             'date' => $date->toDateString(),
+            'employee_external_id' => $employee->external_id,
+            'employee_name' => $employee->full_name,
             'entry_at' => $result->entryAt,
             'exit_at' => $result->exitAt,
             'worked_hours' => $result->workedMinutes / 60,

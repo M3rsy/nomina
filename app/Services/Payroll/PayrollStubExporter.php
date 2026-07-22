@@ -25,14 +25,16 @@ class PayrollStubExporter
 
     public function export(PayPeriod $payPeriod, Employee $employee): string
     {
+        $identity = $this->resolveEmployeeIdentity($payPeriod, $employee);
+
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Comprobante');
 
         $this->applyColumnWidths($sheet);
-        $this->writeHeaderBlock($sheet, $payPeriod, $employee);
+        $this->writeHeaderBlock($sheet, $payPeriod, $identity);
         $this->writeTableHeader($sheet);
-        $totals = $this->writeDataRows($sheet, $payPeriod, $employee);
+        $totals = $this->writeDataRows($sheet, $payPeriod, $employee, $identity);
         $this->writeTotalsRow($sheet, $totals);
         $this->applyHeaderStyle($sheet);
 
@@ -45,7 +47,9 @@ class PayrollStubExporter
 
     public function filename(PayPeriod $payPeriod, Employee $employee): string
     {
-        return "Comprobante {$employee->external_id} {$payPeriod->slug}.xlsx";
+        $identity = $this->resolveEmployeeIdentity($payPeriod, $employee);
+
+        return "Comprobante {$identity['employee_external_id']} {$payPeriod->slug}.xlsx";
     }
 
     private function applyColumnWidths(Worksheet $sheet): void
@@ -64,7 +68,8 @@ class PayrollStubExporter
         $sheet->getColumnDimension('L')->setWidth(14);
     }
 
-    private function writeHeaderBlock(Worksheet $sheet, PayPeriod $payPeriod, Employee $employee): void
+    /** @param array<string, string> $identity */
+    private function writeHeaderBlock(Worksheet $sheet, PayPeriod $payPeriod, array $identity): void
     {
         $sheet->setCellValue('A1', 'Comprobante de nómina');
         $sheet->mergeCells('A1:L1');
@@ -72,9 +77,9 @@ class PayrollStubExporter
         $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
         $sheet->setCellValue('A2', 'Empleado:');
-        $sheet->setCellValue('B2', $employee->full_name);
+        $sheet->setCellValue('B2', $identity['employee_name']);
         $sheet->setCellValue('A3', 'Código:');
-        $sheet->setCellValue('B3', $employee->external_id);
+        $sheet->setCellValue('B3', $identity['employee_external_id']);
         $sheet->setCellValue('A4', 'Período:');
         $sheet->setCellValue('B4', $payPeriod->name);
         $sheet->setCellValue('A5', 'Del:');
@@ -110,12 +115,11 @@ class PayrollStubExporter
     /**
      * @return array<string, int>
      */
-    private function writeDataRows(Worksheet $sheet, PayPeriod $payPeriod, Employee $employee): array
+    private function writeDataRows(Worksheet $sheet, PayPeriod $payPeriod, Employee $employee, array $identity): array
     {
         $results = PayrollResult::withoutCompanyScope()
             ->where('pay_period_id', $payPeriod->id)
             ->where('employee_id', $employee->id)
-            ->with('employee')
             ->orderBy('date')
             ->get();
 
@@ -131,8 +135,8 @@ class PayrollStubExporter
         $row = 9;
 
         foreach ($results as $result) {
-            $sheet->setCellValue("A{$row}", $employee->external_id);
-            $sheet->setCellValue("B{$row}", $employee->full_name);
+            $sheet->setCellValue("A{$row}", $result->employee_external_id ?: $identity['employee_external_id']);
+            $sheet->setCellValue("B{$row}", $result->employee_name ?: $identity['employee_name']);
 
             if ($result->entry_at !== null) {
                 $sheet->setCellValue("C{$row}", $result->entry_at->toDateTimeString());
@@ -183,6 +187,24 @@ class PayrollStubExporter
         }
 
         return $totals;
+    }
+
+    /** @return array<string, string> */
+    private function resolveEmployeeIdentity(PayPeriod $payPeriod, Employee $employee): array
+    {
+        $snapshot = PayrollResult::withoutCompanyScope()
+            ->where('pay_period_id', $payPeriod->id)
+            ->where('employee_id', $employee->id)
+            ->orderBy('date')
+            ->first([
+                'employee_external_id',
+                'employee_name',
+            ]);
+
+        return [
+            'employee_external_id' => $snapshot?->employee_external_id ?: $employee->external_id,
+            'employee_name' => $snapshot?->employee_name ?: $employee->full_name,
+        ];
     }
 
     /**
