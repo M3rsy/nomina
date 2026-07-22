@@ -104,6 +104,41 @@ test('validator marks out of period records', function () {
     expect(RawMark::where('status', 'out_of_period')->exists())->toBeTrue();
 });
 
+test('validator accepts a next-day exit whose overnight work date is inside the period', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+        'base_ordinary_hours' => 12,
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Turno nocturno');
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-20',
+        'status' => 'draft',
+    ]);
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'status' => 'pending',
+    ]);
+
+    $report = app(FileValidator::class)->validate($uploadedFile, collect([
+        buildPayload('13767', '2026-07-20 18:00:00', 1),
+        buildPayload('13767', '2026-07-21 06:00:00', 2),
+    ]));
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
+
+    expect($report->counts['valid'])->toBe(2)
+        ->and($report->counts['out_of_period'])->toBe(0)
+        ->and(RawMark::where('uploaded_file_id', $uploadedFile->id)->pluck('status')->all())
+        ->toBe(['valid', 'valid'])
+        ->and($occurrence->status)->toBe('resolved')
+        ->and($occurrence->entryMark()?->event_at->toDateTimeString())->toBe('2026-07-20 18:00:00')
+        ->and($occurrence->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-21 06:00:00');
+});
+
 test('validator marks unknown employee records', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
