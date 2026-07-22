@@ -5,6 +5,8 @@ use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
+use App\Services\Attendance\PayrollShiftEvaluation;
+use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\ShiftOccurrence;
 use Carbon\CarbonImmutable;
 
@@ -157,14 +159,36 @@ test('uses the assigned schedule version rate bands', function () {
         scheduledStart: '08:00',
         scheduledEnd: '12:00',
         bands: [
+            ['start' => '00:00', 'end' => '08:00', 'rate' => 75],
             ['start' => '08:00', 'end' => '10:00', 'rate' => 25],
             ['start' => '10:00', 'end' => '12:00', 'rate' => 50],
+            ['start' => '12:00', 'end' => '00:00', 'rate' => 0],
         ],
     ));
 
     expect($analysis->scheduledRates->extra25Minutes)->toBe(120)
         ->and($analysis->scheduledRates->extra50Minutes)->toBe(120)
         ->and($analysis->scheduledRates->totalMinutes())->toBe(240);
+});
+
+test('blocks persisted rate bands that do not cover the complete day', function () {
+    $occurrence = attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:00:00',
+        bands: [
+            ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
+            ['start' => '06:00', 'end' => '12:00', 'rate' => 0],
+            ['start' => '14:00', 'end' => '00:00', 'rate' => 50],
+        ],
+    );
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect());
+
+    expect($analysis->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(0)
+        ->and($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
+        ->and($evaluation->blockers->sole()['code'])->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS);
 });
 
 test('propagates an unresolved occurrence without inventing observed time', function () {

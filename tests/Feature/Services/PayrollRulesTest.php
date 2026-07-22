@@ -52,3 +52,24 @@ test('overtime bands normalize configured schedule JSON', function () {
         ->and($bands[1]['start'])->toBe(720)
         ->and($bands[1]['bucket'])->toBe('extra50');
 });
+
+test('rate bands must cover every minute exactly once', function (array $bands, bool $expected) {
+    expect((new PayrollRules)->hasCompleteRateBandCoverage($bands))->toBe($expected);
+})->with([
+    'complete day' => [[
+        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
+        ['start' => '06:00', 'end' => '14:00', 'rate' => 0],
+        ['start' => '14:00', 'end' => '18:00', 'rate' => 25],
+        ['start' => '18:00', 'end' => '00:00', 'rate' => 50],
+    ], true],
+    'gap' => [[
+        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
+        ['start' => '06:00', 'end' => '12:00', 'rate' => 0],
+        ['start' => '14:00', 'end' => '00:00', 'rate' => 50],
+    ], false],
+    'overlap' => [[
+        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
+        ['start' => '06:00', 'end' => '14:00', 'rate' => 0],
+        ['start' => '12:00', 'end' => '00:00', 'rate' => 50],
+    ], false],
+]);

@@ -7,6 +7,7 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\PayrollRules;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -60,7 +61,7 @@ class Index extends Component
         'La jornada ordinaria vigente es 06:00-14:00 y se completa con 25%, 50% y 75% en la lógica de cálculo.',
         'Domingos y feriados se tratan como jornada 100% extra en el motor de nómina.',
         'Los cambios de `is_working_day` y `base_ordinary_hours` sí pueden cambiar resultados futuros.',
-        'Los tramos de recargo aceptan JSON en `banding_json`; si el JSON es inválido, el motor vuelve al template histórico.',
+        'Los tramos de recargo deben cubrir las 24 horas exactamente una vez, sin huecos ni superposiciones.',
     ];
 
     public function mount(): void
@@ -351,6 +352,13 @@ class Index extends Component
         $errors = [];
 
         foreach ($this->schedules as $index => $row) {
+            $rawBands = $row['banding_json'] ?? null;
+
+            if (! blank($rawBands)
+                && ! app(PayrollRules::class)->hasCompleteRateBandCoverage($this->normalizeBandingJson($rawBands))) {
+                $errors["schedules.$index.banding_json"] = 'Los tramos deben cubrir las 24 horas sin huecos ni superposiciones.';
+            }
+
             if (! (bool) $row['is_working_day']) {
                 continue;
             }
