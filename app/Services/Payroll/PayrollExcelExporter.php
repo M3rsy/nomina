@@ -4,10 +4,10 @@ namespace App\Services\Payroll;
 
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -36,8 +36,6 @@ class PayrollExcelExporter
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
 
     private const DECIMAL_HOURS_FORMAT = '#,##0.00';
-
-    private const INTEGER_HOURS_FORMAT = '0';
 
     public function export(PayPeriod $payPeriod): string
     {
@@ -157,29 +155,34 @@ class PayrollExcelExporter
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            $sheet->setCellValue("E{$row}", $result->worked_hours);
+            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($result->worked_minutes));
             $sheet->getStyle("E{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("F{$row}", $result->ordinary_hours);
+            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($result->ordinary_minutes));
             $sheet->getStyle("F{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("G{$row}", $result->extra_25_hours);
-            $sheet->setCellValue("H{$row}", $result->extra_50_hours);
-            $sheet->setCellValue("I{$row}", $result->extra_75_hours);
-            $sheet->setCellValue("J{$row}", $result->extra_100_hours);
+            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($result->extra_25_minutes));
+            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($result->extra_50_minutes));
+            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($result->extra_75_minutes));
+            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($result->extra_100_minutes));
 
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
                     ->getNumberFormat()
-                    ->setFormatCode(self::INTEGER_HOURS_FORMAT);
+                    ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
             }
 
             $row++;
         }
+    }
+
+    private function hoursFromMinutes(int $minutes): float
+    {
+        return $minutes / 60;
     }
 
     private function applyHeaderStyle(Worksheet $sheet): void
@@ -189,7 +192,7 @@ class PayrollExcelExporter
 
         $style->getFont()->setBold(true);
         $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFE0E0E0'));
+        $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new Color('FFE0E0E0'));
         $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
     }
 

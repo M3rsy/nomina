@@ -5,20 +5,19 @@ namespace App\Services\Payroll;
 readonly class BandSplit
 {
     /**
-     * @param  float  $ordinaryMinutes  Minutes in the ordinary band.
-     * @param  float  $extra25Minutes  Minutes in the extra 25% band.
-     * @param  float  $extra50Minutes  Minutes in the extra 50% band.
-     * @param  float  $extra75Minutes  Minutes in the extra 75% band.
-     * @param  float  $extra100Minutes Minutes in the extra 100% band.
+     * @param  int  $ordinaryMinutes  Minutes in the ordinary band.
+     * @param  int  $extra25Minutes  Minutes in the extra 25% band.
+     * @param  int  $extra50Minutes  Minutes in the extra 50% band.
+     * @param  int  $extra75Minutes  Minutes in the extra 75% band.
+     * @param  int  $extra100Minutes  Minutes in the extra 100% band.
      */
     public function __construct(
-        public float $ordinaryMinutes = 0,
-        public float $extra25Minutes = 0,
-        public float $extra50Minutes = 0,
-        public float $extra75Minutes = 0,
-        public float $extra100Minutes = 0,
-    ) {
-    }
+        public int $ordinaryMinutes = 0,
+        public int $extra25Minutes = 0,
+        public int $extra50Minutes = 0,
+        public int $extra75Minutes = 0,
+        public int $extra100Minutes = 0,
+    ) {}
 
     public function ordinaryHours(): float
     {
@@ -45,7 +44,7 @@ readonly class BandSplit
         return $this->extra100Minutes / 60;
     }
 
-    public function totalMinutes(): float
+    public function totalMinutes(): int
     {
         return $this->ordinaryMinutes
             + $this->extra25Minutes
@@ -57,5 +56,16 @@ readonly class BandSplit
     public function totalHours(): float
     {
         return $this->totalMinutes() / 60;
+    }
+
+    public function plus(self $other): self
+    {
+        return new self(
+            ordinaryMinutes: $this->ordinaryMinutes + $other->ordinaryMinutes,
+            extra25Minutes: $this->extra25Minutes + $other->extra25Minutes,
+            extra50Minutes: $this->extra50Minutes + $other->extra50Minutes,
+            extra75Minutes: $this->extra75Minutes + $other->extra75Minutes,
+            extra100Minutes: $this->extra100Minutes + $other->extra100Minutes,
+        );
     }
 }

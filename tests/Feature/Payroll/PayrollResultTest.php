@@ -5,10 +5,12 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Services\CurrentCompany;
+use Carbon\Carbon;
+use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\QueryException;
 
 beforeEach(function () {
-    $this->seed(\Database\Seeders\PermissionRoleSeeder::class);
+    $this->seed(PermissionRoleSeeder::class);
 });
 
 test('payroll result belongs to company, pay period and employee', function () {
@@ -88,11 +90,42 @@ test('casts are applied correctly', function () {
         'metadata' => ['audit' => 'test'],
     ]);
 
-    expect($result->date)->toBeInstanceOf(\Carbon\Carbon::class)
-        ->and($result->entry_at)->toBeInstanceOf(\Carbon\Carbon::class)
-        ->and($result->exit_at)->toBeInstanceOf(\Carbon\Carbon::class)
+    expect($result->date)->toBeInstanceOf(Carbon::class)
+        ->and($result->entry_at)->toBeInstanceOf(Carbon::class)
+        ->and($result->exit_at)->toBeInstanceOf(Carbon::class)
         ->and($result->is_absence)->toBeTrue()
         ->and($result->is_justified)->toBeTrue()
         ->and($result->unjustified)->toBeFalse()
         ->and($result->metadata)->toBe(['audit' => 'test']);
+});
+
+test('persists exact payroll totals in canonical integer minutes', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+
+    $result = PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'worked_hours' => 8.5,
+        'ordinary_hours' => 8,
+        'extra_25_hours' => 0.5,
+        'worked_minutes' => 510,
+        'scheduled_minutes' => 480,
+        'recognized_minutes' => 510,
+        'detected_overtime_minutes' => 30,
+        'approved_overtime_minutes' => 30,
+        'ordinary_minutes' => 480,
+        'extra_25_minutes' => 30,
+        'extra_50_minutes' => 0,
+        'extra_75_minutes' => 0,
+        'extra_100_minutes' => 0,
+    ])->fresh();
+
+    expect($result->worked_minutes)->toBe(510)
+        ->and($result->scheduled_minutes)->toBe(480)
+        ->and($result->recognized_minutes)->toBe(510)
+        ->and($result->detected_overtime_minutes)->toBe(30)
+        ->and($result->approved_overtime_minutes)->toBe(30)
+        ->and($result->ordinary_minutes)->toBe(480)
+        ->and($result->extra_25_minutes)->toBe(30)
+        ->and((float) $result->extra_25_hours)->toBe(0.5);
 });

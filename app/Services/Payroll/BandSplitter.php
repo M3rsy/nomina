@@ -25,6 +25,7 @@ class BandSplitter
      *
      * Band format per item: ['start' => int, 'end' => int, 'bucket' => string]
      * Percentiles supported: ordinary, extra25, extra50, extra75, extra100.
+     * Each complete elapsed minute is classified by the instant at which it starts.
      *
      * @param  array<int, array{start:int,end:int,bucket:string}>  $bands
      */
@@ -38,56 +39,24 @@ class BandSplitter
         }
 
         $totals = [
-            'ordinary' => 0.0,
-            'extra25' => 0.0,
-            'extra50' => 0.0,
-            'extra75' => 0.0,
-            'extra100' => 0.0,
+            'ordinary' => 0,
+            'extra25' => 0,
+            'extra50' => 0,
+            'extra75' => 0,
+            'extra100' => 0,
         ];
 
         $bands = $bands === [] ? self::FALLBACK_BANDS : $bands;
 
-        $day = $entry->startOfDay();
-        $lastDay = $exit->startOfDay();
+        $wholeMinutes = (int) floor($entry->diffInSeconds($exit) / 60);
 
-        while ($day->lte($lastDay)) {
-            $dayStart = $day;
-            $dayEnd = $day->copy()->addDay();
+        for ($offset = 0; $offset < $wholeMinutes; $offset++) {
+            $instant = $entry->addMinutes($offset);
+            $bucket = $this->bucketAt($instant, $bands);
 
-            $segmentStart = $entry->max($dayStart);
-            $segmentEnd = $exit->min($dayEnd);
-
-            if ($segmentStart < $segmentEnd) {
-                foreach ($bands as $band) {
-                    if (! isset($band['start'], $band['end'], $band['bucket'])) {
-                        continue;
-                    }
-
-                    $startMinutes = (int) $band['start'];
-                    $endMinutes = (int) $band['end'];
-                    $bucket = (string) $band['bucket'];
-
-                    $bandStart = $day->copy()->addMinutes($startMinutes);
-                    $bandEnd = $day->copy()->addMinutes($endMinutes);
-
-                    if ($bandEnd <= $bandStart) {
-                        $bandEnd = $bandEnd->addDay();
-                    }
-
-                    if (! isset($totals[$bucket])) {
-                        continue;
-                    }
-
-                    $overlapStart = $segmentStart->max($bandStart);
-                    $overlapEnd = $segmentEnd->min($bandEnd);
-
-                    if ($overlapStart < $overlapEnd) {
-                        $totals[$bucket] += $overlapStart->floatDiffInMinutes($overlapEnd);
-                    }
-                }
+            if ($bucket !== null) {
+                $totals[$bucket]++;
             }
-
-            $day = $day->addDay();
         }
 
         return new BandSplit(
@@ -97,5 +66,31 @@ class BandSplitter
             extra75Minutes: $totals['extra75'],
             extra100Minutes: $totals['extra100'],
         );
+    }
+
+    /** @param array<int, array{start:int,end:int,bucket:string}> $bands */
+    private function bucketAt(CarbonImmutable $instant, array $bands): ?string
+    {
+        $minuteOfDay = $instant->hour * 60 + $instant->minute;
+
+        foreach ($bands as $band) {
+            if (! isset($band['start'], $band['end'], $band['bucket'])) {
+                continue;
+            }
+
+            $start = (int) $band['start'];
+            $end = (int) $band['end'];
+            $bucket = (string) $band['bucket'];
+            $end = $end <= $start ? $end + 1440 : $end;
+            $matches = $end <= 1440
+                ? $minuteOfDay >= $start && $minuteOfDay < $end
+                : $minuteOfDay >= $start || $minuteOfDay < $end - 1440;
+
+            if ($matches && in_array($bucket, ['ordinary', 'extra25', 'extra50', 'extra75', 'extra100'], true)) {
+                return $bucket;
+            }
+        }
+
+        return null;
     }
 }

@@ -1,22 +1,99 @@
 <?php
 
 use App\Models\Company;
-use App\Models\User;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
 use App\Services\CurrentCompany;
+use Database\Seeders\PermissionRoleSeeder;
 use Database\Seeders\WorkScheduleSeeder;
-use Illuminate\Support\Facades\Hash;
 
 beforeEach(function () {
-    $this->seed(\Database\Seeders\PermissionRoleSeeder::class);
+    $this->seed(PermissionRoleSeeder::class);
 });
 
 test('company has seven default work schedules after seeding', function () {
     $company = Company::factory()->create();
 
     $this->seed(WorkScheduleSeeder::class);
+    $this->seed(WorkScheduleSeeder::class);
 
-    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
+    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7)
+        ->and(WorkScheduleProfile::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(1);
+});
+
+test('company gets a versioned default profile with canonical schedule boundaries', function () {
+    $company = Company::factory()->create();
+
+    $this->seed(WorkScheduleSeeder::class);
+
+    $profile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->sole();
+    $schedules = $profile->workSchedules->keyBy('day_of_week');
+
+    expect($profile->name)->toBe('Jornada general')
+        ->and($profile->version)->toBe(1)
+        ->and($profile->is_active)->toBeTrue()
+        ->and($schedules)->toHaveCount(7)
+        ->and(substr($schedules[1]->start_time, 0, 5))->toBe('06:00')
+        ->and(substr($schedules[1]->end_time, 0, 5))->toBe('14:00')
+        ->and(substr($schedules[6]->start_time, 0, 5))->toBe('08:00')
+        ->and(substr($schedules[6]->end_time, 0, 5))->toBe('12:00')
+        ->and($schedules[0]->start_time)->toBeNull()
+        ->and($schedules[0]->end_time)->toBeNull();
+});
+
+test('rerunning the seeder does not mutate an existing schedule version', function () {
+    $company = Company::factory()->create();
+
+    $this->seed(WorkScheduleSeeder::class);
+
+    $profile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->sole();
+    $monday = $profile->workSchedules()->where('day_of_week', 1)->sole();
+    $monday->update([
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+        'notes' => 'Historical assigned version',
+    ]);
+
+    $this->seed(WorkScheduleSeeder::class);
+
+    $monday->refresh();
+
+    expect(substr($monday->start_time, 0, 5))->toBe('18:00')
+        ->and(substr($monday->end_time, 0, 5))->toBe('06:00')
+        ->and($monday->notes)->toBe('Historical assigned version')
+        ->and($profile->workSchedules()->count())->toBe(7);
+});
+
+test('profile versions retain independent schedule definitions', function () {
+    $company = Company::factory()->create();
+    $firstVersion = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'guardias',
+        'version' => 1,
+        'is_active' => false,
+    ]);
+    $secondVersion = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'guardias',
+        'version' => 2,
+    ]);
+
+    WorkSchedule::factory()->forProfile($firstVersion)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    WorkSchedule::factory()->forProfile($secondVersion)->create([
+        'day_of_week' => 1,
+        'start_time' => '18:00',
+        'end_time' => '06:00',
+    ]);
+
+    expect($company->workScheduleProfiles()->count())->toBe(2)
+        ->and(substr($firstVersion->workSchedules()->sole()->start_time, 0, 5))->toBe('06:00')
+        ->and(substr($secondVersion->workSchedules()->sole()->start_time, 0, 5))->toBe('18:00');
 });
 
 test('default schedules match business rules', function () {

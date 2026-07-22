@@ -43,6 +43,26 @@ test('company admin can view uploaded file detail with counts', function () {
     $response->assertSee('Válido con advertencias');
     $response->assertSee('34');
     $response->assertSee('32');
+    $response->assertSee('Revisar y corregir');
+    $response->assertSee(route('nomina.revisar', [
+        'payPeriod' => $payPeriod,
+        'uploaded_file_id' => $uploadedFile->id,
+    ]), false);
+});
+
+test('file viewer without mark management cannot see the correction link', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $viewer = User::factory()->forCompany($company)->create();
+    $viewer->givePermissionTo(['files.view', 'pay_periods.view']);
+
+    $this->actingAs($viewer);
+    app(CurrentCompany::class)->set($company);
+
+    $this->get(route('archivos.show', $uploadedFile))
+        ->assertOk()
+        ->assertDontSee('Revisar y corregir');
 });
 
 test('company admin cannot view file detail from other company', function () {

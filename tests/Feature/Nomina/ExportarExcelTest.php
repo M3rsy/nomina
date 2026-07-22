@@ -8,12 +8,14 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-function setupExportScenario(string $status = 'processed'): array
+function setupExportScenario(string $status = 'approved'): array
 {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
@@ -36,8 +38,8 @@ function setupExportScenario(string $status = 'processed'): array
     return [$company, $payPeriod, $employee, $admin];
 }
 
-test('company admin can download excel export for processed pay period', function () {
-    [$company, $payPeriod, $employee, $admin] = setupExportScenario('processed');
+test('company admin can download excel export for approved pay period', function () {
+    [$company, $payPeriod, $employee, $admin] = setupExportScenario('approved');
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
@@ -61,6 +63,35 @@ test('excel export sets pay period status to exported', function () {
     expect($payPeriod->fresh()->status)->toBe('exported');
 });
 
+test('excel export cannot overwrite a period changed before the transition lock', function () {
+    [$company, $payPeriod, $employee, $admin] = setupExportScenario('approved');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $raceTriggered = false;
+    $armed = true;
+
+    DB::connection()->beforeStartingTransaction(function () use (&$armed, &$raceTriggered, $payPeriod): void {
+        if (! $armed || $raceTriggered) {
+            return;
+        }
+
+        $raceTriggered = true;
+
+        DB::table('pay_periods')
+            ->where('id', $payPeriod->id)
+            ->update(['status' => 'validating']);
+    });
+
+    $this->get("/nomina/{$payPeriod->id}/excel")
+        ->assertStatus(Response::HTTP_CONFLICT);
+    $armed = false;
+
+    expect($raceTriggered)->toBeTrue()
+        ->and($payPeriod->fresh()->status)->toBe('validating');
+});
+
 test('excel export is idempotent and does not downgrade from exported', function () {
     [$company, $payPeriod, $employee, $admin] = setupExportScenario('exported');
 
@@ -73,17 +104,24 @@ test('excel export is idempotent and does not downgrade from exported', function
     expect($payPeriod->fresh()->status)->toBe('exported');
 });
 
-test('excel export does not change cancelled status', function () {
-    [$company, $payPeriod, $employee, $admin] = setupExportScenario('cancelled');
+test('excel export rejects a pay period outside the approved workflow', function (string $status) {
+    [$company, $payPeriod, $employee, $admin] = setupExportScenario($status);
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     $this->get("/nomina/{$payPeriod->id}/excel")
-        ->assertOk();
+        ->assertStatus(Response::HTTP_CONFLICT);
 
-    expect($payPeriod->fresh()->status)->toBe('cancelled');
-});
+    expect($payPeriod->fresh()->status)->toBe($status);
+})->with([
+    'draft' => ['draft'],
+    'validating' => ['validating'],
+    'ready' => ['ready'],
+    'processing' => ['processing'],
+    'processed' => ['processed'],
+    'cancelled' => ['cancelled'],
+]);
 
 test('company admin cannot download excel export of other company', function () {
     $companyA = Company::factory()->create();

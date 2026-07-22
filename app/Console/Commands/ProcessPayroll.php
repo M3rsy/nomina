@@ -4,24 +4,29 @@ namespace App\Console\Commands;
 
 use App\Models\PayPeriod;
 use App\Services\CurrentCompany;
-use App\Services\Payroll\PayrollCalculator;
+use App\Services\Payroll\PayrollProcessingBlocked;
 use App\Services\Payroll\PayrollProcessor;
-use App\Services\PayrollRules;
 use Illuminate\Console\Command;
+
 class ProcessPayroll extends Command
 {
     protected $signature = 'payroll:process {payPeriodId}';
 
     protected $description = 'Process a ready PayPeriod and persist payroll results.';
 
-    public function handle(PayrollRules $rules): int
+    public function handle(PayrollProcessor $processor): int
     {
         $payPeriod = PayPeriod::findOrFail($this->argument('payPeriodId'));
 
         app(CurrentCompany::class)->set($payPeriod->company);
 
-        $processor = new PayrollProcessor(new PayrollCalculator(new \App\Services\Payroll\BandSplitter, $rules));
-        $report = $processor->processPayPeriod($payPeriod);
+        try {
+            $report = $processor->processPayPeriod($payPeriod);
+        } catch (PayrollProcessingBlocked $exception) {
+            $this->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
 
         $this->info('Payroll processed successfully.');
         $this->table(

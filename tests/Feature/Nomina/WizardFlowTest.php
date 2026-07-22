@@ -7,9 +7,13 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
+use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -30,6 +34,20 @@ function setUpCompanyAndPayPeriod(string $payPeriodStatus = 'validating'): array
     return [$company, $payPeriod, $file, $admin];
 }
 
+function assignWizardSchedule(Company $company, Employee $employee): void
+{
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach (Company::defaultWorkSchedules() as $day => $definition) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $day,
+            ...$definition,
+        ]);
+    }
+
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada inicial');
+}
+
 test('saveDraft sets pay period status to validating', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('uploaded');
 
@@ -43,14 +61,38 @@ test('saveDraft sets pay period status to validating', function () {
     expect($payPeriod->fresh()->status)->toBe('validating');
 });
 
+test('saveDraft cannot overwrite a period processed after its initial status read', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('uploaded');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $disarmRace = simulateWorkflowProcessingRace($payPeriod, $raceTriggered);
+
+    $component->call('saveDraft')->assertHasNoErrors();
+    $disarmRace();
+
+    expect($raceTriggered)->toBeTrue();
+    expect($payPeriod->fresh()->status)->toBe('processed');
+});
+
 test('continueToReady sets status to ready when all marks are clean', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
+    assignWizardSchedule($company, $employee);
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
         'employee_external_id' => $employee->external_id,
         'employee_id' => $employee->id,
         'event_at' => Carbon::parse('2026-01-05 06:00:00'),
+        'status' => 'valid',
+    ]);
+    RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'employee_external_id' => $employee->external_id,
+        'employee_id' => $employee->id,
+        'event_at' => Carbon::parse('2026-01-05 14:00:00'),
         'status' => 'valid',
     ]);
 
@@ -64,9 +106,25 @@ test('continueToReady sets status to ready when all marks are clean', function (
     expect($payPeriod->fresh()->status)->toBe('ready');
 });
 
+test('continueToReady cannot overwrite a period processed after its initial status read', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $disarmRace = simulateWorkflowProcessingRace($payPeriod, $raceTriggered);
+
+    $component->call('continueToReady')->assertHasNoErrors();
+    $disarmRace();
+
+    expect($raceTriggered)->toBeTrue();
+    expect($payPeriod->fresh()->status)->toBe('processed');
+});
+
 test('continueToReady with pending marks opens confirmation modal and does not advance status', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
-    $employee = Employee::factory()->forCompany($company)->create();
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
         'employee_external_id' => 'unknown-123',
@@ -85,6 +143,31 @@ test('continueToReady with pending marks opens confirmation modal and does not a
     $component
         ->assertSet('showReadyConfirm', true)
         ->assertSet('readyMessage', 'Aún existen marcas pendientes, desconocidas, fuera de período o duplicadas. ¿Desea continuar de todas formas?');
+
+    expect($payPeriod->fresh()->status)->toBe('validating');
+});
+
+test('an unreviewed overtime candidate cannot be bypassed when advancing to ready', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $employee = Employee::factory()->forCompany($company)->create();
+    assignWizardSchedule($company, $employee);
+
+    foreach (['2026-01-05 06:00:00', '2026-01-05 14:30:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)
+            ->forEmployee($employee)->create(['event_at' => $eventAt, 'status' => 'valid']);
+    }
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('continueToReady')
+        ->assertSet('showReadyConfirm', false)
+        ->assertCount('readinessBlockers', 1)
+        ->assertSee('Revisión obligatoria pendiente')
+        ->set('showReadyConfirm', true)
+        ->call('confirmContinueToReady')
+        ->assertCount('readinessBlockers', 1);
 
     expect($payPeriod->fresh()->status)->toBe('validating');
 });
@@ -111,7 +194,7 @@ test('confirmContinueToReady advances pay period to ready after user acceptance'
     expect($payPeriod->fresh()->status)->toBe('ready');
 });
 
-test('saveDraft and continueToReady are no-ops when pay period is approved, exported or cancelled', function (string $blockedStatus) {
+test('saveDraft and continueToReady are no-ops when pay period is processed or locked', function (string $blockedStatus) {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod($blockedStatus);
 
     $this->actingAs($admin);
@@ -129,12 +212,72 @@ test('saveDraft and continueToReady are no-ops when pay period is approved, expo
 
     expect($payPeriod->fresh()->status)->toBe($blockedStatus);
 })->with([
+    'processed' => ['processed'],
     'approved' => ['approved'],
     'exported' => ['exported'],
     'cancelled' => ['cancelled'],
 ]);
 
-test('markCorrected changes raw mark status to corrected and records audit entry', function () {
+test('editing a raw mark requires a reason and records the applied values', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $employee = Employee::factory()->forCompany($company)->create();
+    $rawMark = RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'employee_external_id' => $employee->external_id,
+        'employee_id' => $employee->id,
+        'event_at' => '2026-01-05 06:00:00',
+        'status' => 'valid',
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openEditRawMark', $rawMark->id)
+        ->set('editEventAt', '2026-01-05 06:15:00')
+        ->call('saveEditRawMark')
+        ->assertHasErrors(['editReason' => 'required']);
+
+    expect($rawMark->fresh()->event_at->toDateTimeString())->toBe('2026-01-05 06:00:00');
+
+    $component
+        ->set('editReason', 'El reloj registró una hora incorrecta')
+        ->call('saveEditRawMark')
+        ->assertHasNoErrors();
+
+    $revision = collect($rawMark->fresh()->metadata['revisions'])->last();
+
+    expect($rawMark->fresh()->event_at->toDateTimeString())->toBe('2026-01-05 06:15:00')
+        ->and($revision['action'])->toBe('edit_event_at')
+        ->and($revision['user_id'])->toBe($admin->id)
+        ->and($revision['reason'])->toBe('El reloj registró una hora incorrecta')
+        ->and($revision['old_event_at'])->toBe('2026-01-05 06:00:00')
+        ->and($revision['new_event_at'])->toBe('2026-01-05 06:15:00')
+        ->and($revision['at'])->not->toBeEmpty();
+});
+
+test('closing the edit modal resets its correction state', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+    $rawMark = RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'event_at' => '2026-01-05 06:00:00',
+        'status' => 'valid',
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openEditRawMark', $rawMark->id)
+        ->set('editReason', 'Motivo transitorio')
+        ->set('editWarning', 'Advertencia transitoria')
+        ->call('closeEditModal')
+        ->assertSet('showEditModal', false)
+        ->assertSet('editRawMarkId', null)
+        ->assertSet('editEventAt', '')
+        ->assertSet('editReason', '')
+        ->assertSet('editWarning', null);
+});
+
+test('correcting a raw mark status requires a reason and records the applied values', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
 
@@ -148,8 +291,17 @@ test('markCorrected changes raw mark status to corrected and records audit entry
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
-        ->call('markCorrected', $rawMark->id)
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->call('openCorrectRawMark', $rawMark->id)
+        ->assertSet('showCorrectModal', true)
+        ->call('markCorrected')
+        ->assertHasErrors(['correctReason' => 'required']);
+
+    expect($rawMark->fresh()->status)->toBe('valid');
+
+    $component
+        ->set('correctReason', 'Validación manual contra el reporte del supervisor')
+        ->call('markCorrected')
         ->assertHasNoErrors();
 
     $rawMark->refresh();
@@ -162,10 +314,13 @@ test('markCorrected changes raw mark status to corrected and records audit entry
 
     expect($lastAudit['action'])->toBe('mark_corrected')
         ->and($lastAudit['user_id'])->toBe($admin->id)
-        ->and($lastAudit['previous_status'])->toBe('valid');
+        ->and($lastAudit['reason'])->toBe('Validación manual contra el reporte del supervisor')
+        ->and($lastAudit['previous_status'])->toBe('valid')
+        ->and($lastAudit['new_status'])->toBe('corrected')
+        ->and($lastAudit['at'])->not->toBeEmpty();
 });
 
-test('deleteRawMark sets raw mark status to deleted and records audit entry', function () {
+test('deleting a raw mark requires a reason and records the applied values', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
 
@@ -179,10 +334,17 @@ test('deleteRawMark sets raw mark status to deleted and records audit entry', fu
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->call('openDeleteRawMark', $rawMark->id)
         ->assertSet('showDeleteModal', true)
         ->assertSet('deleteRawMarkId', $rawMark->id)
+        ->call('deleteRawMark')
+        ->assertHasErrors(['deleteReason' => 'required']);
+
+    expect($rawMark->fresh()->status)->toBe('valid');
+
+    $component
+        ->set('deleteReason', 'La marca no corresponde a un hecho real')
         ->call('deleteRawMark')
         ->assertHasNoErrors();
 
@@ -196,5 +358,44 @@ test('deleteRawMark sets raw mark status to deleted and records audit entry', fu
 
     expect($lastAudit['action'])->toBe('delete')
         ->and($lastAudit['user_id'])->toBe($admin->id)
-        ->and($lastAudit['previous_status'])->toBe('valid');
+        ->and($lastAudit['reason'])->toBe('La marca no corresponde a un hecho real')
+        ->and($lastAudit['previous_status'])->toBe('valid')
+        ->and($lastAudit['new_status'])->toBe('deleted')
+        ->and($lastAudit['at'])->not->toBeEmpty();
 });
+
+function simulateWorkflowProcessingRace(PayPeriod $payPeriod, bool &$triggered): Closure
+{
+    $armed = true;
+    $reads = 0;
+
+    DB::connection()->beforeExecuting(function (string $query, array $bindings) use (&$armed, &$reads, &$triggered, $payPeriod): void {
+        if (! $armed || $triggered) {
+            return;
+        }
+
+        $normalizedQuery = strtolower(ltrim($query));
+        $targetsPeriod = str_contains($query, 'pay_periods')
+            && in_array($payPeriod->id, $bindings, true);
+
+        if (str_starts_with($normalizedQuery, 'select') && $targetsPeriod) {
+            $reads++;
+
+            if ($reads !== 3) {
+                return;
+            }
+        } elseif (! str_starts_with($normalizedQuery, 'update') || ! $targetsPeriod) {
+            return;
+        }
+
+        $triggered = true;
+
+        DB::table('pay_periods')
+            ->where('id', $payPeriod->id)
+            ->update(['status' => 'processed']);
+    });
+
+    return function () use (&$armed): void {
+        $armed = false;
+    };
+}

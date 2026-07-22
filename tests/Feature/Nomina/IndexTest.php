@@ -270,6 +270,28 @@ test('period creation rejects an end date before the start date', function () {
     expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
 });
 
+test('period creation rejects dates that overlap another company period', function () {
+    $company = Company::factory()->create();
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-15',
+    ]);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->set('name', 'Período superpuesto')
+        ->set('start_date', '2026-08-15')
+        ->set('end_date', '2026-08-31')
+        ->call('store')
+        ->assertHasErrors('start_date')
+        ->assertSee('Las fechas se superponen con otro período de la empresa.');
+
+    expect(PayPeriod::withoutCompanyScope()->count())->toBe(1);
+});
+
 test('period creation reports a same-company slug collision without adding a row', function () {
     $company = Company::factory()->create();
     PayPeriod::factory()->forCompany($company)->create([

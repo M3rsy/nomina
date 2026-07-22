@@ -138,7 +138,7 @@ class Upload extends Component
         $parser = ParserFactory::make($originalName);
         $parsedFile = $parser->parse($contents);
 
-        $validator = new FileValidator;
+        $validator = app(FileValidator::class);
         $validator->validate($uploadedFile, $parsedFile->records);
 
         $this->redirect('/archivos/'.$uploadedFile->id, navigate: true);

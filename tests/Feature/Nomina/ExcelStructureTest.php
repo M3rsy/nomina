@@ -4,8 +4,6 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
-use App\Models\User;
-use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollStubExporter;
 use Carbon\Carbon;
@@ -35,10 +33,13 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
         'exit_at' => Carbon::parse('2024-01-22 17:00:00'),
         'worked_hours' => 9.0,
         'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
+        'worked_minutes' => 540,
+        'ordinary_minutes' => 480,
+        'extra_25_hours' => 0.5,
         'extra_50_hours' => 0,
         'extra_75_hours' => 0,
         'extra_100_hours' => 0,
+        'extra_25_minutes' => 30,
     ]);
 
     $exporter = new PayrollExcelExporter;
@@ -63,10 +64,10 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
         ->and($data[5][2])->toContain('2024-01-22')
         ->and($data[5][4])->toBe(9.0)
         ->and($data[5][5])->toBe(8.0)
-        ->and($data[5][6])->toBe(1)
-        ->and($data[5][7])->toBe(0)
-        ->and($data[5][8])->toBe(0)
-        ->and($data[5][9])->toBe(0);
+        ->and($data[5][6])->toBe(0.5)
+        ->and($data[5][7])->toBe(0.0)
+        ->and($data[5][8])->toBe(0.0)
+        ->and($data[5][9])->toBe(0.0);
 });
 
 test('PayrollStubExporter produces expected sheet structure', function () {
@@ -88,7 +89,10 @@ test('PayrollStubExporter produces expected sheet structure', function () {
         'exit_at' => Carbon::parse('2024-01-22 17:00:00'),
         'worked_hours' => 9.0,
         'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
+        'worked_minutes' => 540,
+        'ordinary_minutes' => 480,
+        'extra_25_hours' => 0.5,
+        'extra_25_minutes' => 30,
     ]);
 
     $exporter = new PayrollStubExporter;
@@ -106,5 +110,46 @@ test('PayrollStubExporter produces expected sheet structure', function () {
     expect($sheet->getTitle())->toBe('Comprobante')
         ->and($data[0][0])->toBe('Comprobante de nómina')
         ->and($data[7])->toContain('Codigo', 'NOMBRE', 'Entrada', 'Salida')
-        ->and($data[8])->toContain('Juan Perez', 1);
+        ->and($data[8])->toContain('Juan Perez', 1)
+        ->and($data[8][6])->toBe(0.5)
+        ->and($data[9][6])->toBe(0.5);
+});
+
+test('payroll exports derive exact hours and totals from canonical minutes', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2024-01-20',
+        'end_date' => '2024-01-27',
+        'status' => 'processed',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+
+    foreach (['2024-01-22', '2024-01-23'] as $date) {
+        PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+            'date' => $date,
+            'worked_minutes' => 1,
+            'ordinary_minutes' => 1,
+            'extra_25_minutes' => 1,
+            'worked_hours' => 0.02,
+            'ordinary_hours' => 0.02,
+            'extra_25_hours' => 0.02,
+        ]);
+    }
+
+    $payrollPath = (new PayrollExcelExporter)->export($payPeriod);
+    $payrollSheet = IOFactory::load($payrollPath)->getActiveSheet();
+
+    expect(round((float) $payrollSheet->getCell('E6')->getValue() * 60, 8))->toBe(1.0)
+        ->and(round((float) $payrollSheet->getCell('F6')->getValue() * 60, 8))->toBe(1.0)
+        ->and(round((float) $payrollSheet->getCell('G6')->getValue() * 60, 8))->toBe(1.0);
+
+    $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
+    $stubSheet = IOFactory::load($stubPath)->getActiveSheet();
+
+    expect(round((float) $stubSheet->getCell('E9')->getValue() * 60, 8))->toBe(1.0)
+        ->and(round((float) $stubSheet->getCell('F9')->getValue() * 60, 8))->toBe(1.0)
+        ->and(round((float) $stubSheet->getCell('G9')->getValue() * 60, 8))->toBe(1.0)
+        ->and(round((float) $stubSheet->getCell('E11')->getValue() * 60, 8))->toBe(2.0)
+        ->and(round((float) $stubSheet->getCell('F11')->getValue() * 60, 8))->toBe(2.0)
+        ->and(round((float) $stubSheet->getCell('G11')->getValue() * 60, 8))->toBe(2.0);
 });

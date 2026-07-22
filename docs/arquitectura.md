@@ -1,6 +1,6 @@
 # Arquitectura de Nómina
 
-Resumen técnico del proyecto en sus nueve fases de construcción.
+Resumen técnico de las fases de construcción y de la arquitectura vigente.
 
 ## Fases de construcción
 
@@ -9,10 +9,10 @@ Resumen técnico del proyecto en sus nueve fases de construcción.
 | Fase 0 | Esqueleto Laravel 12, Docker de desarrollo, autenticación base. |
 | Fase 1 | Multi-tenant: modelo `Company`, `company_id` global scope, `CurrentCompany` service. |
 | Fase 2 | Empleados, usuarios, roles (`super_admin`, `company_admin`) y permisos con spatie. |
-| Fase 3 | Jornadas y feriados por empresa, scoped al `company_id`. |
-| Fase 4 | Carga de archivos de asistencia (GLG, ATTLOG), parser factory. |
-| Fase 5 | Períodos de nómina y flujo de estados (`draft → validating → ready → processed → approved → exported → cancelled`). |
-| Fase 6 | Motor de cálculo de planilla, `BandSplitter`, `PayrollCalculator`, `PayrollProcessor`. |
+| Fase 3 | Perfiles versionados de jornada, asignaciones efectivas por empleado y feriados por empresa. |
+| Fase 4 | Carga inmutable de archivos de asistencia (GLG, ATTLOG), parser factory y correcciones normalizadas auditadas. |
+| Fase 5 | Períodos de nómina, revisión obligatoria, procesamiento, reapertura auditada y estados terminales. |
+| Fase 6 | Resolución de jornadas asignadas, análisis de asistencia, autorizaciones y cálculo exacto en minutos. |
 | Fase 7 | Exportación de Excel: nómina consolidada y comprobantes individuales. |
 | Fase 8 | Auditoría unificada (`AuditEntry`) y respaldos con spatie/laravel-backup. |
 | Fase 9 | Preparación para producción: Docker Compose, nginx, php-fpm, SSL, deploy scripts, backups y health checks. |
@@ -24,20 +24,32 @@ Resumen técnico del proyecto en sus nueve fases de construcción.
 - Super admin usa `Model::withoutCompanyScope()` para ver cross-empresa.
 - `app(\App\Services\CurrentCompany::class)->set($company)` es la forma correcta de establecer empresa en tests; nunca `current_company()->set()`.
 
-## Separación de servicios
+## Módulos de asistencia y nómina
 
-- `Payroll/BandSplitter`: divide franjas horarias según reglas hondureñas.
-- `Payroll/PayrollCalculator`: calcula ordinarias, extras y faltas por día.
-- `Payroll/PayrollProcessor`: transiciona el período y persiste resultados.
-- `Export`: genera Excel con phpoffice/phpspreadsheet.
+- `Attendance/ShiftOccurrenceResolver`: resuelve la jornada asignada efectiva y su fecha laboral, incluso cuando termina al día siguiente o cruza períodos de nómina.
+- `Attendance/AttendanceShiftAnalyzer`: compara marcas de asistencia con la jornada, produce déficits y candidatos de hora extra completos, y conserva sus minutos y huellas exactas. Para el cálculo cuantiza una sola vez el intervalo observado en minutos completos consecutivos desde la entrada; los segundos originales permanecen en la evidencia y la auditoría.
+- `Attendance/OvertimeDecisionRecorder` y `Attendance/AttendanceExceptionRecorder`: guardan autorizaciones y excepciones como historiales inmutables y auditados.
+- `Attendance/PayrollShiftEvaluationResolver`: ofrece a revisión, preparación y procesamiento una sola ruta para cargar y evaluar los hechos vigentes.
+- `Attendance/PayrollShiftEvaluator`: reconoce el tiempo programado, aplica excepciones exactas y paga únicamente candidatos de hora extra autorizados.
+- `Payroll/BandSplitter`: clasifica intervalos en minutos exactos según la banda salarial aplicable.
+- `Payroll/PayrollProcessor`: transiciona el período y persiste resultados canónicos en minutos; las horas decimales son valores derivados.
+- `Export`: genera Excel con phpoffice/phpspreadsheet a partir de los minutos persistidos, sin reprocesar marcas.
+
+El TXT/DAT, cada línea importada y la identidad física del archivo son evidencia inmutable. Las asignaciones y correcciones actúan sobre registros normalizados y conservan actor, motivo, valores aplicados y fecha de auditoría. Una marca manual auditada solo incorpora una entrada o salida real omitida por el reloj, sin archivo, fila ni `raw_line`; no ingresa horas pagables ni reemplaza una excepción de asistencia.
 
 ## Estado de período de nómina
 
-```
-draft → validating → ready → processed → approved → exported → cancelled
+```text
+draft → validating → ready → processing → processed → approved → exported
+          ↑                         │
+          └──── reapertura auditada┘
 ```
 
-Un período en estados `approved`, `exported` o `cancelled` está bloqueado para edición de marcas.
+- La transición a `ready` se bloquea mientras falte una asignación de jornada, existan marcas ambiguas o pares incompletos, o haya candidatos de hora extra pendientes de autorización o rechazo.
+- Los estados `processing`, `processed`, `approved`, `exported` y `cancelled` bloquean cualquier entrada que pueda alterar la asistencia calculada, incluidas marcas y asignaciones de jornada efectivas.
+- La empresa de un empleado es inmutable después de crearlo porque identifica toda su historia de asistencia. Un traslado futuro debe modelar afiliaciones efectivas sin reescribir registros anteriores.
+- Solo un período `processed` puede reabrirse. La reapertura exige permiso y motivo, elimina los resultados derivados obsoletos, registra actor y fecha, y devuelve el período a `validating`.
+- `approved`, `exported` y `cancelled` permanecen inmutables; `cancelled` es un estado terminal fuera del flujo principal mostrado arriba.
 
 ## Seguridad
 

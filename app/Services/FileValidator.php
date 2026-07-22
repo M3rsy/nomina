@@ -2,14 +2,24 @@
 
 namespace App\Services;
 
+use App\Models\Employee;
+use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
+use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Parsers\RawMarkPayload;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class FileValidator
 {
+    public function __construct(
+        private ShiftOccurrenceResolver $shiftOccurrenceResolver,
+        private AttendanceFactGenerationTracker $factGenerations,
+    ) {}
+
     /**
      * @param  Collection<int, RawMarkPayload>  $records
      */
@@ -48,19 +58,22 @@ class FileValidator
 
     private function runValidation(UploadedFile $uploadedFile, Collection $records): void
     {
-        $payPeriod = $uploadedFile->payPeriod;
         $companyId = $uploadedFile->company_id;
+        $payPeriod = PayPeriod::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->lockForUpdate()
+            ->findOrFail($uploadedFile->pay_period_id);
 
-        $employeeIds = DB::table('employees')
+        $employees = Employee::withoutCompanyScope()
             ->where('company_id', $companyId)
             ->whereNull('deleted_at')
-            ->pluck('id', 'external_id')
-            ->toArray();
+            ->get()
+            ->keyBy('external_id');
 
-        $existingMarks = RawMark::query()
+        $existingMarks = RawMark::withoutCompanyScope()
             ->where('company_id', $companyId)
-            ->where('pay_period_id', $payPeriod->id)
             ->where('uploaded_file_id', '!=', $uploadedFile->id)
+            ->whereIn('status', ['valid', 'corrected'])
             ->get(['employee_external_id', 'event_at'])
             ->map(fn ($mark) => $mark->employee_external_id.'|'.$mark->event_at->toDateTimeString())
             ->toArray();
@@ -72,16 +85,23 @@ class FileValidator
         foreach ($records as $record) {
             $status = 'valid';
             $notes = null;
+            $workDate = null;
+            $workDateIsLocked = false;
 
-            $employeeId = $employeeIds[$record->employee_external_id] ?? null;
-            if ($employeeId === null) {
+            $employee = $employees->get($record->employee_external_id);
+            if ($employee === null) {
                 $status = 'unknown_employee';
                 $notes = 'Empleado no encontrado';
             }
 
-            if ($status === 'valid' && ($record->event_at->lt($payPeriod->start_date) || $record->event_at->gt($payPeriod->end_date))) {
-                $status = 'out_of_period';
-                $notes = 'Fuera del período';
+            if ($status === 'valid') {
+                $workDate = $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at);
+                $workDateIsLocked = $this->workDateIsLocked($employee, $workDate);
+
+                if (! $workDateIsLocked && ($workDate->lt($payPeriod->start_date) || $workDate->gt($payPeriod->end_date))) {
+                    $status = 'out_of_period';
+                    $notes = 'Fuera del período';
+                }
             }
 
             $key = $record->employee_external_id.'|'.$record->event_at->toDateTimeString();
@@ -91,20 +111,36 @@ class FileValidator
             }
             $seen[$key] = true;
 
+            if ($status === 'valid' && $workDateIsLocked) {
+                $status = 'invalid';
+                $notes = 'La fecha laboral pertenece a un período bloqueado.';
+            }
+
+            $markQuery = RawMark::query()
+                ->where('uploaded_file_id', $uploadedFile->id)
+                ->where('row_number', $record->row_number);
+            $markQuery->update([
+                'status' => $status,
+                'notes' => $notes,
+                'employee_id' => $employee?->id,
+            ]);
+
+            if ($status === 'valid') {
+                $occurrence = $this->shiftOccurrenceResolver->resolve($employee, $workDate);
+
+                if (! $occurrence->satisfiesManualPairInvariant()) {
+                    $status = 'invalid';
+                    $notes = 'La importación rompería un par con una marca manual auditada.';
+                    $markQuery->update(['status' => $status, 'notes' => $notes]);
+                }
+            }
+
             if ($status === 'valid') {
                 $validCount++;
+                $this->factGenerations->advance($employee, $workDate);
             } else {
                 $issueCount++;
             }
-
-            RawMark::query()
-                ->where('uploaded_file_id', $uploadedFile->id)
-                ->where('row_number', $record->row_number)
-                ->update([
-                    'status' => $status,
-                    'notes' => $notes,
-                    'employee_id' => $employeeId,
-                ]);
         }
 
         $uploadedFile->status = $this->computeFileStatus($validCount, $issueCount);
@@ -117,6 +153,21 @@ class FileValidator
             'invalid_row' => $this->countStatus($uploadedFile, 'invalid'),
         ];
         $uploadedFile->save();
+    }
+
+    private function workDateIsLocked(Employee $employee, CarbonInterface $workDate): bool
+    {
+        return PayPeriod::withoutCompanyScope()
+            ->where('company_id', $employee->company_id)
+            ->whereDate('start_date', '<=', $workDate->toDateString())
+            ->whereDate('end_date', '>=', $workDate->toDateString())
+            ->lockForUpdate()
+            ->get(['status'])
+            ->contains(fn (PayPeriod $period): bool => in_array(
+                $period->status,
+                PayPeriod::ATTENDANCE_LOCKED_STATUSES,
+                true,
+            ));
     }
 
     private function computeFileStatus(int $validCount, int $issueCount): string

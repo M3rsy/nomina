@@ -48,7 +48,15 @@
                     Volver a períodos
                 </a>
 
-                @if ($isBlocked)
+                @if ($payPeriod->status === 'processed')
+                    <button
+                        type="button"
+                        wire:click="openReopenModal"
+                        class="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+                    >
+                        Reabrir para corregir
+                    </button>
+                @elseif ($isBlocked)
                     <button
                         type="button"
                         disabled
@@ -78,7 +86,39 @@
 
         @if ($isBlocked)
             <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Este período está bloqueado (estado: {{ $payPeriod->status }}) y no permite modificaciones.
+                @if ($payPeriod->status === 'processed')
+                    Este período ya tiene resultados calculados. Debe reabrirlo con un motivo antes de modificar la asistencia.
+                @else
+                    Este período está bloqueado (estado: {{ $payPeriod->status }}) y no permite modificaciones.
+                @endif
+            </div>
+        @endif
+
+        @if ($readinessBlockers !== [])
+            <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950" role="alert">
+                <p class="font-bold">Revisión obligatoria pendiente: {{ count($readinessBlockers) }} {{ count($readinessBlockers) === 1 ? 'caso' : 'casos' }}</p>
+                <p class="mt-1 text-rose-800">El período no puede marcarse como listo hasta resolver cada caso.</p>
+                <ul class="mt-3 space-y-2">
+                    @foreach (array_slice($readinessBlockers, 0, 10) as $blocker)
+                        <li class="rounded-lg border border-rose-200 bg-white/70 px-3 py-2">
+                            <span class="font-semibold">{{ $blocker['employee_name'] }}</span>
+                            <span class="text-rose-700">({{ $blocker['employee_external_id'] }}) · {{ \Carbon\CarbonImmutable::parse($blocker['work_date'])->format('d/m/Y') }}</span>
+                            <span class="block text-rose-900">{{ $this->readinessBlockerLabel($blocker['code']) }}</span>
+                            @if ($blocker['code'] === 'missing_pair' && ! $isBlocked)
+                                <button
+                                    type="button"
+                                    wire:click="openManualMarkModal({{ $blocker['employee_id'] }}, '{{ $blocker['work_date'] }}')"
+                                    class="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
+                                >
+                                    Agregar marca faltante
+                                </button>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+                @if (count($readinessBlockers) > 10)
+                    <p class="mt-2 text-rose-800">Se muestran los primeros 10 casos.</p>
+                @endif
             </div>
         @endif
     </header>
@@ -127,7 +167,264 @@
         </article>
     </section>
 
+    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Revisión por jornada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Autorizaciones de horas extra</h2>
+                <p class="mt-1 max-w-3xl text-sm text-slate-600">
+                    El sistema calcula el tramo completo fuera de la jornada asignada. Una decisión humana determina si ese tiempo será pagable.
+                </p>
+            </div>
+            <p class="text-sm font-semibold text-slate-700">
+                {{ $overtimeReviews->sum(fn ($review) => $review->analysis->overtimeCandidates->count()) }} candidatos
+            </p>
+        </div>
+
+        <div class="mt-5 space-y-4">
+            @forelse ($overtimeReviews as $review)
+                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <header class="flex flex-col gap-1 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $review->employee->full_name }}</p>
+                            <p class="text-xs text-slate-500">Código {{ $review->employee->external_id }}</p>
+                        </div>
+                        <p class="text-sm font-semibold text-slate-700">Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}</p>
+                    </header>
+
+                    <div class="grid gap-3 p-4 sm:grid-cols-3">
+                        <div class="rounded-xl border border-slate-200 bg-white p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Jornada asignada</p>
+                            <p class="mt-1 font-bold text-slate-900">
+                                @if ($review->occurrence->scheduledStart && $review->occurrence->scheduledEnd)
+                                    {{ $review->occurrence->scheduledStart->format('H:i') }} → {{ $review->occurrence->scheduledEnd->format('H:i') }}
+                                @else
+                                    Día no laborable
+                                @endif
+                            </p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
+                            <p class="mt-1 font-bold text-slate-900">
+                                {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
+                            </p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tiempo programado reconocido</p>
+                            <p class="mt-1 font-bold text-slate-900">
+                                {{ $review->analysis->scheduledMinutes }} min · {{ number_format($review->analysis->scheduledMinutes / 60, 2, ',', '.') }} h
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 border-t border-slate-200 p-4">
+                        @foreach ($review->analysis->overtimeCandidates as $candidate)
+                            @php
+                                $decision = $review->decisionFor($candidate);
+                                $candidateLabel = match ($candidate->kind) {
+                                    'pre_shift' => 'Entrada anterior',
+                                    'post_shift' => 'Salida posterior',
+                                    'non_working' => 'Día no laborable',
+                                    default => 'Tramo fuera de jornada',
+                                };
+                                $rateLabels = collect([
+                                    'Ordinario' => $candidate->rateMinutes->ordinaryMinutes,
+                                    '25%' => $candidate->rateMinutes->extra25Minutes,
+                                    '50%' => $candidate->rateMinutes->extra50Minutes,
+                                    '75%' => $candidate->rateMinutes->extra75Minutes,
+                                    '100%' => $candidate->rateMinutes->extra100Minutes,
+                                ])->filter();
+                            @endphp
+
+                            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <p class="text-sm font-bold text-slate-950">{{ $candidateLabel }}</p>
+                                        <p class="mt-1 text-sm text-slate-600">
+                                            {{ $candidate->start->format('d/m H:i') }} → {{ $candidate->end->format('d/m H:i') }}
+                                        </p>
+                                        <p class="mt-1 text-sm font-semibold text-slate-800">
+                                            {{ $candidate->minutes }} min · {{ number_format($candidate->minutes / 60, 2, ',', '.') }} h
+                                        </p>
+                                        <p class="mt-1 text-xs text-slate-500">
+                                            {{ $rateLabels->map(fn ($minutes, $rate) => $rate.': '.$minutes.' min')->implode(' · ') }}
+                                        </p>
+                                    </div>
+
+                                    <div class="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+                                        @if ($decision)
+                                            <div class="rounded-xl border px-3 py-2 text-sm {{ $decision->decision === 'approved' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-rose-200 bg-rose-50 text-rose-950' }}">
+                                                <p class="font-bold">{{ $decision->decision === 'approved' ? 'Aprobado' : 'Rechazado' }}</p>
+                                                <p class="mt-1">{{ $decision->reason }}</p>
+                                                <p class="mt-1 text-xs opacity-80">
+                                                    {{ $decision->decider->email ?: 'Usuario eliminado' }} · {{ $decision->created_at?->format('d/m/Y H:i') }}
+                                                </p>
+                                            </div>
+                                        @else
+                                            <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Pendiente de decisión</span>
+                                        @endif
+
+                                        <div class="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                wire:click="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'approved')"
+                                                @disabled($isBlocked || $decision?->decision === 'approved')
+                                                class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Aprobar completo
+                                            </button>
+                                            <button
+                                                type="button"
+                                                wire:click="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'rejected')"
+                                                @disabled($isBlocked || $decision?->decision === 'rejected')
+                                                class="rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Rechazar completo
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </article>
+            @empty
+                <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+                    <p class="font-semibold text-slate-800">No hay candidatos de hora extra con el filtro actual.</p>
+                    <p class="mt-1 text-sm text-slate-500">Las marcas dentro de la jornada asignada no requieren autorización.</p>
+                </div>
+            @endforelse
+        </div>
+    </section>
+
+    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">Tiempo programado no cubierto</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Excepciones de asistencia</h2>
+                <p class="mt-1 max-w-3xl text-sm text-slate-600">
+                    Las marcas de asistencia no se modifican. Sin una excepción concedida, el déficit se descuenta del tiempo reconocido.
+                </p>
+            </div>
+            <p class="text-sm font-semibold text-slate-700">
+                {{ $deficitReviews->sum(fn ($review) => $review->analysis->deficits->count()) }} déficits
+            </p>
+        </div>
+
+        <div class="mt-5 space-y-4">
+            @forelse ($deficitReviews as $review)
+                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <header class="flex flex-col gap-1 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $review->employee->full_name }}</p>
+                            <p class="text-xs text-slate-500">Código {{ $review->employee->external_id }}</p>
+                        </div>
+                        <p class="text-sm font-semibold text-slate-700">Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}</p>
+                    </header>
+
+                    <div class="grid gap-3 p-4 sm:grid-cols-2">
+                        <div class="rounded-xl border border-slate-200 bg-white p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Jornada asignada</p>
+                            <p class="mt-1 font-bold text-slate-900">
+                                {{ $review->occurrence->scheduledStart?->format('H:i') ?? '—' }} → {{ $review->occurrence->scheduledEnd?->format('H:i') ?? '—' }}
+                            </p>
+                        </div>
+                        <div class="rounded-xl border border-slate-200 bg-white p-3">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
+                            <p class="mt-1 font-bold text-slate-900">
+                                {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 border-t border-slate-200 p-4">
+                        @foreach ($review->analysis->deficits as $deficit)
+                            @php
+                                $exception = $review->exceptionFor($deficit);
+                                $deficitLabel = match ($deficit->kind) {
+                                    'late_arrival' => 'Llegada tardía',
+                                    'early_departure' => 'Salida anticipada',
+                                    'full_day_absence' => 'Jornada completa sin marcas',
+                                    default => 'Déficit de asistencia',
+                                };
+                                $rateLabels = collect([
+                                    'Ordinario' => $deficit->rateMinutes->ordinaryMinutes,
+                                    '25%' => $deficit->rateMinutes->extra25Minutes,
+                                    '50%' => $deficit->rateMinutes->extra50Minutes,
+                                    '75%' => $deficit->rateMinutes->extra75Minutes,
+                                    '100%' => $deficit->rateMinutes->extra100Minutes,
+                                ])->filter();
+                            @endphp
+
+                            <div class="rounded-xl border border-slate-200 bg-white p-4">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <p class="text-sm font-bold text-slate-950">{{ $deficitLabel }}</p>
+                                        <p class="mt-1 text-sm text-slate-600">
+                                            {{ $deficit->start->format('H:i') }} → {{ $deficit->end->format('H:i') }}
+                                        </p>
+                                        <p class="mt-1 text-sm font-semibold text-slate-800">
+                                            {{ $deficit->minutes }} min · {{ number_format($deficit->minutes / 60, 2, ',', '.') }} h
+                                        </p>
+                                        <p class="mt-1 text-xs text-slate-500">
+                                            {{ $rateLabels->map(fn ($minutes, $rate) => $rate.': '.$minutes.' min')->implode(' · ') }}
+                                        </p>
+                                    </div>
+
+                                    <div class="flex max-w-sm flex-col items-start gap-2 sm:items-end">
+                                        @if ($exception)
+                                            <div class="rounded-xl border px-3 py-2 text-sm {{ $exception->decision === 'granted' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-300 bg-slate-100 text-slate-800' }}">
+                                                <p class="font-bold">{{ $exception->decision === 'granted' ? 'Excepción concedida' : 'Excepción revocada' }}</p>
+                                                <p class="mt-1">{{ $exception->reason }}</p>
+                                                <p class="mt-1 text-xs opacity-80">
+                                                    {{ $exception->decider->email ?: 'Usuario eliminado' }} · {{ $exception->created_at?->format('d/m/Y H:i') }}
+                                                </p>
+                                            </div>
+                                        @else
+                                            <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Sin excepción · se descuenta</span>
+                                        @endif
+
+                                        <div class="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'granted')"
+                                                @disabled($isBlocked || $exception?->decision === 'granted')
+                                                class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Conceder excepción
+                                            </button>
+                                            <button
+                                                type="button"
+                                                wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'revoked')"
+                                                @disabled($isBlocked || $exception?->decision !== 'granted')
+                                                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                Revocar excepción
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </article>
+            @empty
+                <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+                    <p class="font-semibold text-slate-800">No hay déficits de asistencia con el filtro actual.</p>
+                    <p class="mt-1 text-sm text-slate-500">Las jornadas completamente cubiertas no requieren una excepción.</p>
+                </div>
+            @endforelse
+        </div>
+    </section>
+
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="mb-4">
+            <div>
+                <h2 class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-600">Registros de asistencia</h2>
+                <p class="mt-1 text-sm text-slate-500">Distingue las marcas importadas de los hechos manuales auditados que completan un par incompleto; los archivos originales permanecen intactos.</p>
+            </div>
+        </div>
+
         <div class="mb-4 flex flex-wrap gap-3">
             <label class="flex-1 min-w-44" for="search">
                 <span class="mb-1 block text-xs font-medium text-slate-700">Buscar por empleado/código/observación</span>
@@ -178,7 +475,7 @@
                         <th class="px-4 py-3">Código</th>
                         <th class="px-4 py-3">Empleado</th>
                         <th class="px-4 py-3">Fecha/hora</th>
-                        <th class="px-4 py-3">Archivo</th>
+                        <th class="px-4 py-3">Archivo / origen</th>
                         <th class="px-4 py-3">Estado</th>
                         <th class="px-4 py-3">Acciones</th>
                     </tr>
@@ -186,11 +483,13 @@
                 <tbody class="divide-y divide-slate-100 bg-white">
                     @forelse ($records as $record)
                         <tr>
-                            <td class="px-4 py-3 font-medium text-slate-900">#{{ $record->row_number }}</td>
+                            <td class="px-4 py-3 font-medium text-slate-900">{{ $record->source === \App\Models\RawMark::SOURCE_MANUAL ? 'Manual' : '#'.$record->row_number }}</td>
                             <td class="px-4 py-3 text-slate-600">{{ $record->employee_external_id }}</td>
                             <td class="px-4 py-3 text-slate-900">{{ $record->employee?->full_name ?? 'Sin empleado' }}</td>
                             <td class="px-4 py-3 text-slate-600">{{ optional($record->event_at)?->format('d/m/Y H:i') ?? '-' }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ $record->uploadedFile?->original_name ?? '—' }}</td>
+                            <td class="px-4 py-3 text-slate-600">
+                                {{ $record->source === \App\Models\RawMark::SOURCE_MANUAL ? 'Origen manual' : ($record->uploadedFile?->original_name ?? '—') }}
+                            </td>
                             <td class="px-4 py-3 text-slate-700">
                                 <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $this->statusClass($record->status) }}">
                                     {{ $this->statusLabel($record->status) }}
@@ -218,7 +517,7 @@
 
                                     <button
                                         type="button"
-                                        wire:click="markCorrected({{ $record->id }})"
+                                        wire:click="openCorrectRawMark({{ $record->id }})"
                                         @disabled($isBlocked)
                                         class="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
@@ -256,8 +555,8 @@
                     <p class="text-sm font-semibold text-slate-900">{{ $falta['employee']->full_name }}</p>
                     <p class="text-sm text-slate-600">
                         {{ $falta['date']->format('d/m/Y') }}
-                        @if ($falta['justified_absence'])
-                            — Justificada ({{ $falta['justified_absence']->reason }})
+                        @if ($falta['attendance_exception'])
+                            — Justificada ({{ $falta['attendance_exception']->reason }})
                         @else
                             — Sin justificar
                         @endif
@@ -268,6 +567,136 @@
             @endforelse
         </div>
     </section>
+
+    @if ($showManualMarkModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">Corrección normalizada y auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Registrar hecho faltante</h2>
+                <p class="mt-2 text-sm text-slate-600">
+                    Use esta acción solo para completar un par incompleto cuando el reloj omitió un hecho real. La marca se identifica como manual y no modifica el archivo TXT/DAT ni sus líneas originales.
+                </p>
+
+                <form wire:submit.prevent="saveManualMark" class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label for="manual_mark_employee" class="block text-sm sm:col-span-2">
+                        <span class="font-semibold text-slate-900">Empleado</span>
+                        <select id="manual_mark_employee" wire:model="manualMarkEmployeeId" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                            <option value="">Seleccionar empleado</option>
+                            @foreach ($employees as $employee)
+                                <option value="{{ $employee->id }}">{{ $employee->full_name }} ({{ $employee->external_id }})</option>
+                            @endforeach
+                        </select>
+                        @error('manualMarkEmployeeId') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_work_date" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Fecha laboral</span>
+                        <input id="manual_mark_work_date" type="date" wire:model="manualMarkWorkDate" min="{{ $payPeriod->start_date->toDateString() }}" max="{{ $payPeriod->end_date->toDateString() }}" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                        @error('manualMarkWorkDate') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('work_date') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_event_at" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Fecha y hora reales</span>
+                        <input id="manual_mark_event_at" type="datetime-local" step="1" wire:model="manualMarkEventAt" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                        @error('manualMarkEventAt') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('event_at') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_reason" class="block text-sm sm:col-span-2">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea id="manual_mark_reason" wire:model="manualMarkReason" rows="3" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Indique cómo se verificó el hecho faltante"></textarea>
+                        @error('manualMarkReason') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('reason') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('pay_period') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2 sm:col-span-2">
+                        <button type="button" wire:click="closeManualMarkModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Registrar marca real</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($showAttendanceExceptionModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $attendanceExceptionDecision === 'granted' ? 'text-emerald-700' : 'text-slate-700' }}">Decisión auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">
+                    {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción completa' : 'Revocar excepción completa' }}
+                </h2>
+                <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{{ $attendanceDeficitSummary }}</p>
+                <p class="mt-3 text-sm text-slate-600">
+                    El déficit fue calculado por el sistema y no puede modificarse parcialmente. La marca de asistencia seguirá mostrando la hora real.
+                </p>
+
+                <form wire:submit.prevent="saveAttendanceException" class="mt-4 space-y-4">
+                    <label for="attendance_exception_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea
+                            id="attendance_exception_reason"
+                            wire:model="attendanceExceptionReason"
+                            rows="3"
+                            maxlength="500"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                            placeholder="Explique por qué este déficit se reconoce o vuelve a descontarse"
+                        ></textarea>
+                    </label>
+                    @error('attendanceExceptionReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('attendanceDeficitKey') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('attendanceExceptionDecision') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
+                            {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($showOvertimeDecisionModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $overtimeDecision === 'approved' ? 'text-emerald-700' : 'text-rose-700' }}">Decisión auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">
+                    {{ $overtimeDecision === 'approved' ? 'Aprobar tramo completo' : 'Rechazar tramo completo' }}
+                </h2>
+                <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{{ $overtimeCandidateSummary }}</p>
+                <p class="mt-3 text-sm text-slate-600">
+                    La duración fue calculada por el sistema y no puede modificarse parcialmente. Si cambian las marcas o la jornada, esta decisión deja de ser vigente.
+                </p>
+
+                <form wire:submit.prevent="saveOvertimeDecision" class="mt-4 space-y-4">
+                    <label for="overtime_decision_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea
+                            id="overtime_decision_reason"
+                            wire:model="overtimeDecisionReason"
+                            rows="3"
+                            maxlength="500"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                            placeholder="Explique por qué este tramo se paga o se rechaza"
+                        ></textarea>
+                    </label>
+                    @error('overtimeDecisionReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('candidate_key') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('decision') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeOvertimeDecisionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $overtimeDecision === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700' }}">
+                            {{ $overtimeDecision === 'approved' ? 'Aprobar completo' : 'Rechazar completo' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 
     @if ($showEditModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
@@ -285,6 +714,18 @@
                         >
                     </label>
 
+                    <label for="edit_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la corrección</span>
+                        <textarea
+                            id="edit_reason"
+                            wire:model="editReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué la marca de asistencia es incorrecta"
+                        ></textarea>
+                        @error('editReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
                     @if ($editWarning)
                         <p class="rounded-lg bg-amber-50 p-2 text-sm text-amber-900">{{ $editWarning }}</p>
                     @endif
@@ -298,15 +739,56 @@
         </div>
     @endif
 
+    @if ($showCorrectModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+                <h2 class="text-lg font-bold">Corregir estado de marca</h2>
+                <p class="mt-2 text-sm text-slate-600">La marca se validará como corregida sin modificar la evidencia del archivo original.</p>
+                <form wire:submit.prevent="markCorrected" class="mt-4 space-y-4">
+                    <label for="correct_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la corrección</span>
+                        <textarea
+                            id="correct_reason"
+                            wire:model="correctReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué el estado debe considerarse corregido"
+                        ></textarea>
+                        @error('correctReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2 pt-2">
+                        <button type="button" wire:click="closeCorrectModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Guardar corrección</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
     @if ($showDeleteModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
             <div class="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
                 <h2 class="text-lg font-bold">Eliminar marca</h2>
                 <p class="mt-2 text-sm text-slate-600">La marca se marcará como eliminada y se conserva su rastro en historial.</p>
-                <div class="mt-4 flex justify-end gap-2">
-                    <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                    <button type="button" wire:click="deleteRawMark" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar</button>
-                </div>
+                <form wire:submit.prevent="deleteRawMark" class="mt-4 space-y-4">
+                    <label for="delete_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la eliminación</span>
+                        <textarea
+                            id="delete_reason"
+                            wire:model="deleteReason"
+                            rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá por qué esta marca de asistencia no debe utilizarse"
+                        ></textarea>
+                        @error('deleteReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar</button>
+                    </div>
+                </form>
             </div>
         </div>
     @endif
@@ -331,6 +813,19 @@
                         <span>Aplicar a todas las marcas sin empleado de este mismo externo</span>
                     </label>
 
+                    <label for="assign_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo de la asignación</span>
+                        <textarea
+                            id="assign_reason"
+                            wire:model="assignReason"
+                            rows="3"
+                            maxlength="500"
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                            placeholder="Explicá cómo se verificó la identidad del empleado"
+                        ></textarea>
+                        @error('assignReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
+                    </label>
+
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
                         <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Guardar</button>
@@ -349,6 +844,26 @@
                     <button type="button" wire:click="cancelReadyConfirm" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
                     <button type="button" wire:click="confirmContinueToReady" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Confirmar</button>
                 </div>
+            </div>
+        </div>
+    @endif
+
+    @if ($showReopenModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <h2 class="text-lg font-bold">Reabrir período procesado</h2>
+                <p class="mt-2 text-sm text-slate-600">Los resultados calculados se eliminarán para evitar usar valores obsoletos. Las marcas y las decisiones auditadas se conservan.</p>
+                <form wire:submit.prevent="reopenProcessedPeriod" class="mt-4 space-y-4">
+                    <label for="reopen_reason" class="block text-sm">
+                        <span class="font-semibold">Motivo obligatorio</span>
+                        <textarea id="reopen_reason" wire:model="reopenReason" rows="3" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>
+                    </label>
+                    @error('reopenReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeReopenModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">Invalidar y reabrir</button>
+                    </div>
+                </form>
             </div>
         </div>
     @endif

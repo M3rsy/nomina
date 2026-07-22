@@ -20,6 +20,15 @@
                         Volver
                     </a>
 
+                    @if ($uploadedFile->payPeriod && auth()->user()?->can('marks.manage') && auth()->user()?->can('view', $uploadedFile->payPeriod))
+                        <a
+                            href="{{ route('nomina.revisar', ['payPeriod' => $uploadedFile->payPeriod, 'uploaded_file_id' => $uploadedFile->id]) }}"
+                            class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                        >
+                            Revisar y corregir
+                        </a>
+                    @endif
+
                     <a
                         href="{{ route('archivos.report', ['uploadedFile' => $uploadedFile]) }}"
                         class="inline-flex min-h-11 items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
@@ -122,7 +131,7 @@
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <h2 class="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">Registros de archivo</h2>
-                    <p class="mt-1 text-sm text-slate-600">Buscá por empleado, fila o estado para analizar consistencia. Edición de marcas: no disponible en este flujo.</p>
+                    <p class="mt-1 text-sm text-slate-600">Buscá por empleado, fila o estado para analizar consistencia. Este detalle conserva la evidencia; las correcciones se realizan en la revisión de nómina.</p>
                 </div>
                 <button
                     type="button"

@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Holiday;
 use App\Models\User;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Database\Seeders\WorkScheduleSeeder;
@@ -76,6 +77,75 @@ test('company admin can save work schedules for own company', function () {
     expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
 });
 
+test('saving a schedule profile creates an audited immutable version', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+
+    $this->seed(WorkScheduleSeeder::class);
+    $originalProfile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->sole();
+    $originalMonday = $originalProfile->workSchedules()->where('day_of_week', 1)->sole();
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.start_time', '18:00')
+        ->set('schedules.1.end_time', '06:00')
+        ->set('changeReason', 'Nuevo horario operativo')
+        ->call('save')
+        ->assertSet('showSuccess', true)
+        ->assertHasNoErrors();
+
+    $newProfile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->where('is_active', true)
+        ->sole();
+
+    expect($originalProfile->fresh()->is_active)->toBeFalse()
+        ->and($originalMonday->fresh()->start_time)->toStartWith('06:00')
+        ->and($newProfile->version)->toBe(2)
+        ->and($newProfile->created_by)->toBe($admin->id)
+        ->and($newProfile->change_reason)->toBe('Nuevo horario operativo')
+        ->and($newProfile->workSchedules()->where('day_of_week', 1)->sole()->start_time)->toStartWith('18:00');
+
+    Livewire::actingAs($admin)->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.start_time', '06:00')
+        ->set('schedules.1.end_time', '06:00')
+        ->set('changeReason', 'Horario inválido')
+        ->call('save')
+        ->assertHasErrors(['schedules.1.end_time']);
+});
+
+test('company admin can duplicate the selected schedule into a reusable profile', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+
+    $this->seed(WorkScheduleSeeder::class);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('newProfileName', 'Guardia nocturna')
+        ->call('createProfile')
+        ->assertHasNoErrors()
+        ->assertSet('showCreateProfile', false);
+
+    $profile = WorkScheduleProfile::withoutCompanyScope()
+        ->where('company_id', $company->id)
+        ->where('profile_key', 'guardia-nocturna')
+        ->sole();
+
+    expect($profile->name)->toBe('Guardia nocturna')
+        ->and($profile->version)->toBe(1)
+        ->and($profile->created_by)->toBe($admin->id)
+        ->and($profile->workSchedules)->toHaveCount(7)
+        ->and($profile->workSchedules()->where('day_of_week', 1)->sole()->start_time)->toStartWith('06:00')
+        ->and($component->get('selectedProfileId'))->toBe($profile->id)
+        ->and(WorkScheduleProfile::withoutCompanyScope()->where('company_id', $company->id)->where('is_active', true)->count())->toBe(2);
+});
+
 test('company admin can save custom overtime bands in work schedule JSON', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
@@ -114,6 +184,22 @@ test('company admin gets validation error for invalid overtime band JSON', funct
         ->call('save')
         ->assertHasErrors(['schedules.1.banding_json']);
 });
+
+test('company admin cannot save overtime bands with gaps or overlaps', function (string $bands) {
+    $company = Company::factory()->create();
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->set('schedules.1.banding_json', $bands)
+        ->call('save')
+        ->assertHasErrors(['schedules.1.banding_json']);
+})->with([
+    'gap from 12:00 to 14:00' => '[{"start":"00:00","end":"06:00","extra_percent":75},{"start":"06:00","end":"12:00","extra_percent":0},{"start":"14:00","end":"18:00","extra_percent":25},{"start":"18:00","end":"00:00","extra_percent":50}]',
+    'overlap from 12:00 to 14:00' => '[{"start":"00:00","end":"06:00","extra_percent":75},{"start":"06:00","end":"14:00","extra_percent":0},{"start":"12:00","end":"18:00","extra_percent":25},{"start":"18:00","end":"00:00","extra_percent":50}]',
+]);
 
 test('company admin can access feriados page of own company', function () {
     $company = Company::factory()->create();

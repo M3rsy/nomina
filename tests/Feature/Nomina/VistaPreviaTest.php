@@ -49,7 +49,7 @@ test('procesar page renders payroll results grouped by employee', function () {
         'exit_at' => Carbon::parse('2026-01-05 17:00:00'),
         'worked_hours' => 9.0,
         'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
+        'extra_25_hours' => 0.5,
     ]);
 
     $this->actingAs($admin);
@@ -66,11 +66,17 @@ test('procesar summary card shows totals for employees and hours', function () {
 
     PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
         'date' => '2026-01-05',
-        'ordinary_hours' => 8.0,
-        'extra_25_hours' => 1,
-        'extra_50_hours' => 0,
-        'extra_75_hours' => 0,
-        'extra_100_hours' => 0,
+        'ordinary_hours' => 0.02,
+        'extra_25_hours' => 0.02,
+        'ordinary_minutes' => 1,
+        'extra_25_minutes' => 1,
+    ]);
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2026-01-06',
+        'ordinary_hours' => 0.02,
+        'extra_25_hours' => 0.02,
+        'ordinary_minutes' => 1,
+        'extra_25_minutes' => 1,
     ]);
 
     $this->actingAs($admin);
@@ -78,11 +84,37 @@ test('procesar summary card shows totals for employees and hours', function () {
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
         ->assertViewHas('summary', function ($summary) {
-            return $summary['total_employees'] === 1
-                && $summary['total_records'] === 1
-                && $summary['ordinary_hours'] === 8.0
-                && $summary['extra_25_hours'] === 1;
+            expect($summary)->toMatchArray([
+                'total_employees' => 1,
+                'total_records' => 2,
+                'ordinary_hours' => 2 / 60,
+                'extra_25_hours' => 2 / 60,
+            ]);
+
+            return true;
         });
+});
+
+test('procesar rows derive displayed hours from canonical minutes', function () {
+    [$company, $payPeriod, $employee, $admin] = setupProcessedPayPeriod();
+
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2026-01-05',
+        'worked_hours' => 9.0,
+        'ordinary_hours' => 8.0,
+        'extra_25_hours' => 0.5,
+        'worked_minutes' => 1,
+        'ordinary_minutes' => 1,
+        'extra_25_minutes' => 1,
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
+        ->assertSeeHtml('>0.02</td>')
+        ->assertDontSee('9.00')
+        ->assertDontSee('8.00');
 });
 
 test('procesar page filters by employee', function () {

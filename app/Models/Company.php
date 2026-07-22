@@ -3,13 +3,13 @@
 namespace App\Models;
 
 use App\Services\DatabaseSessionRevoker;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class Company extends Model
 {
@@ -86,6 +86,21 @@ class Company extends Model
         return $this->hasMany(WorkSchedule::class);
     }
 
+    public function workScheduleProfiles(): HasMany
+    {
+        return $this->hasMany(WorkScheduleProfile::class);
+    }
+
+    public function overtimeDecisions(): HasMany
+    {
+        return $this->hasMany(OvertimeDecision::class);
+    }
+
+    public function attendanceExceptions(): HasMany
+    {
+        return $this->hasMany(AttendanceException::class);
+    }
+
     public function holidays(): HasMany
     {
         return $this->hasMany(Holiday::class);
@@ -94,13 +109,13 @@ class Company extends Model
     public static function defaultWorkSchedules(): array
     {
         return [
-            ['day_of_week' => 1, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
-            ['day_of_week' => 2, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
-            ['day_of_week' => 3, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
-            ['day_of_week' => 4, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
-            ['day_of_week' => 5, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'notes' => null],
-            ['day_of_week' => 6, 'is_working_day' => true, 'base_ordinary_hours' => 4.00, 'notes' => null],
-            ['day_of_week' => 0, 'is_working_day' => false, 'base_ordinary_hours' => 0.00, 'notes' => null],
+            ['day_of_week' => 1, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'start_time' => '06:00', 'end_time' => '14:00', 'notes' => null],
+            ['day_of_week' => 2, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'start_time' => '06:00', 'end_time' => '14:00', 'notes' => null],
+            ['day_of_week' => 3, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'start_time' => '06:00', 'end_time' => '14:00', 'notes' => null],
+            ['day_of_week' => 4, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'start_time' => '06:00', 'end_time' => '14:00', 'notes' => null],
+            ['day_of_week' => 5, 'is_working_day' => true, 'base_ordinary_hours' => 8.00, 'start_time' => '06:00', 'end_time' => '14:00', 'notes' => null],
+            ['day_of_week' => 6, 'is_working_day' => true, 'base_ordinary_hours' => 4.00, 'start_time' => '08:00', 'end_time' => '12:00', 'notes' => null],
+            ['day_of_week' => 0, 'is_working_day' => false, 'base_ordinary_hours' => 0.00, 'start_time' => null, 'end_time' => null, 'notes' => null],
         ];
     }
 }

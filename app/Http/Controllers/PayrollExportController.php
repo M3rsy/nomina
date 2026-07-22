@@ -7,6 +7,7 @@ use App\Models\PayPeriod;
 use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollStubExporter;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -15,8 +16,7 @@ class PayrollExportController extends Controller
     public function __construct(
         private PayrollExcelExporter $excelExporter,
         private PayrollStubExporter $stubExporter,
-    ) {
-    }
+    ) {}
 
     public function __invoke(PayPeriod $payPeriod): BinaryFileResponse
     {
@@ -24,10 +24,17 @@ class PayrollExportController extends Controller
 
         $this->ensureCompanyAccess($payPeriod);
 
-        $path = $this->excelExporter->export($payPeriod);
-        $filename = $this->excelExporter->filename($payPeriod);
+        [$path, $filename] = DB::transaction(function () use ($payPeriod): array {
+            $lockedPeriod = $this->lockPeriodInState($payPeriod, ['approved', 'exported']);
+            $path = $this->excelExporter->export($lockedPeriod);
+            $filename = $this->excelExporter->filename($lockedPeriod);
 
-        $this->markExported($payPeriod);
+            if ($lockedPeriod->status === 'approved') {
+                $lockedPeriod->update(['status' => 'exported']);
+            }
+
+            return [$path, $filename];
+        });
 
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -46,8 +53,14 @@ class PayrollExportController extends Controller
             abort(403);
         }
 
-        $path = $this->stubExporter->export($payPeriod, $employee);
-        $filename = $this->stubExporter->filename($payPeriod, $employee);
+        [$path, $filename] = DB::transaction(function () use ($payPeriod, $employee): array {
+            $lockedPeriod = $this->lockPeriodInState($payPeriod, ['exported']);
+
+            return [
+                $this->stubExporter->export($lockedPeriod, $employee),
+                $this->stubExporter->filename($lockedPeriod, $employee),
+            ];
+        });
 
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -67,15 +80,19 @@ class PayrollExportController extends Controller
         }
     }
 
-    private function markExported(PayPeriod $payPeriod): void
+    /**
+     * @param  list<string>  $allowedStatuses
+     */
+    private function lockPeriodInState(PayPeriod $payPeriod, array $allowedStatuses): PayPeriod
     {
-        if ($payPeriod->status === 'cancelled') {
-            return;
+        $lockedPeriod = PayPeriod::withoutCompanyScope()
+            ->lockForUpdate()
+            ->findOrFail($payPeriod->id);
+
+        if (! in_array($lockedPeriod->status, $allowedStatuses, true)) {
+            abort(Response::HTTP_CONFLICT, 'El estado actual del período no permite esta exportación.');
         }
 
-        if ($payPeriod->status !== 'exported') {
-            $payPeriod->status = 'exported';
-            $payPeriod->save();
-        }
+        return $lockedPeriod;
     }
 }
