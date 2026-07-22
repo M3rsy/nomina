@@ -417,19 +417,11 @@
     </section>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div class="mb-4">
             <div>
                 <h2 class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-600">Registros de asistencia</h2>
-                <p class="mt-1 text-sm text-slate-500">Distingue las marcas importadas de las reconstrucciones manuales auditadas; los archivos originales permanecen intactos.</p>
+                <p class="mt-1 text-sm text-slate-500">Distingue las marcas importadas de los hechos manuales auditados que completan un par incompleto; los archivos originales permanecen intactos.</p>
             </div>
-            <button
-                type="button"
-                wire:click="openManualMarkModal"
-                @disabled($isBlocked)
-                class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
-            >
-                Agregar marca manual
-            </button>
         </div>
 
         <div class="mb-4 flex flex-wrap gap-3">
@@ -581,7 +573,7 @@
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">Corrección normalizada y auditada</p>
                 <h2 class="mt-1 text-xl font-black text-slate-950">Registrar hecho faltante</h2>
                 <p class="mt-2 text-sm text-slate-600">
-                    Use esta acción solo cuando el reloj omitió un hecho real. La marca se identifica como manual y no modifica el archivo TXT/DAT ni sus líneas originales.
+                    Use esta acción solo para completar un par incompleto cuando el reloj omitió un hecho real. La marca se identifica como manual y no modifica el archivo TXT/DAT ni sus líneas originales.
                 </p>
 
                 <form wire:submit.prevent="saveManualMark" class="mt-4 grid gap-4 sm:grid-cols-2">

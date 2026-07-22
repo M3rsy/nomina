@@ -19,23 +19,18 @@ beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('records missing clock facts as audited normalized marks', function () {
+test('completes an observed incomplete pair with one audited manual fact', function () {
     $context = manualMarkContext();
     $recorder = app(ManualRawMarkRecorder::class);
 
-    $entry = $recorder->record(
-        $context['period'], $context['employee'], '2026-07-20', '2026-07-20 06:00:00',
-        'El reloj no registró la entrada', $context['actor'],
-    );
-    $afterEntry = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
+    $entry = observedMark($context, '2026-07-20 06:00:00');
     $exit = $recorder->record(
         $context['period'], $context['employee'], '2026-07-20', '2026-07-20 14:00:00',
         'El reloj no registró la salida', $context['actor'],
     );
     $resolved = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
 
-    expect($afterEntry->status)->toBe(ShiftOccurrence::MISSING_PAIR)
-        ->and($resolved->status)->toBe(ShiftOccurrence::RESOLVED)
+    expect($resolved->status)->toBe(ShiftOccurrence::RESOLVED)
         ->and($resolved->marks->pluck('id')->all())->toBe([$entry->id, $exit->id])
         ->and($exit->source)->toBe(RawMark::SOURCE_MANUAL)
         ->and($exit->uploaded_file_id)->toBeNull()
@@ -51,6 +46,16 @@ test('records missing clock facts as audited normalized marks', function () {
         ]);
 });
 
+test('rejects constructing a shift from manual facts without an observed mark', function () {
+    $context = manualMarkContext();
+
+    expect(fn () => app(ManualRawMarkRecorder::class)->record(
+        $context['period'], $context['employee'], '2026-07-20', '2026-07-20 06:00:00',
+        'Entrada informada por supervisión', $context['actor'],
+    ))->toThrow(ValidationException::class)
+        ->and(RawMark::withoutCompanyScope()->count())->toBe(0);
+});
+
 test('records an overnight exit after the payroll period end for its starting work date', function () {
     $context = manualMarkContext();
     $context['period']->update(['end_date' => '2026-07-20']);
@@ -61,10 +66,7 @@ test('records an overnight exit after the payroll period end for its starting wo
     ]);
     $recorder = app(ManualRawMarkRecorder::class);
 
-    $recorder->record(
-        $context['period'], $context['employee'], '2026-07-20', '2026-07-20 18:00:00',
-        'Entrada informada por supervisión', $context['actor'],
-    );
+    observedMark($context, '2026-07-20 18:00:00');
     $exit = $recorder->record(
         $context['period'], $context['employee'], '2026-07-20', '2026-07-21 06:00:00',
         'Salida informada por supervisión', $context['actor'],
@@ -85,7 +87,7 @@ test('rejects duplicate misplaced and ambiguity-producing manual marks atomicall
         'Reconstrucción validada', $context['actor'],
     );
 
-    $record('2026-07-20 06:00:00');
+    observedMark($context, '2026-07-20 06:00:00');
 
     expect(fn () => $record('2026-07-20 06:00:00'))->toThrow(ValidationException::class)
         ->and(fn () => $record('2026-07-21 06:00:00'))->toThrow(ValidationException::class)
@@ -126,6 +128,7 @@ test('requires valid context and an active marks manager from the same company',
 test('allows a super administrator to record for the selected company', function () {
     $context = manualMarkContext();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+    observedMark($context, '2026-07-20 14:00:00');
 
     $mark = app(ManualRawMarkRecorder::class)->record(
         $context['period'], $context['employee'], '2026-07-20', '2026-07-20 06:00:00',
@@ -182,4 +185,18 @@ function manualMarkContext(string $status = 'validating'): array
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     return compact('company', 'period', 'employee', 'actor', 'profile');
+}
+
+function observedMark(array $context, string $eventAt): RawMark
+{
+    return RawMark::factory()
+        ->forCompany($context['company'])
+        ->forPayPeriod($context['period'])
+        ->forEmployee($context['employee'])
+        ->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => $eventAt,
+            'status' => 'valid',
+            'source' => 'glg',
+        ]);
 }
