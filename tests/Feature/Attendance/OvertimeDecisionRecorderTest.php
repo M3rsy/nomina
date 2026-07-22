@@ -9,6 +9,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
@@ -141,6 +142,28 @@ test('an old approval stays stale when a corrected mark returns to its original 
             ],
         ]],
     ]);
+
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
+    $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();
+    $evaluation = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+    );
+
+    expect($candidate->key)->not->toBe($context['candidate_key'])
+        ->and($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
+        ->and($evaluation->blockers->pluck('code')->all())->toBe(['pending_overtime_candidate']);
+});
+
+test('an old approval stays stale after attendance facts change without changing the visible pair', function () {
+    $context = overtimeDecisionFixture();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        OvertimeDecision::APPROVED, 'Servicio confirmado originalmente', $context['actor'],
+    );
+
+    app(AttendanceFactGenerationTracker::class)->advance($context['employee'], '2026-07-20');
 
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-07-20');
     $candidate = app(AttendanceShiftAnalyzer::class)->analyze($occurrence)->overtimeCandidates->sole();

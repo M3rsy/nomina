@@ -12,6 +12,8 @@ use Illuminate\Support\Collection;
 
 class ShiftOccurrenceResolver
 {
+    public function __construct(private AttendanceFactGenerationTracker $factGenerations) {}
+
     public function resolve(Employee $employee, CarbonInterface|string $workDate): ShiftOccurrence
     {
         $date = CarbonImmutable::parse($workDate)->startOfDay();
@@ -51,6 +53,7 @@ class ShiftOccurrenceResolver
                 2 => ShiftOccurrence::RESOLVED,
                 default => ShiftOccurrence::AMBIGUOUS,
             },
+            factGeneration: $this->factGenerations->current($employee, $date),
         );
     }
 
