@@ -301,6 +301,23 @@ test('processor rejects pay periods that are not ready', function () {
     expect(fn () => $processor->processPayPeriod($payPeriod))->toThrow(InvalidArgumentException::class);
 });
 
+test('processor rejects a pay period whose work dates overlap another period', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-11');
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-11',
+        'end_date' => '2026-01-18',
+        'status' => 'draft',
+    ]);
+
+    app(CurrentCompany::class)->set($company);
+
+    expect(fn () => app(PayrollProcessor::class)->processPayPeriod($payPeriod))
+        ->toThrow(InvalidArgumentException::class, 'Las fechas se superponen con otro período de la empresa.')
+        ->and($payPeriod->fresh()->status)->toBe('ready')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+});
+
 test('processor stores rules version from config', function () {
     $company = Company::factory()->create();
     $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');

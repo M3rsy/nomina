@@ -3,8 +3,11 @@
 namespace App\Livewire\Nomina;
 
 use App\Models\PayPeriod;
+use App\Services\Payroll\PayPeriodRangeGuard;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -56,7 +59,7 @@ class Index extends Component
         $this->resetValidation();
     }
 
-    public function store(): void
+    public function store(PayPeriodRangeGuard $rangeGuard): void
     {
         $this->authorize('create', PayPeriod::class);
         $this->showCreateForm = true;
@@ -92,14 +95,26 @@ class Index extends Component
         }
 
         try {
-            $payPeriod = PayPeriod::create([
-                'company_id' => $company->id,
-                'slug' => $slug,
-                'name' => $validated['name'],
-                'start_date' => $validated['start_date'],
-                'end_date' => $validated['end_date'],
-                'status' => 'draft',
-            ]);
+            $payPeriod = DB::transaction(function () use ($company, $rangeGuard, $slug, $validated): PayPeriod {
+                $rangeGuard->assertAvailable(
+                    $company->id,
+                    $validated['start_date'],
+                    $validated['end_date'],
+                );
+
+                return PayPeriod::create([
+                    'company_id' => $company->id,
+                    'slug' => $slug,
+                    'name' => $validated['name'],
+                    'start_date' => $validated['start_date'],
+                    'end_date' => $validated['end_date'],
+                    'status' => 'draft',
+                ]);
+            });
+        } catch (InvalidArgumentException $exception) {
+            $this->addError('start_date', $exception->getMessage());
+
+            return;
         } catch (UniqueConstraintViolationException) {
             $this->addError('name', 'Ya existe un período con este nombre en la empresa activa.');
 
