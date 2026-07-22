@@ -26,6 +26,40 @@ test('recognizes an exact scheduled shift in integer minutes', function () {
         ->and($analysis->overtimeCandidates)->toBeEmpty();
 });
 
+test('conserves scheduled minutes when both attendance marks contain seconds', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:30',
+        exitAt: '2026-07-20 14:00:30',
+    ));
+
+    expect($analysis->entryAt?->toDateTimeString())->toBe('2026-07-20 06:00:30')
+        ->and($analysis->exitAt?->toDateTimeString())->toBe('2026-07-20 14:00:30')
+        ->and($analysis->workedMinutes)->toBe(480)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('partitions second-bearing marks once into scheduled and candidate minutes', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:30',
+        exitAt: '2026-07-20 14:30:30',
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(510)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 14:00:00')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 14:30:00')
+        ->and($candidate->minutes)->toBe(30)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(30)
+        ->and($analysis->scheduledMinutes + $candidate->minutes)->toBe($analysis->workedMinutes);
+});
+
 test('detects a complete post-shift overtime candidate', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         workDate: '2026-07-20',

@@ -27,7 +27,7 @@ Resumen técnico de las fases de construcción y de la arquitectura vigente.
 ## Módulos de asistencia y nómina
 
 - `Attendance/ShiftOccurrenceResolver`: resuelve la jornada asignada efectiva y su fecha laboral, incluso cuando termina al día siguiente o cruza períodos de nómina.
-- `Attendance/AttendanceShiftAnalyzer`: compara marcas de asistencia con la jornada, produce déficits y candidatos de hora extra completos, y conserva sus minutos y huellas exactas.
+- `Attendance/AttendanceShiftAnalyzer`: compara marcas de asistencia con la jornada, produce déficits y candidatos de hora extra completos, y conserva sus minutos y huellas exactas. Para el cálculo normaliza una sola vez cada marca al minuto inferior; los segundos originales permanecen en la evidencia y la auditoría.
 - `Attendance/OvertimeDecisionRecorder` y `Attendance/AttendanceExceptionRecorder`: guardan autorizaciones y excepciones como historiales inmutables y auditados.
 - `Attendance/PayrollShiftEvaluationResolver`: ofrece a revisión, preparación y procesamiento una sola ruta para cargar y evaluar los hechos vigentes.
 - `Attendance/PayrollShiftEvaluator`: reconoce el tiempo programado, aplica excepciones exactas y paga únicamente candidatos de hora extra autorizados.
