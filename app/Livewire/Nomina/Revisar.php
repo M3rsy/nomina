@@ -10,6 +10,7 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
+use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
@@ -111,6 +112,16 @@ class Revisar extends Component
     public string $attendanceExceptionReason = '';
 
     public string $attendanceDeficitSummary = '';
+
+    public bool $showManualMarkModal = false;
+
+    public ?int $manualMarkEmployeeId = null;
+
+    public string $manualMarkWorkDate = '';
+
+    public string $manualMarkEventAt = '';
+
+    public string $manualMarkReason = '';
 
     public bool $locked = false;
 
@@ -705,6 +716,98 @@ class Revisar extends Component
         session()->flash('success', "Excepción completa {$decision} y registrada en el historial.");
     }
 
+    public function openManualMarkModal(?int $employeeId = null, ?string $workDate = null): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $this->closeManualMarkModal();
+        $employee = $this->findPeriodEmployee($employeeId);
+
+        if ($employeeId !== null && $employee === null) {
+            $this->addError('manualMarkEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        $workDate ??= $this->payPeriod->start_date->toDateString();
+        $dateValidator = validator(['work_date' => $workDate], [
+            'work_date' => [
+                'required',
+                'date_format:Y-m-d',
+                'after_or_equal:'.$this->payPeriod->start_date->toDateString(),
+                'before_or_equal:'.$this->payPeriod->end_date->toDateString(),
+            ],
+        ]);
+
+        if ($dateValidator->fails()) {
+            $this->addError('manualMarkWorkDate', 'La fecha laboral no pertenece a este período.');
+
+            return;
+        }
+
+        $this->manualMarkEmployeeId = $employee?->id;
+        $this->manualMarkWorkDate = $workDate;
+        $this->showManualMarkModal = true;
+    }
+
+    public function closeManualMarkModal(): void
+    {
+        $this->showManualMarkModal = false;
+        $this->manualMarkEmployeeId = null;
+        $this->manualMarkWorkDate = '';
+        $this->manualMarkEventAt = '';
+        $this->manualMarkReason = '';
+        $this->resetErrorBag();
+    }
+
+    public function saveManualMark(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $validated = $this->validate([
+            'manualMarkEmployeeId' => ['required', 'integer'],
+            'manualMarkWorkDate' => [
+                'required',
+                'date_format:Y-m-d',
+                'after_or_equal:'.$this->payPeriod->start_date->toDateString(),
+                'before_or_equal:'.$this->payPeriod->end_date->toDateString(),
+            ],
+            'manualMarkEventAt' => ['required', 'date'],
+            'manualMarkReason' => ['required', 'string', 'max:500'],
+        ], [
+            'manualMarkEmployeeId.required' => 'Debe seleccionar un empleado.',
+            'manualMarkWorkDate.required' => 'Debe indicar la fecha laboral.',
+            'manualMarkEventAt.required' => 'Debe indicar la fecha y hora real de la marca.',
+            'manualMarkReason.required' => 'Debe indicar por qué falta la marca del reloj.',
+        ]);
+        $employee = $this->findPeriodEmployee((int) $validated['manualMarkEmployeeId']);
+
+        if ($employee === null) {
+            $this->addError('manualMarkEmployeeId', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        app(ManualRawMarkRecorder::class)->record(
+            $this->payPeriod,
+            $employee,
+            $validated['manualMarkWorkDate'],
+            $validated['manualMarkEventAt'],
+            $validated['manualMarkReason'],
+            Auth::user(),
+        );
+
+        $this->closeManualMarkModal();
+        $this->loadReadinessBlockers();
+        $this->resetPage();
+
+        session()->flash('success', 'Marca manual auditada y registrada sin modificar el archivo de origen.');
+    }
+
     public function continueToReady(): void
     {
         if ($this->isBlocked()) {
@@ -854,6 +957,8 @@ class Revisar extends Component
             })
             ->orderBy('uploaded_file_id')
             ->orderBy('row_number')
+            ->orderBy('event_at')
+            ->orderBy('id')
             ->paginate(25);
     }
 

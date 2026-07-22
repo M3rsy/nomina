@@ -104,6 +104,15 @@
                             <span class="font-semibold">{{ $blocker['employee_name'] }}</span>
                             <span class="text-rose-700">({{ $blocker['employee_external_id'] }}) · {{ \Carbon\CarbonImmutable::parse($blocker['work_date'])->format('d/m/Y') }}</span>
                             <span class="block text-rose-900">{{ $this->readinessBlockerLabel($blocker['code']) }}</span>
+                            @if ($blocker['code'] === 'missing_pair' && ! $isBlocked)
+                                <button
+                                    type="button"
+                                    wire:click="openManualMarkModal({{ $blocker['employee_id'] }}, '{{ $blocker['work_date'] }}')"
+                                    class="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
+                                >
+                                    Agregar marca faltante
+                                </button>
+                            @endif
                         </li>
                     @endforeach
                 </ul>
@@ -408,6 +417,21 @@
     </section>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h2 class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-600">Registros de asistencia</h2>
+                <p class="mt-1 text-sm text-slate-500">Distingue las marcas importadas de las reconstrucciones manuales auditadas; los archivos originales permanecen intactos.</p>
+            </div>
+            <button
+                type="button"
+                wire:click="openManualMarkModal"
+                @disabled($isBlocked)
+                class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
+            >
+                Agregar marca manual
+            </button>
+        </div>
+
         <div class="mb-4 flex flex-wrap gap-3">
             <label class="flex-1 min-w-44" for="search">
                 <span class="mb-1 block text-xs font-medium text-slate-700">Buscar por empleado/código/observación</span>
@@ -458,7 +482,7 @@
                         <th class="px-4 py-3">Código</th>
                         <th class="px-4 py-3">Empleado</th>
                         <th class="px-4 py-3">Fecha/hora</th>
-                        <th class="px-4 py-3">Archivo</th>
+                        <th class="px-4 py-3">Archivo / origen</th>
                         <th class="px-4 py-3">Estado</th>
                         <th class="px-4 py-3">Acciones</th>
                     </tr>
@@ -466,11 +490,13 @@
                 <tbody class="divide-y divide-slate-100 bg-white">
                     @forelse ($records as $record)
                         <tr>
-                            <td class="px-4 py-3 font-medium text-slate-900">#{{ $record->row_number }}</td>
+                            <td class="px-4 py-3 font-medium text-slate-900">{{ $record->source === \App\Models\RawMark::SOURCE_MANUAL ? 'Manual' : '#'.$record->row_number }}</td>
                             <td class="px-4 py-3 text-slate-600">{{ $record->employee_external_id }}</td>
                             <td class="px-4 py-3 text-slate-900">{{ $record->employee?->full_name ?? 'Sin empleado' }}</td>
                             <td class="px-4 py-3 text-slate-600">{{ optional($record->event_at)?->format('d/m/Y H:i') ?? '-' }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ $record->uploadedFile?->original_name ?? '—' }}</td>
+                            <td class="px-4 py-3 text-slate-600">
+                                {{ $record->source === \App\Models\RawMark::SOURCE_MANUAL ? 'Origen manual' : ($record->uploadedFile?->original_name ?? '—') }}
+                            </td>
                             <td class="px-4 py-3 text-slate-700">
                                 <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $this->statusClass($record->status) }}">
                                     {{ $this->statusLabel($record->status) }}
@@ -548,6 +574,58 @@
             @endforelse
         </div>
     </section>
+
+    @if ($showManualMarkModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">Corrección normalizada y auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Registrar hecho faltante</h2>
+                <p class="mt-2 text-sm text-slate-600">
+                    Use esta acción solo cuando el reloj omitió un hecho real. La marca se identifica como manual y no modifica el archivo TXT/DAT ni sus líneas originales.
+                </p>
+
+                <form wire:submit.prevent="saveManualMark" class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label for="manual_mark_employee" class="block text-sm sm:col-span-2">
+                        <span class="font-semibold text-slate-900">Empleado</span>
+                        <select id="manual_mark_employee" wire:model="manualMarkEmployeeId" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                            <option value="">Seleccionar empleado</option>
+                            @foreach ($employees as $employee)
+                                <option value="{{ $employee->id }}">{{ $employee->full_name }} ({{ $employee->external_id }})</option>
+                            @endforeach
+                        </select>
+                        @error('manualMarkEmployeeId') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_work_date" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Fecha laboral</span>
+                        <input id="manual_mark_work_date" type="date" wire:model="manualMarkWorkDate" min="{{ $payPeriod->start_date->toDateString() }}" max="{{ $payPeriod->end_date->toDateString() }}" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                        @error('manualMarkWorkDate') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('work_date') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_event_at" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Fecha y hora reales</span>
+                        <input id="manual_mark_event_at" type="datetime-local" step="1" wire:model="manualMarkEventAt" class="mt-2 h-11 w-full rounded-xl border border-slate-300 px-3">
+                        @error('manualMarkEventAt') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('event_at') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label for="manual_mark_reason" class="block text-sm sm:col-span-2">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea id="manual_mark_reason" wire:model="manualMarkReason" rows="3" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Indique cómo se verificó el hecho faltante"></textarea>
+                        @error('manualMarkReason') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('reason') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                        @error('pay_period') <span class="mt-1 block text-sm text-rose-700">{{ $message }}</span> @enderror
+                    </label>
+
+                    <div class="flex justify-end gap-2 sm:col-span-2">
+                        <button type="button" wire:click="closeManualMarkModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Registrar marca real</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 
     @if ($showAttendanceExceptionModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
