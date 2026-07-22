@@ -13,6 +13,7 @@ use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -60,6 +61,23 @@ test('saveDraft sets pay period status to validating', function () {
     expect($payPeriod->fresh()->status)->toBe('validating');
 });
 
+test('saveDraft cannot overwrite a period processed after its initial status read', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('uploaded');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $disarmRace = simulateWorkflowProcessingRace($payPeriod, $raceTriggered);
+
+    $component->call('saveDraft')->assertHasNoErrors();
+    $disarmRace();
+
+    expect($raceTriggered)->toBeTrue();
+    expect($payPeriod->fresh()->status)->toBe('processed');
+});
+
 test('continueToReady sets status to ready when all marks are clean', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
@@ -86,6 +104,23 @@ test('continueToReady sets status to ready when all marks are clean', function (
         ->assertHasNoErrors();
 
     expect($payPeriod->fresh()->status)->toBe('ready');
+});
+
+test('continueToReady cannot overwrite a period processed after its initial status read', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $payPeriod]);
+    $raceTriggered = false;
+    $disarmRace = simulateWorkflowProcessingRace($payPeriod, $raceTriggered);
+
+    $component->call('continueToReady')->assertHasNoErrors();
+    $disarmRace();
+
+    expect($raceTriggered)->toBeTrue();
+    expect($payPeriod->fresh()->status)->toBe('processed');
 });
 
 test('continueToReady with pending marks opens confirmation modal and does not advance status', function () {
@@ -328,3 +363,39 @@ test('deleting a raw mark requires a reason and records the applied values', fun
         ->and($lastAudit['new_status'])->toBe('deleted')
         ->and($lastAudit['at'])->not->toBeEmpty();
 });
+
+function simulateWorkflowProcessingRace(PayPeriod $payPeriod, bool &$triggered): Closure
+{
+    $armed = true;
+    $reads = 0;
+
+    DB::connection()->beforeExecuting(function (string $query, array $bindings) use (&$armed, &$reads, &$triggered, $payPeriod): void {
+        if (! $armed || $triggered) {
+            return;
+        }
+
+        $normalizedQuery = strtolower(ltrim($query));
+        $targetsPeriod = str_contains($query, 'pay_periods')
+            && in_array($payPeriod->id, $bindings, true);
+
+        if (str_starts_with($normalizedQuery, 'select') && $targetsPeriod) {
+            $reads++;
+
+            if ($reads !== 3) {
+                return;
+            }
+        } elseif (! str_starts_with($normalizedQuery, 'update') || ! $targetsPeriod) {
+            return;
+        }
+
+        $triggered = true;
+
+        DB::table('pay_periods')
+            ->where('id', $payPeriod->id)
+            ->update(['status' => 'processed']);
+    });
+
+    return function () use (&$armed): void {
+        $armed = false;
+    };
+}
