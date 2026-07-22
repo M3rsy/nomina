@@ -80,7 +80,7 @@ test('reviewed overtime flows from readiness to exact payroll and export', funct
     $employee = processorEmployee($company);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
 
-    foreach (['2026-01-05 06:00:00', '2026-01-05 14:30:00'] as $eventAt) {
+    foreach (['2026-01-05 06:00:30', '2026-01-05 14:30:30'] as $eventAt) {
         RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
             ->forUploadedFile($file)->forEmployee($employee)->create([
                 'event_at' => $eventAt,
@@ -115,7 +115,9 @@ test('reviewed overtime flows from readiness to exact payroll and export', funct
     $path = app(PayrollExcelExporter::class)->export($payPeriod->fresh());
     $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
 
-    expect($result->worked_minutes)->toBe(510)
+    expect($result->entry_at->toDateTimeString())->toBe('2026-01-05 06:00:30')
+        ->and($result->exit_at->toDateTimeString())->toBe('2026-01-05 14:30:30')
+        ->and($result->worked_minutes)->toBe(510)
         ->and($result->scheduled_minutes)->toBe(480)
         ->and($result->recognized_minutes)->toBe(510)
         ->and($result->detected_overtime_minutes)->toBe(30)
