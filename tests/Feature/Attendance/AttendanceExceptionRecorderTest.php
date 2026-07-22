@@ -72,6 +72,36 @@ test('grants and revokes the complete server-calculated deficit', function () {
         ->and(AttendanceException::query()->count())->toBe(2);
 });
 
+test('grants and revokes an exact full-day no-mark deficit', function () {
+    $context = attendanceExceptionRecorderFixture(withMarks: false);
+    $recorder = app(AttendanceExceptionRecorder::class);
+
+    $granted = $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::GRANTED, 'Permiso de jornada completa', $context['actor'],
+    );
+    $paid = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'], $context['employee'], '2026-07-20',
+    );
+
+    expect($granted->segment_kind)->toBe('full_day_absence')
+        ->and($granted->minutes)->toBe(480)
+        ->and($paid->isJustified)->toBeTrue()
+        ->and($paid->recognizedMinutes)->toBe(480);
+
+    $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::REVOKED, 'Permiso revocado', $context['actor'],
+    );
+    $unpaid = app(PayrollShiftEvaluationResolver::class)->resolve(
+        $context['period'], $context['employee'], '2026-07-20',
+    );
+
+    expect($unpaid->isJustified)->toBeFalse()
+        ->and($unpaid->recognizedMinutes)->toBe(0)
+        ->and(AttendanceException::query()->count())->toBe(2);
+});
+
 test('requires a meaningful exception state change and reason', function (string $decision, string $reason) {
     $context = attendanceExceptionRecorderFixture();
 
@@ -140,7 +170,7 @@ test('blocks exceptions while the payroll period is locked', function (string $s
         ->and(AttendanceException::query()->count())->toBe(0);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
-function attendanceExceptionRecorderFixture(string $periodStatus = 'uploaded'): array
+function attendanceExceptionRecorderFixture(string $periodStatus = 'uploaded', bool $withMarks = true): array
 {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
@@ -158,13 +188,15 @@ function attendanceExceptionRecorderFixture(string $periodStatus = 'uploaded'): 
         'status' => $periodStatus,
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
-    $marks = collect(['2026-07-20 06:15:00', '2026-07-20 14:00:00'])->map(
-        fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($period)
-            ->forUploadedFile($file)->forEmployee($employee)->create([
-                'event_at' => $eventAt,
-                'status' => 'valid',
-            ]),
-    );
+    $marks = $withMarks
+        ? collect(['2026-07-20 06:15:00', '2026-07-20 14:00:00'])->map(
+            fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($period)
+                ->forUploadedFile($file)->forEmployee($employee)->create([
+                    'event_at' => $eventAt,
+                    'status' => 'valid',
+                ]),
+        )
+        : collect();
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
     $holiday = app(PayrollRules::class)->isHoliday($company, $occurrence->workDate);

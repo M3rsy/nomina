@@ -2,13 +2,11 @@
 
 use App\Models\AttendanceException;
 use App\Models\EmployeeScheduleAssignment;
-use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
-use App\Services\Attendance\FullDayAbsenceSnapshot;
 use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\ShiftOccurrence;
 use Carbon\CarbonImmutable;
@@ -106,7 +104,7 @@ test('credits only an exact granted attendance deficit', function () {
     $evaluator = app(PayrollShiftEvaluator::class);
     $withoutException = $evaluator->evaluate($occurrence, $analysis, collect());
     $granted = payrollAttendanceException($deficit, AttendanceException::GRANTED);
-    $withException = $evaluator->evaluate($occurrence, $analysis, collect(), null, collect([$granted]));
+    $withException = $evaluator->evaluate($occurrence, $analysis, collect(), collect([$granted]));
 
     expect($withoutException->scheduledMinutes)->toBe(480)
         ->and($withoutException->recognizedMinutes)->toBe(465)
@@ -121,12 +119,11 @@ test('credits only an exact granted attendance deficit', function () {
         ]);
 
     $granted->fingerprint = str_repeat('f', 64);
-    $stale = $evaluator->evaluate($occurrence, $analysis, collect(), null, collect([$granted]));
+    $stale = $evaluator->evaluate($occurrence, $analysis, collect(), collect([$granted]));
     $revoked = $evaluator->evaluate(
         $occurrence,
         $analysis,
         collect(),
-        null,
         collect([payrollAttendanceException($deficit, AttendanceException::REVOKED)]),
     );
 
@@ -165,16 +162,21 @@ test('keeps a scheduled day with no marks as an unpaid absence', function () {
         ->and($evaluation->recognizedMinutes)->toBe(0);
 });
 
-test('credits the configured scheduled minutes for a justified full-day absence', function () {
+test('credits a scheduled no-mark shift through an append-only attendance exception', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks();
-    $absence = (new JustifiedAbsence)->forceFill([
-        'reason' => 'permission',
-        ...FullDayAbsenceSnapshot::from($occurrence, $analysis)->attributes(),
-    ]);
+    $deficit = $analysis->deficits->sole();
+    $exception = payrollAttendanceException($deficit, AttendanceException::GRANTED);
 
-    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate(
+        $occurrence,
+        $analysis,
+        collect(),
+        collect([$exception]),
+    );
 
-    expect($evaluation->status)->toBe('processable')
+    expect($deficit->kind)->toBe('full_day_absence')
+        ->and($deficit->minutes)->toBe(480)
+        ->and($evaluation->status)->toBe('processable')
         ->and($evaluation->isAbsence)->toBeTrue()
         ->and($evaluation->isJustified)->toBeTrue()
         ->and($evaluation->unjustified)->toBeFalse()
@@ -183,27 +185,26 @@ test('credits the configured scheduled minutes for a justified full-day absence'
         ->and($evaluation->payableRates->ordinaryMinutes)->toBe(480);
 });
 
-test('does not credit a legacy absence without the current schedule snapshot', function () {
+test('keeps a revoked full-day attendance exception unpaid', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks();
-    $absence = (new JustifiedAbsence)->forceFill(['reason' => 'permission']);
+    $deficit = $analysis->deficits->sole();
+    $exception = payrollAttendanceException($deficit, AttendanceException::REVOKED);
 
-    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), collect([$exception]));
 
     expect($evaluation->isJustified)->toBeFalse()
         ->and($evaluation->recognizedMinutes)->toBe(0);
 });
 
-test('preserves scheduled rate bands for a justified overnight absence', function () {
+test('preserves scheduled rate bands for a granted overnight full-day exception', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks(
         scheduledStart: '18:00',
         scheduledEnd: '06:00',
     );
-    $absence = (new JustifiedAbsence)->forceFill([
-        'reason' => 'permission',
-        ...FullDayAbsenceSnapshot::from($occurrence, $analysis)->attributes(),
-    ]);
+    $deficit = $analysis->deficits->sole();
+    $exception = payrollAttendanceException($deficit, AttendanceException::GRANTED);
 
-    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), $absence);
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect(), collect([$exception]));
 
     expect($evaluation->status)->toBe('processable')
         ->and($evaluation->scheduledMinutes)->toBe(720)

@@ -4,7 +4,6 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceException;
 use App\Models\Employee;
-use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Services\PayrollRules;
@@ -27,19 +26,11 @@ class PayrollShiftEvaluationResolver
         CarbonInterface|string $workDate,
     ): PayrollShiftEvaluation {
         $review = $this->review($payPeriod, $employee, $workDate);
-        $date = $review->occurrence->workDate;
-        $absence = JustifiedAbsence::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('date', $date->toDateString())
-            ->first();
 
         return $this->shiftEvaluator->evaluate(
             $review->occurrence,
             $review->analysis,
             $review->currentDecisions,
-            $absence,
             $review->currentExceptions,
         );
     }

@@ -20,6 +20,7 @@ class AttendanceShiftAnalyzer
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
             $scheduledMinutes = 0;
             $scheduledRates = new BandSplit;
+            $deficits = collect();
 
             if ($occurrence->status === ShiftOccurrence::NO_MARKS
                 && $occurrence->scheduledStart !== null
@@ -47,6 +48,18 @@ class AttendanceShiftAnalyzer
                     false,
                     $isHoliday,
                 );
+
+                if (! $isHoliday
+                    && $occurrence->schedule?->is_working_day
+                    && $scheduledMinutes > 0) {
+                    $deficits->push(new AttendanceSegment(
+                        'full_day_absence',
+                        $occurrence->scheduledStart,
+                        $occurrence->scheduledEnd,
+                        $this->fingerprint($occurrence, $isHoliday),
+                        $scheduledRates,
+                    ));
+                }
             }
 
             return new AttendanceShiftAnalysis(
@@ -57,7 +70,7 @@ class AttendanceShiftAnalyzer
                 0,
                 $scheduledMinutes,
                 $scheduledRates,
-                collect(),
+                $deficits,
                 collect(),
                 $isHoliday,
             );

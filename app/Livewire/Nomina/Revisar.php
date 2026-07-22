@@ -4,14 +4,11 @@ namespace App\Livewire\Nomina;
 
 use App\Models\AttendanceException;
 use App\Models\Employee;
-use App\Models\JustifiedAbsence;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
-use App\Services\Attendance\AttendanceShiftAnalyzer;
-use App\Services\Attendance\FullDayAbsenceSnapshot;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
@@ -29,6 +26,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -155,11 +153,11 @@ class Revisar extends Component
     public function render()
     {
         $records = $this->queryRawMarks();
-        $summary = $this->summaryCounts();
         $employees = Employee::where('company_id', $this->payPeriod->company_id)
             ->orderBy('first_name')
             ->get();
         $faltas = $this->detectFaltas();
+        $summary = $this->summaryCounts($faltas);
         $isBlocked = $this->isBlocked();
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
@@ -544,93 +542,56 @@ class Revisar extends Component
         ]);
         $reason = $this->absenceReason;
 
-        $saved = DB::transaction(function () use ($employeeId, $date, $reason, $notes): bool {
-            $payPeriod = $this->lockMutablePayPeriod();
+        try {
+            $saved = DB::transaction(function () use ($employeeId, $date, $reason, $notes): bool {
+                $payPeriod = $this->lockMutablePayPeriod();
 
-            if ($payPeriod === null) {
-                return false;
+                if ($payPeriod === null) {
+                    return false;
+                }
+
+                $employee = Employee::withoutCompanyScope()
+                    ->where('company_id', $payPeriod->company_id)
+                    ->find($employeeId);
+
+                if ($employee === null) {
+                    return false;
+                }
+
+                $review = app(PayrollShiftEvaluationResolver::class)->review(
+                    $payPeriod,
+                    $employee,
+                    CarbonImmutable::parse($date)->startOfDay(),
+                );
+                $deficit = $review->analysis->deficits->firstWhere('kind', 'full_day_absence');
+
+                if ($deficit === null) {
+                    $this->addError('absenceReason', 'La falta debe corresponder a una jornada programada completa y vigente.');
+
+                    return false;
+                }
+
+                app(AttendanceExceptionRecorder::class)->decide(
+                    $payPeriod,
+                    $employee,
+                    $date,
+                    $deficit->key,
+                    AttendanceException::GRANTED,
+                    $notes ? sprintf('%s: %s', $reason, $notes) : $reason,
+                    Auth::user(),
+                );
+
+                return true;
+            });
+        } catch (ValidationException $exception) {
+            if ($exception->errors()['pay_period'] ?? false) {
+                return;
             }
 
-            $employee = Employee::withoutCompanyScope()
-                ->where('company_id', $payPeriod->company_id)
-                ->find($employeeId);
-
-            if ($employee === null) {
-                return false;
-            }
-
-            $day = CarbonImmutable::parse($date)->startOfDay();
-
-            if ($day->lt($payPeriod->start_date->startOfDay()) || $day->gt($payPeriod->end_date)) {
-                return false;
-            }
-
-            $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, $day);
-            $analysis = app(AttendanceShiftAnalyzer::class)->analyze(
-                $occurrence,
-                app(PayrollRules::class)->isHoliday($payPeriod->company, $day),
-            );
-
-            try {
-                $snapshot = FullDayAbsenceSnapshot::from($occurrence, $analysis);
-            } catch (InvalidArgumentException $exception) {
-                $this->addError('absenceReason', $exception->getMessage());
-
-                return false;
-            }
-
-            $absence = JustifiedAbsence::withoutCompanyScope()
-                ->where('company_id', $payPeriod->company_id)
-                ->where('pay_period_id', $payPeriod->id)
-                ->where('employee_id', $employeeId)
-                ->whereDate('date', $date)
-                ->lockForUpdate()
-                ->first();
-            $metadata = $absence?->metadata ?? [];
-            $metadata['revisions'] ??= [];
-            $metadata['revisions'][] = [
-                'action' => 'justify_full_day_absence',
-                'user_id' => Auth::id(),
-                'old_values' => $absence === null ? null : [
-                    'reason' => $absence->reason,
-                    'notes' => $absence->notes,
-                    'justified_by' => $absence->justified_by,
-                    'schedule_fingerprint' => $absence->schedule_fingerprint,
-                    'scheduled_start' => $absence->scheduled_start?->toIso8601String(),
-                    'scheduled_end' => $absence->scheduled_end?->toIso8601String(),
-                    'scheduled_minutes' => $absence->scheduled_minutes,
-                    'rate_minutes' => $absence->rate_minutes,
-                ],
-                'new_values' => [
-                    'reason' => $reason,
-                    'notes' => $notes ?: null,
-                    'justified_by' => Auth::id(),
-                    ...$snapshot->auditValues(),
-                ],
-                'at' => now()->toIso8601String(),
-            ];
-            $attributes = [
-                'reason' => $reason,
-                'notes' => $notes ?: null,
-                'justified_by' => Auth::id(),
-                ...$snapshot->attributes(),
-                'metadata' => $metadata,
-            ];
-
-            if ($absence === null) {
-                JustifiedAbsence::withoutCompanyScope()->create([
-                    'company_id' => $payPeriod->company_id,
-                    'pay_period_id' => $payPeriod->id,
-                    'employee_id' => $employeeId,
-                    'date' => $date,
-                    ...$attributes,
-                ]);
-            } else {
-                $absence->update($attributes);
-            }
-
-            return true;
-        });
+            throw $exception;
+        } catch (InvalidArgumentException) {
+            return;
+        }
 
         if (! $saved) {
             return;
@@ -1157,7 +1118,7 @@ class Revisar extends Component
             ->paginate(25);
     }
 
-    private function summaryCounts(): array
+    private function summaryCounts(Collection $faltas): array
     {
         $counts = RawMark::query()
             ->where('pay_period_id', $this->payPeriod->id)
@@ -1165,10 +1126,6 @@ class Revisar extends Component
             ->groupBy('status')
             ->pluck('count', 'status')
             ->toArray();
-
-        $justified = JustifiedAbsence::withoutCompanyScope()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->count();
 
         return [
             'total' => array_sum($counts),
@@ -1178,7 +1135,7 @@ class Revisar extends Component
             'unknown_employee' => $counts['unknown_employee'] ?? 0,
             'corrected' => $counts['corrected'] ?? 0,
             'deleted' => $counts['deleted'] ?? 0,
-            'justified' => $justified,
+            'justified' => $faltas->whereNotNull('attendance_exception')->count(),
         ];
     }
 
@@ -1190,10 +1147,7 @@ class Revisar extends Component
         $employees = Employee::withoutCompanyScope()
             ->where('company_id', $this->payPeriod->company_id)
             ->get();
-        $justified = JustifiedAbsence::withoutCompanyScope()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->get();
-        $occurrenceResolver = app(ShiftOccurrenceResolver::class);
+        $evaluationResolver = app(PayrollShiftEvaluationResolver::class);
         $faltas = collect();
 
         foreach ($employees as $employee) {
@@ -1204,36 +1158,25 @@ class Revisar extends Component
                     continue;
                 }
 
-                $dateString = $day->toDateString();
-                $occurrence = $occurrenceResolver->resolve($employee, $day);
+                $review = $evaluationResolver->review($this->payPeriod, $employee, $day);
+                $occurrence = $review->occurrence;
 
                 if (! $occurrence->schedule?->is_working_day
                     || $occurrence->status !== ShiftOccurrence::NO_MARKS) {
                     continue;
                 }
 
-                $justifiedAbsence = $justified->first(function ($absence) use ($employee, $dateString) {
-                    return $absence->employee_id === $employee->id && $absence->date->toDateString() === $dateString;
-                });
+                $deficit = $review->analysis->deficits->firstWhere('kind', 'full_day_absence');
+                $exception = $deficit === null ? null : $review->exceptionFor($deficit);
 
-                if ($justifiedAbsence !== null) {
-                    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
-
-                    try {
-                        $snapshot = FullDayAbsenceSnapshot::from($occurrence, $analysis);
-                    } catch (InvalidArgumentException) {
-                        $snapshot = null;
-                    }
-
-                    if ($snapshot === null || ! $snapshot->matches($justifiedAbsence)) {
-                        $justifiedAbsence = null;
-                    }
+                if ($exception?->decision !== AttendanceException::GRANTED) {
+                    $exception = null;
                 }
 
                 $faltas->push([
                     'employee' => $employee,
                     'date' => $day,
-                    'justified_absence' => $justifiedAbsence,
+                    'attendance_exception' => $exception,
                 ]);
             }
         }
