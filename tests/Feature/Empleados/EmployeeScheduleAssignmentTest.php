@@ -100,8 +100,48 @@ test('an assignment may start after a locked payroll period', function () {
         'status' => 'exported',
     ]);
 
-    $next = $assigner->assign($employee, $profiles[1], '2026-07-16', 'Cambio posterior');
+    $next = $assigner->assign($employee, $profiles[1], '2026-07-17', 'Cambio posterior');
 
-    expect($current->fresh()->effective_to?->toDateString())->toBe('2026-07-15')
-        ->and($next->effective_from->toDateString())->toBe('2026-07-16');
+    expect($current->fresh()->effective_to?->toDateString())->toBe('2026-07-16')
+        ->and($next->effective_from->toDateString())->toBe('2026-07-17');
+});
+
+test('an assignment cannot repartition the final work date of a locked payroll period', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profiles = WorkScheduleProfile::factory()->count(2)->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $current = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
+
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-20',
+        'status' => 'exported',
+    ]);
+
+    expect(fn () => $assigner->assign($employee, $profiles[1], '2026-07-21', 'Cambio inmediato'))
+        ->toThrow(ValidationException::class)
+        ->and($current->fresh()->effective_to)->toBeNull()
+        ->and($employee->scheduleAssignments()->count())->toBe(1);
+});
+
+test('a backdated assignment cannot repartition the first work date of a locked payroll period', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profiles = WorkScheduleProfile::factory()->count(3)->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $first = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
+    $next = $assigner->assign($employee, $profiles[2], '2026-08-01', 'Turno de agosto');
+
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-15',
+        'status' => 'exported',
+    ]);
+
+    expect(fn () => $assigner->assign($employee, $profiles[1], '2026-07-15', 'Cobertura retroactiva'))
+        ->toThrow(ValidationException::class)
+        ->and($first->fresh()->effective_to?->toDateString())->toBe('2026-07-31')
+        ->and($next->fresh()->effective_from->toDateString())->toBe('2026-08-01')
+        ->and($employee->scheduleAssignments()->count())->toBe(2);
 });
