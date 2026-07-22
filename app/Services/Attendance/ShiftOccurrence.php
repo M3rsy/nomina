@@ -33,6 +33,7 @@ class ShiftOccurrence
         public readonly ?CarbonImmutable $scheduledEnd,
         public readonly Collection $marks,
         public readonly string $status,
+        public readonly int $factGeneration = 0,
     ) {}
 
     public function entryMark(): ?RawMark

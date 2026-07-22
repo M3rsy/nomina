@@ -217,6 +217,7 @@ class AttendanceShiftAnalyzer
             json_encode($occurrence->schedule?->banding_json),
             $occurrence->workDate->toDateString(),
             $isHoliday ? 'holiday' : 'regular',
+            $occurrence->factGeneration,
             $occurrence->entryMark()?->id,
             $occurrence->entryMark()?->event_at?->toIso8601String(),
             $this->markRevisionGeneration($occurrence->entryMark()),

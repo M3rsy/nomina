@@ -151,6 +151,24 @@ test('changes candidate identity when holiday classification changes', function 
         ->and($holiday->rateMinutes->extra100Minutes)->toBe(30);
 });
 
+test('changes candidate identity when the attendance fact generation advances', function () {
+    $original = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:30:00',
+        factGeneration: 0,
+    ))->overtimeCandidates->sole();
+    $changed = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:30:00',
+        factGeneration: 1,
+    ))->overtimeCandidates->sole();
+
+    expect($changed->key)->not->toBe($original->key)
+        ->and($changed->fingerprint)->not->toBe($original->fingerprint);
+});
+
 test('uses the assigned schedule version rate bands', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         workDate: '2026-07-20',
@@ -234,6 +252,7 @@ function attendanceOccurrence(
     ?string $scheduledStart = '06:00',
     ?string $scheduledEnd = '14:00',
     ?array $bands = null,
+    int $factGeneration = 0,
 ): ShiftOccurrence {
     $date = CarbonImmutable::parse($workDate)->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -258,12 +277,13 @@ function attendanceOccurrence(
     }
 
     return new ShiftOccurrence(
-        $date,
-        $assignment,
-        $schedule,
-        $start,
-        $end,
-        collect([$entry, $exit]),
-        ShiftOccurrence::RESOLVED,
+        workDate: $date,
+        assignment: $assignment,
+        schedule: $schedule,
+        scheduledStart: $start,
+        scheduledEnd: $end,
+        marks: collect([$entry, $exit]),
+        status: ShiftOccurrence::RESOLVED,
+        factGeneration: $factGeneration,
     );
 }
