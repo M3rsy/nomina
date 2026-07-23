@@ -31,16 +31,20 @@ test('authenticated user with company_admin role is redirected to dashboard', fu
         ->assertRedirect(route('dashboard'));
 });
 
-test('authenticated user without privileged role reaches dashboard only to be redirected to login', function () {
+test('authenticated non-admin user is redirected to login from dashboard', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get(route('dashboard'))
+        ->assertRedirect(route('login'));
+});
+
+test('authenticated non-admin user is redirected to dashboard from root', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user)
         ->get('/')
         ->assertRedirect(route('dashboard'));
-
-    $this->actingAs($user)
-        ->get('/dashboard')
-        ->assertRedirect('/login');
 });
 
 test('guest sees landing hero and login call-to-action', function () {
@@ -63,5 +67,5 @@ test('guest sees operational modules cards', function () {
 });
 
 test('guest accessing dashboard is redirected to login', function () {
-    $this->get('/dashboard')->assertRedirect('/login');
+    $this->get('/dashboard')->assertRedirect(route('login'));
 });

@@ -1,30 +1,32 @@
 <x-auth.shell
-    eyebrow="Asistencia y nómina operacional"
+    eyebrow="Acceso inicial"
     heading="Gestioná asistencia y nómina desde un solo ingreso"
-    description="Entrá una sola vez para ver el panel que corresponde a tu rol y continuar con los módulos clave de operación."
+    description="Entrá una sola vez para llegar al panel que corresponde a tu rol y continuar con los módulos clave."
 >
-    <main class="space-y-8" aria-labelledby="welcome-page-title">
-        <header>
-            <p class="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Acceso inicial</p>
-            <h2 id="welcome-page-title" class="mt-2 text-2xl font-bold text-slate-900">Entrá y accedé al módulo que necesitás</h2>
-            <p class="mt-2 text-sm text-slate-600">Si ya tenés usuario, inicia sesión y te redirigimos al dashboard correcto.</p>
+    <main class="space-y-8">
+        <section aria-labelledby="welcome-page-title">
+            <header class="space-y-1">
+                <p class="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Ingreso</p>
+                <h2 id="welcome-page-title" class="mt-2 text-2xl font-bold text-slate-900">Entrá y accedé al módulo que necesites</h2>
+                <p class="mt-2 text-sm text-slate-600">Si ya tenés usuario, iniciá sesión y te redirigimos al panel correcto.</p>
 
-            <div class="mt-5 flex flex-wrap gap-3" role="navigation" aria-label="Acciones de acceso">
-                <a
-                    href="{{ route('login') }}"
-                    class="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                >
-                    Iniciar sesión
-                </a>
+                <nav class="mt-5 flex flex-wrap gap-3" aria-label="Acciones de acceso">
+                    <a
+                        href="{{ route('login') }}"
+                        class="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                    >
+                        Iniciar sesión
+                    </a>
 
-                <a
-                    href="{{ route('password.request') }}"
-                    class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                    Recuperar contraseña
-                </a>
-            </div>
-        </header>
+                    <a
+                        href="{{ route('password.request') }}"
+                        class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                        Recuperar contraseña
+                    </a>
+                </nav>
+            </header>
+        </section>
 
         <section aria-labelledby="modules-title">
             <h2 id="modules-title" class="text-lg font-semibold text-slate-900">Módulos disponibles</h2>
@@ -38,8 +40,9 @@
                         <a
                             href="{{ route('login') }}"
                             class="mt-4 inline-flex text-sm font-semibold text-indigo-700"
+                            aria-label="Ingresá para acceder a Asistencia y jornadas"
                         >
-                            Ir al login de asistencia y jornadas
+                            Acceder
                         </a>
                     </article>
                 </li>
@@ -51,8 +54,9 @@
                         <a
                             href="{{ route('login') }}"
                             class="mt-4 inline-flex text-sm font-semibold text-indigo-700"
+                            aria-label="Ingresá para acceder a Nómina"
                         >
-                            Ir al login de nómina
+                            Acceder
                         </a>
                     </article>
                 </li>
@@ -64,8 +68,9 @@
                         <a
                             href="{{ route('login') }}"
                             class="mt-4 inline-flex text-sm font-semibold text-indigo-700"
+                            aria-label="Ingresá para acceder a Feriados"
                         >
-                            Ir al login de feriados
+                            Acceder
                         </a>
                     </article>
                 </li>
@@ -77,8 +82,9 @@
                         <a
                             href="{{ route('login') }}"
                             class="mt-4 inline-flex text-sm font-semibold text-indigo-700"
+                            aria-label="Ingresá para acceder a Respaldos"
                         >
-                            Ir al login de respaldos
+                            Acceder
                         </a>
                     </article>
                 </li>
@@ -90,8 +96,9 @@
                         <a
                             href="{{ route('login') }}"
                             class="mt-4 inline-flex text-sm font-semibold text-indigo-700"
+                            aria-label="Ingresá para acceder a Usuarios y Empresa"
                         >
-                            Ir al login de usuarios y empresa
+                            Acceder
                         </a>
                     </article>
                 </li>
