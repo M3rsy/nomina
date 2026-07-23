@@ -22,10 +22,31 @@ test('authenticated user with super_admin role is redirected to dashboard', func
         ->assertRedirect(route('dashboard'));
 });
 
+test('authenticated user with company_admin role is redirected to dashboard', function () {
+    $user = User::factory()->forCompany()->create();
+    $user->assignRole('company_admin');
+
+    $this->actingAs($user)
+        ->get('/')
+        ->assertRedirect(route('dashboard'));
+});
+
+test('authenticated user without privileged role reaches dashboard only to be redirected to login', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get('/')
+        ->assertRedirect(route('dashboard'));
+
+    $this->actingAs($user)
+        ->get('/dashboard')
+        ->assertRedirect('/login');
+});
+
 test('guest sees landing hero and login call-to-action', function () {
     $this->get('/')
         ->assertOk()
-        ->assertSeeText('Sistema de planilla para gestionar tu operación')
+        ->assertSeeText('Gestioná asistencia y nómina desde un solo ingreso')
         ->assertSeeText('Iniciar sesión')
         ->assertSee(route('login'));
 });
@@ -39,4 +60,8 @@ test('guest sees operational modules cards', function () {
         ->assertSee('Respaldos')
         ->assertSee('Usuarios/Empresa')
         ->assertSee('Estado del sistema');
+});
+
+test('guest accessing dashboard is redirected to login', function () {
+    $this->get('/dashboard')->assertRedirect('/login');
 });
