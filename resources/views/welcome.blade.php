@@ -115,22 +115,22 @@
             <h2 id="system-health-title" class="text-lg font-semibold text-slate-900">Estado del sistema</h2>
             <p class="mt-1 text-sm text-slate-600">Indicadores estáticos para detectar si los servicios clave están disponibles.</p>
 
-            <dl class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <dl class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                     <dt class="text-sm font-semibold text-emerald-800">Base de datos</dt>
                     <dd class="mt-1 text-sm text-emerald-700">Verificación estática: <span class="font-semibold">verificado</span></dd>
-                </div>
+                </dl>
 
-                <div class="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <dl class="rounded-xl border border-blue-200 bg-blue-50 p-4">
                     <dt class="text-sm font-semibold text-blue-800">Storage</dt>
                     <dd class="mt-1 text-sm text-blue-700">Verificación estática: <span class="font-semibold">verificado</span></dd>
-                </div>
+                </dl>
 
-                <div class="rounded-xl border border-violet-200 bg-violet-50 p-4">
+                <dl class="rounded-xl border border-violet-200 bg-violet-50 p-4">
                     <dt class="text-sm font-semibold text-violet-800">Cache</dt>
                     <dd class="mt-1 text-sm text-violet-700">Verificación estática: <span class="font-semibold">verificado</span></dd>
-                </div>
-            </dl>
+                </dl>
+            </div>
 
             <div class="mt-4 flex flex-wrap gap-3">
                 <a
