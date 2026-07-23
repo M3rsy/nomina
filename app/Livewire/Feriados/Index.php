@@ -2,7 +2,9 @@
 
 namespace App\Livewire\Feriados;
 
+use App\Models\Company;
 use App\Models\Holiday;
+use App\Services\Attendance\HolidayCalendar;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -80,7 +82,7 @@ class Index extends Component
         $this->showCreateModal = true;
     }
 
-    public function save(): void
+    public function save(HolidayCalendar $calendar): void
     {
         $companyId = current_company_id();
 
@@ -108,7 +110,7 @@ class Index extends Component
 
             $this->authorize('update', $holiday);
 
-            $holiday->update([
+            $calendar->save(Company::query()->findOrFail($companyId), $holiday, [
                 'date' => $validated['formDate'],
                 'name' => $validated['formName'],
                 'description' => $validated['formDescription'] ?: null,
@@ -119,17 +121,12 @@ class Index extends Component
         } else {
             $this->authorize('create', Holiday::class);
 
-            Holiday::withoutCompanyScope()->updateOrCreate(
-                [
-                    'company_id' => $companyId,
-                    'date' => $validated['formDate'],
-                ],
-                [
-                    'name' => $validated['formName'],
-                    'description' => $validated['formDescription'] ?: null,
-                    'is_active' => $validated['formIsActive'],
-                ]
-            );
+            $calendar->save(Company::query()->findOrFail($companyId), null, [
+                'date' => $validated['formDate'],
+                'name' => $validated['formName'],
+                'description' => $validated['formDescription'] ?: null,
+                'is_active' => $validated['formIsActive'],
+            ]);
         }
 
         $this->showCreateModal = false;
@@ -143,7 +140,7 @@ class Index extends Component
         $this->confirmingDelete = true;
     }
 
-    public function delete(): void
+    public function delete(HolidayCalendar $calendar): void
     {
         $holiday = Holiday::withoutCompanyScope()->find($this->deleteId);
 
@@ -156,7 +153,7 @@ class Index extends Component
 
         $this->authorize('delete', $holiday);
 
-        $holiday->delete();
+        $calendar->delete($holiday);
 
         $this->confirmingDelete = false;
         $this->deleteId = null;
@@ -174,7 +171,7 @@ class Index extends Component
         $this->showCompanyToast = true;
     }
 
-    public function toggle(int $id): void
+    public function toggle(int $id, HolidayCalendar $calendar): void
     {
         $holiday = Holiday::withoutCompanyScope()->find($id);
 
@@ -184,7 +181,12 @@ class Index extends Component
 
         $this->authorize('update', $holiday);
 
-        $holiday->update(['is_active' => ! $holiday->is_active]);
+        $calendar->save(Company::query()->findOrFail($holiday->company_id), $holiday, [
+            'date' => $holiday->date,
+            'name' => $holiday->name,
+            'description' => $holiday->description,
+            'is_active' => ! $holiday->is_active,
+        ]);
     }
 
     public function resetForm(): void

@@ -2,9 +2,11 @@
 
 namespace App\Services\Payroll;
 
+use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\PayrollShiftEvaluation;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use Carbon\CarbonImmutable;
@@ -16,6 +18,7 @@ class PayrollProcessor
     public function __construct(
         private PayrollShiftEvaluationResolver $evaluationResolver,
         private PayPeriodRangeGuard $rangeGuard,
+        private HolidayCalendar $holidayCalendar,
     ) {}
 
     public function processPayPeriod(PayPeriod $payPeriod): PayrollProcessReport
@@ -23,10 +26,15 @@ class PayrollProcessor
         $report = new PayrollProcessReport;
 
         DB::transaction(function () use ($payPeriod, &$report) {
+            $company = Company::query()
+                ->whereKey($payPeriod->company_id)
+                ->lockForUpdate()
+                ->firstOrFail();
             $payPeriod = PayPeriod::withoutCompanyScope()
                 ->whereKey($payPeriod->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            $payPeriod->setRelation('company', $company);
 
             if ($payPeriod->status !== 'ready') {
                 throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
@@ -45,6 +53,7 @@ class PayrollProcessor
             $companyId = $payPeriod->company_id;
             $start = CarbonImmutable::parse($payPeriod->start_date);
             $end = CarbonImmutable::parse($payPeriod->end_date);
+            $calendarContext = $this->holidayCalendar->capture($company, $start, $end);
 
             $employees = Employee::withoutCompanyScope()
                 ->where('company_id', $companyId)
@@ -54,7 +63,7 @@ class PayrollProcessor
 
             for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
                 foreach ($employees as $employee) {
-                    $result = $this->evaluationResolver->resolve($payPeriod, $employee, $date);
+                    $result = $this->evaluationResolver->resolve($payPeriod, $employee, $date, $calendarContext);
 
                     if ($result->status === PayrollShiftEvaluation::BLOCKED) {
                         throw new PayrollProcessingBlocked([[
@@ -68,7 +77,15 @@ class PayrollProcessor
                         continue;
                     }
 
-                    $this->storeResult($payPeriod, $employee, $date, $result, $rulesVersion, $report);
+                    $this->storeResult(
+                        $payPeriod,
+                        $employee,
+                        $date,
+                        $result,
+                        $calendarContext->generation($date),
+                        $rulesVersion,
+                        $report,
+                    );
                     $report->daysProcessed++;
                 }
             }
@@ -94,6 +111,7 @@ class PayrollProcessor
         Employee $employee,
         CarbonImmutable $date,
         PayrollShiftEvaluation $result,
+        int $calendarGeneration,
         string $rulesVersion,
         PayrollProcessReport $report,
     ): void {
@@ -136,6 +154,7 @@ class PayrollProcessor
                 ? 'Justified absence: scheduled minutes paid.'
                 : ($result->unjustified ? 'Unjustified absence on scheduled working day.' : null),
             'rules_version' => $rulesVersion,
+            'calendar_generation' => $calendarGeneration,
             'metadata' => $result->metadata,
         ];
 

@@ -8,7 +8,6 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\Payroll\BandSplit;
-use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -20,7 +19,7 @@ class OvertimeDecisionRecorder
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceShiftAnalyzer $analyzer,
-        private PayrollRules $rules,
+        private HolidayCalendar $holidayCalendar,
     ) {}
 
     public function decide(
@@ -47,8 +46,13 @@ class OvertimeDecisionRecorder
         }
 
         $date = CarbonImmutable::parse($workDate)->startOfDay();
+        $calendarContext = $this->holidayCalendar->capture(
+            Company::query()->findOrFail($payPeriod->company_id),
+            $date,
+            $date,
+        );
 
-        return DB::transaction(function () use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor): OvertimeDecision {
+        return DB::transaction(function () use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor, $calendarContext): OvertimeDecision {
             $lockedPeriod = PayPeriod::withoutCompanyScope()
                 ->withTrashed()
                 ->whereKey($payPeriod->id)
@@ -68,7 +72,8 @@ class OvertimeDecisionRecorder
             $occurrence = $this->resolver->resolve($lockedEmployee, $date);
             $analysis = $this->analyzer->analyze(
                 $occurrence,
-                $this->rules->isHoliday($company, $date),
+                $calendarContext->isHoliday($date),
+                $calendarContext->generation($date),
             );
             $candidate = $analysis->overtimeCandidates->firstWhere('key', $candidateKey);
 
