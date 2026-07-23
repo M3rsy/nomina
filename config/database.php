@@ -11,12 +11,13 @@ $resolvedPgDumpBinaryPath = (function () {
 
         if (is_file($configuredPath) && is_executable($configuredPath)) {
             $dir = dirname($configuredPath);
+
             return $dir === '/' ? '/' : $dir.'/';
         }
 
         $candidateConfiguredPath = str_ends_with($configuredPath, '/')
             ? $configuredPath
-            : $configuredPath . '/';
+            : $configuredPath.'/';
 
         if (is_executable($candidateConfiguredPath.'pg_dump')) {
             return $candidateConfiguredPath;
@@ -69,7 +70,7 @@ $resolvedPgDumpBinaryPath = (function () {
     if ($commandPath !== '' && is_executable($commandPath)) {
         $dirname = dirname($commandPath);
 
-        return $dirname === '/' ? '/' : $dirname . '/';
+        return $dirname === '/' ? '/' : $dirname.'/';
     }
 
     return '';
@@ -172,6 +173,20 @@ return [
             'dump' => [
                 'dump_binary_path' => $resolvedPgDumpBinaryPath,
             ],
+        ],
+
+        'pgsql_testing' => [
+            'driver' => 'pgsql',
+            'host' => env('TEST_DB_HOST'),
+            'port' => env('TEST_DB_PORT'),
+            'database' => env('TEST_DB_DATABASE'),
+            'username' => env('TEST_DB_USERNAME'),
+            'password' => env('TEST_DB_PASSWORD'),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => 'prefer',
         ],
 
         'sqlsrv' => [

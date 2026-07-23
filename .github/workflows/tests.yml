@@ -50,3 +50,38 @@ jobs:
                   DB_DATABASE: ':memory:'
                   DB_URL: ''
               run: composer test
+
+    postgresql:
+        runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:15-alpine
+                env:
+                    POSTGRES_DB: nomina_test
+                    POSTGRES_USER: nomina_test
+                    POSTGRES_PASSWORD: nomina_test
+                ports:
+                    - 55432:5432
+                options: >-
+                    --health-cmd "pg_isready -U nomina_test -d nomina_test"
+                    --health-interval 1s
+                    --health-timeout 5s
+                    --health-retries 20
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.5'
+                  extensions: pdo_pgsql
+                  coverage: none
+            - run: composer install --no-interaction --prefer-dist
+            - run: cp .env.example .env && php artisan key:generate
+            - name: Run PostgreSQL races
+              env:
+                  TEST_DB_HOST: 127.0.0.1
+                  TEST_DB_PORT: 55432
+                  TEST_DB_DATABASE: nomina_test
+                  TEST_DB_USERNAME: nomina_test
+                  TEST_DB_PASSWORD: nomina_test
+                  NOMINA_ALLOW_DESTRUCTIVE_TEST_DATABASE: nomina_test@postgresql-v1
+              run: ./vendor/bin/pest -c phpunit.postgresql.xml
