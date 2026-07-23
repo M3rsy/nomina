@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollShiftEvaluation;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
@@ -55,6 +56,33 @@ test('approves exactly the server-calculated candidate in integer minutes', func
         ->and($decision->reason)->toBe('Cobertura extraordinaria confirmada')
         ->and($decision->decider->is($context['actor']))->toBeTrue()
         ->and($decision->supersedes_id)->toBeNull();
+});
+
+test('records a candidate from the current holiday calendar generation', function () {
+    $context = overtimeDecisionFixture();
+    app(HolidayCalendar::class)->save($context['company'], null, [
+        'date' => '2026-07-20',
+        'name' => 'Inactive calendar revision',
+        'description' => null,
+        'is_active' => false,
+    ]);
+    $candidate = app(PayrollShiftEvaluationResolver::class)
+        ->review($context['period'], $context['employee'], '2026-07-20')
+        ->analysis
+        ->overtimeCandidates
+        ->sole();
+
+    $decision = app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+        $candidate->key,
+        OvertimeDecision::APPROVED,
+        'Calendar revision acknowledged',
+        $context['actor'],
+    );
+
+    expect($decision->fingerprint)->toBe($candidate->fingerprint);
 });
 
 test('changes a decision by appending a superseding audit record', function () {

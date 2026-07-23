@@ -43,6 +43,7 @@ class PayrollResult extends Model
         'unjustified',
         'notes',
         'rules_version',
+        'calendar_generation',
         'metadata',
     ];
 
@@ -73,6 +74,7 @@ class PayrollResult extends Model
             'is_absence' => 'boolean',
             'is_justified' => 'boolean',
             'unjustified' => 'boolean',
+            'calendar_generation' => 'integer',
             'metadata' => 'array',
         ];
     }

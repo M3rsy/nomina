@@ -11,6 +11,7 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
@@ -30,6 +31,27 @@ test('reports a pending whole-segment overtime candidate with employee and work 
         ->and($blocker['work_date'])->toBe('2026-01-05')
         ->and($blocker['code'])->toBe('pending_overtime_candidate')
         ->and($blocker['candidate_key'])->not->toBeEmpty();
+});
+
+test('readiness can reuse a context captured before its pay period transaction', function () {
+    $context = readinessFixture(['2026-01-05 06:00:00', '2026-01-05 14:30:00']);
+    $calendar = app(HolidayCalendar::class);
+    $captured = $calendar->capture($context['company'], '2026-01-05');
+    $calendar->save($context['company'], null, [
+        'date' => '2026-01-05',
+        'name' => 'Later inactive revision',
+        'description' => null,
+        'is_active' => false,
+    ]);
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($context['employee'], '2026-01-05');
+    $capturedCandidate = app(AttendanceShiftAnalyzer::class)
+        ->analyze($occurrence, false, 0)
+        ->overtimeCandidates
+        ->sole();
+
+    $blocker = app(PayrollReadinessChecker::class)->blockers($context['period'], $captured)->sole();
+
+    expect($blocker['candidate_key'])->toBe($capturedCandidate->key);
 });
 
 test('a rejected complete candidate is reviewed and no longer blocks readiness', function () {

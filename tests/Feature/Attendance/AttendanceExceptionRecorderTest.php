@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
@@ -70,6 +71,33 @@ test('grants and revokes the complete server-calculated deficit', function () {
         ->and($granted->fresh()->decision)->toBe(AttendanceException::GRANTED)
         ->and(AttendanceException::current()->sole()->is($revoked))->toBeTrue()
         ->and(AttendanceException::query()->count())->toBe(2);
+});
+
+test('records a deficit from the current holiday calendar generation', function () {
+    $context = attendanceExceptionRecorderFixture();
+    app(HolidayCalendar::class)->save($context['company'], null, [
+        'date' => '2026-07-20',
+        'name' => 'Inactive calendar revision',
+        'description' => null,
+        'is_active' => false,
+    ]);
+    $deficit = app(PayrollShiftEvaluationResolver::class)
+        ->review($context['period'], $context['employee'], '2026-07-20')
+        ->analysis
+        ->deficits
+        ->sole();
+
+    $exception = app(AttendanceExceptionRecorder::class)->decide(
+        $context['period'],
+        $context['employee'],
+        '2026-07-20',
+        $deficit->key,
+        AttendanceException::GRANTED,
+        'Calendar revision acknowledged',
+        $context['actor'],
+    );
+
+    expect($exception->fingerprint)->toBe($deficit->fingerprint);
 });
 
 test('grants and revokes an exact full-day no-mark deficit', function () {
