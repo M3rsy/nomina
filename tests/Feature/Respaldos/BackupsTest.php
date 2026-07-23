@@ -211,6 +211,52 @@ test('super admin can generate backup', function () {
         ->assertSee('Respaldo generado correctamente');
 });
 
+test('super admin sees error when backup command exits with non-zero code', function () {
+    Storage::fake('backups');
+    config(['backup.enabled' => true]);
+    $failureOutput = 'Backup command failed: permission denied';
+
+    Artisan::shouldReceive('call')
+        ->once()
+        ->with('backup:run', ['--disable-notifications' => true])
+        ->andReturn(1);
+    Artisan::shouldReceive('output')->andReturn($failureOutput);
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+
+    Livewire::actingAs($super)
+        ->test(Index::class)
+        ->call('generate')
+        ->assertSee('Error al generar el respaldo')
+        ->assertSee($failureOutput);
+});
+
+test('successful generation result appears in rendered backup list', function () {
+    Storage::fake('backups');
+    config(['backup.enabled' => true]);
+
+    $generatedFile = 'nomina-generated.zip';
+
+    Artisan::shouldReceive('call')
+        ->once()
+        ->with('backup:run', ['--disable-notifications' => true])
+        ->andReturnUsing(function () use ($generatedFile) {
+            Storage::disk('backups')->put($generatedFile, 'fake-backup');
+
+            return 0;
+        });
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+
+    Livewire::actingAs($super)
+        ->test(Index::class)
+        ->call('generate')
+        ->assertSee('Respaldo generado correctamente')
+        ->assertSee($generatedFile);
+});
+
 test('denied generation does not call Artisan or mutate backup storage', function () {
     Storage::fake('backups');
     $path = 'existing-global-backup.zip';

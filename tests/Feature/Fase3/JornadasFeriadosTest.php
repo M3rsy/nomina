@@ -228,6 +228,35 @@ test('company admin can create a holiday for own company', function () {
     expect(Holiday::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(1);
 });
 
+test('holiday creation button requires a company and shows toast when missing', function () {
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set(null);
+
+    Livewire::actingAs($superAdmin)
+        ->test(HolidaysIndex::class)
+        ->call('openCreateModal')
+        ->assertSet('showCompanyToast', true)
+        ->assertSet('companyToastMessage', 'Seleccioná una empresa para gestionar feriados.')
+        ->assertSet('showCreateModal', false);
+});
+
+test('saving a holiday requires a company and shows toast message', function () {
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set(null);
+
+    Livewire::actingAs($superAdmin)
+        ->test(HolidaysIndex::class)
+        ->set('formDate', '2026-12-25')
+        ->set('formName', 'Navidad')
+        ->set('formDescription', 'Feriado nacional')
+        ->call('save')
+        ->assertSet('showCompanyToast', true)
+        ->assertSet('companyToastMessage', 'Seleccioná una empresa antes de guardar.')
+        ->assertSet('showCreateModal', false);
+});
+
 test('work schedule seeder creates seven rows per company', function () {
     $company = Company::factory()->create();
 

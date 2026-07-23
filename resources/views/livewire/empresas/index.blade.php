@@ -85,7 +85,8 @@
                                 <td class="px-4 py-3.5 text-sm text-slate-700">{{ $company->slug }}</td>
                                 <td class="px-4 py-3.5 text-sm text-slate-700">{{ $company->legal_id }}</td>
                                 <td class="px-4 py-3.5 text-sm">
-                                    <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold {{ $company->is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-600' }}">
+                                    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium leading-5 {{ $company->is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700' }}">
+                                        <span class="h-2 w-2 rounded-full {{ $company->is_active ? 'bg-emerald-500' : 'bg-rose-500' }}"></span>
                                         {{ $company->is_active ? 'Activa' : 'Inactiva' }}
                                     </span>
                                 </td>

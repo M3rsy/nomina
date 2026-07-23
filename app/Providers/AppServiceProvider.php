@@ -20,6 +20,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CurrentCompany::class, function (): CurrentCompany {
             return new CurrentCompany;
         });
+
+        if ($this->shouldUseFileCacheForMaintenanceCommands()) {
+            config(['cache.default' => 'file']);
+        }
     }
 
     public static function canManageGlobalBackups(User $user): bool
@@ -40,5 +44,64 @@ class AppServiceProvider extends ServiceProvider
                 $view->with(app(AppLayout::class)->data());
             }
         });
+    }
+
+    private function shouldUseFileCacheForMaintenanceCommands(): bool
+    {
+        if (! $this->app->runningInConsole()) {
+            return false;
+        }
+
+        if (extension_loaded('pdo_pgsql')) {
+            return false;
+        }
+
+        if (! $this->isDockerOrCiContext()) {
+            return false;
+        }
+
+        if (! $this->isMaintenanceCommand()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function isDockerOrCiContext(): bool
+    {
+        if (file_exists('/.dockerenv')) {
+            return true;
+        }
+
+        $environmentFlags = [
+            env('CI'),
+            env('GITHUB_ACTIONS'),
+            env('GITLAB_CI'),
+            env('TRAVIS'),
+            env('CIRCLECI'),
+            env('BUILDKITE'),
+            env('DRONE'),
+        ];
+
+        foreach ($environmentFlags as $flag) {
+            if (is_string($flag) && filter_var($flag, FILTER_VALIDATE_BOOLEAN)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isMaintenanceCommand(): bool
+    {
+        $command = $_SERVER['argv'][1] ?? null;
+
+        return is_string($command)
+            && in_array($command, [
+                'cache:clear',
+                'config:clear',
+                'route:clear',
+                'view:clear',
+            ], true);
     }
 }

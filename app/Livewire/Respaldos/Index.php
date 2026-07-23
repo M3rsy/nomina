@@ -40,7 +40,20 @@ class Index extends Component
         }
 
         try {
-            Artisan::call('backup:run', ['--disable-notifications' => true]);
+            $exitCode = Artisan::call('backup:run', ['--disable-notifications' => true]);
+
+            if ($exitCode !== 0) {
+                $commandOutput = trim(Artisan::output());
+                $this->message = 'Error al generar el respaldo: '.($commandOutput !== '' ? $commandOutput : "código {$exitCode}");
+                $this->messageType = 'danger';
+
+                Log::warning('Backup generation reported error', [
+                    'exit_code' => $exitCode,
+                    'output' => $commandOutput,
+                ]);
+
+                return;
+            }
 
             $this->message = 'Respaldo generado correctamente.';
             $this->messageType = 'success';
@@ -96,7 +109,9 @@ class Index extends Component
             ->sortByDesc('modified')
             ->values();
 
-        return view('livewire.respaldos.index', [
+        $viewPath = resource_path('views/livewire/respaldos/index.blade.php');
+
+        return view()->file($viewPath, [
             'files' => $files,
             'canRestore' => auth()->user()->can('backups.restore'),
         ]);
