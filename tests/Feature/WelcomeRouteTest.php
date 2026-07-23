@@ -36,6 +36,7 @@ test('authenticated non-admin user is redirected to login from dashboard', funct
 
     $this->actingAs($user)
         ->get(route('dashboard'))
+        ->assertStatus(302)
         ->assertRedirect(route('login'));
 });
 
@@ -44,7 +45,23 @@ test('authenticated non-admin user is redirected to dashboard from root', functi
 
     $this->actingAs($user)
         ->get('/')
+        ->assertStatus(302)
         ->assertRedirect(route('dashboard'));
+});
+
+test('authenticated non-admin users follow a stable dashboard entry path', function () {
+    $user = User::factory()->create();
+
+    $rootResponse = $this->actingAs($user)->get('/');
+    $rootResponse->assertStatus(302);
+    $rootResponse->assertRedirect(route('dashboard'));
+
+    $dashboardResponse = $this->actingAs($user)->get(route('dashboard'));
+    $dashboardResponse->assertStatus(302);
+    $dashboardResponse->assertRedirect(route('login'));
+
+    $this->assertSame(route('dashboard'), $rootResponse->headers->get('Location'));
+    $this->assertSame(route('login'), $dashboardResponse->headers->get('Location'));
 });
 
 test('guest sees landing hero and login call-to-action', function () {

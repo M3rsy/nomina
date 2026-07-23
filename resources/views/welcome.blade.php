@@ -1,36 +1,42 @@
 <x-auth.shell
     eyebrow="Acceso inicial"
     heading="Gestioná asistencia y nómina desde un solo ingreso"
-    description="Entrá una sola vez para llegar al panel que corresponde a tu rol y continuar con los módulos clave."
+    description="Ingresá con tu cuenta y accedé al panel correcto para tu rol."
 >
-    <main class="space-y-8">
+    <main class="space-y-8" aria-labelledby="welcome-page-title">
         <section aria-labelledby="welcome-page-title">
             <header class="space-y-1">
                 <p class="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Ingreso</p>
-                <h2 id="welcome-page-title" class="mt-2 text-2xl font-bold text-slate-900">Entrá y accedé al módulo que necesites</h2>
-                <p class="mt-2 text-sm text-slate-600">Si ya tenés usuario, iniciá sesión y te redirigimos al panel correcto.</p>
+                <h2 id="welcome-page-title" class="mt-2 text-2xl font-bold text-slate-900">Entrá y accedé al panel que te toque</h2>
+                <p class="mt-2 text-sm text-slate-600">Si ya tenés usuario, iniciá sesión y te redirigimos al panel para tu rol.</p>
 
                 <nav class="mt-5 flex flex-wrap gap-3" aria-label="Acciones de acceso">
-                    <a
-                        href="{{ route('login') }}"
-                        class="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                    >
-                        Iniciar sesión
-                    </a>
+                    <ul class="flex flex-wrap gap-3">
+                        <li>
+                            <a
+                                href="{{ route('login') }}"
+                                class="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                            >
+                                Iniciar sesión
+                            </a>
+                        </li>
 
-                    <a
-                        href="{{ route('password.request') }}"
-                        class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                    >
-                        Recuperar contraseña
-                    </a>
+                        <li>
+                            <a
+                                href="{{ route('password.request') }}"
+                                class="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                            >
+                                Recuperar contraseña
+                            </a>
+                        </li>
+                    </ul>
                 </nav>
             </header>
         </section>
 
         <section aria-labelledby="modules-title">
             <h2 id="modules-title" class="text-lg font-semibold text-slate-900">Módulos disponibles</h2>
-            <p class="mt-1 text-sm text-slate-600">Qué podés gestionar desde la plataforma, previa autenticación.</p>
+            <p class="mt-1 text-sm text-slate-600">Qué podés gestionar desde la plataforma una vez autenticado.</p>
 
             <ul class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <li>
@@ -107,6 +113,7 @@
 
         <section aria-labelledby="system-health-title">
             <h2 id="system-health-title" class="text-lg font-semibold text-slate-900">Estado del sistema</h2>
+            <p class="mt-1 text-sm text-slate-600">Indicadores estáticos para detectar si los servicios clave están disponibles.</p>
 
             <dl class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
