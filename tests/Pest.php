@@ -1,5 +1,6 @@
 <?php
 
+use Tests\Concerns\DatabaseMigrationsSafely;
 use Tests\Concerns\RefreshDatabaseSafely;
 use Tests\TestCase;
 
@@ -18,6 +19,8 @@ uses(
     TestCase::class,
     RefreshDatabaseSafely::class,
 )->in('Feature');
+
+uses(TestCase::class, DatabaseMigrationsSafely::class)->in('PostgreSQL');
 
 /*
 |--------------------------------------------------------------------------

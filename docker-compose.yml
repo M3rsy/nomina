@@ -39,6 +39,25 @@ services:
         networks:
             - nomina
 
+    nomina-test-db:
+        image: postgres:15-alpine
+        profiles: [testing]
+        environment:
+            POSTGRES_DB: nomina_test
+            POSTGRES_USER: nomina_test
+            POSTGRES_PASSWORD: nomina_test
+        ports:
+            - "127.0.0.1:55432:5432"
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: [CMD-SHELL, "pg_isready -U nomina_test -d nomina_test"]
+            interval: 1s
+            timeout: 5s
+            retries: 20
+        networks:
+            - nomina
+
 volumes:
     nomina-db-data:
 

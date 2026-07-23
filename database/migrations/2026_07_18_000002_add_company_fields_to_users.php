@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->foreignId('company_id')->nullable()->constrained()->onDelete('set null')->index()->after('email_verified_at');
+            $table->foreignId('company_id')->nullable()->index()->constrained()->onDelete('set null')->after('email_verified_at');
             $table->boolean('is_active')->default(true)->after('company_id');
             $table->timestamp('password_changed_at')->nullable()->after('is_active');
         });

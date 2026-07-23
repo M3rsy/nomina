@@ -4,8 +4,53 @@ use Tests\Concerns\RefreshDatabaseSafely;
 use Tests\Support\DatabaseIsolationGuard;
 
 it('accepts the isolated in-memory SQLite identity', function () {
-    expect(fn () => DatabaseIsolationGuard::assertIsolated('sqlite', ':memory:'))
+    expect(fn () => DatabaseIsolationGuard::assertConfiguration(
+        'testing',
+        'sqlite',
+        ['driver' => 'sqlite', 'database' => ':memory:'],
+        null,
+    ))
         ->not->toThrow(RuntimeException::class);
+});
+
+it('accepts only the dedicated PostgreSQL test configuration', function () {
+    $safe = [
+        'driver' => 'pgsql',
+        'host' => '127.0.0.1',
+        'port' => '55432',
+        'database' => 'nomina_test',
+        'username' => 'nomina_test',
+    ];
+
+    expect(fn () => DatabaseIsolationGuard::assertConfiguration(
+        'testing',
+        'pgsql_testing',
+        $safe,
+        'nomina_test@postgresql-v1',
+    ))->not->toThrow(RuntimeException::class);
+
+    foreach ([
+        'environment' => ['local', 'pgsql_testing', $safe, 'nomina_test@postgresql-v1'],
+        'connection' => ['testing', 'pgsql', $safe, 'nomina_test@postgresql-v1'],
+        'driver' => ['testing', 'pgsql_testing', array_replace($safe, ['driver' => 'sqlite']), 'nomina_test@postgresql-v1'],
+        'url' => ['testing', 'pgsql_testing', $safe + ['url' => 'postgresql://nomina@nomina-db/nomina'], 'nomina_test@postgresql-v1'],
+        'development endpoint' => ['testing', 'pgsql_testing', array_replace($safe, ['host' => 'nomina-db', 'port' => '5432']), 'nomina_test@postgresql-v1'],
+        'development database' => ['testing', 'pgsql_testing', array_replace($safe, ['database' => 'nomina']), 'nomina_test@postgresql-v1'],
+        'development role' => ['testing', 'pgsql_testing', array_replace($safe, ['username' => 'nomina']), 'nomina_test@postgresql-v1'],
+        'token' => ['testing', 'pgsql_testing', $safe, 'wrong'],
+    ] as $arguments) {
+        expect(fn () => DatabaseIsolationGuard::assertConfiguration(...$arguments))
+            ->toThrow(RuntimeException::class);
+    }
+});
+
+it('accepts only the live dedicated PostgreSQL identity', function () {
+    expect(fn () => DatabaseIsolationGuard::assertLiveIdentity('nomina_test', 'nomina_test'))
+        ->not->toThrow(RuntimeException::class)
+        ->and(fn () => DatabaseIsolationGuard::assertLiveIdentity('nomina', 'nomina_test'))
+        ->toThrow(RuntimeException::class)
+        ->and(fn () => DatabaseIsolationGuard::assertLiveIdentity('nomina_test', 'nomina'))
+        ->toThrow(RuntimeException::class);
 });
 
 it('forces the canonical identity over inherited process variables', function () {
