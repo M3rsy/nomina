@@ -1,4 +1,36 @@
 <div class="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
+    <div
+        x-data="{ hideCompanyToastTimer: null }"
+        x-show="$wire.showCompanyToast"
+        x-effect="
+            if (! $wire.showCompanyToast) {
+                clearTimeout(hideCompanyToastTimer);
+                hideCompanyToastTimer = null;
+
+                return;
+            }
+
+            clearTimeout(hideCompanyToastTimer);
+            hideCompanyToastTimer = setTimeout(() => $wire.call('hideCompanyToast'), 3800);
+        "
+        x-transition.opacity
+        x-cloak
+        class="fixed top-4 right-4 z-[1000] flex max-w-sm rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm"
+        role="alert"
+        aria-live="assertive"
+    >
+        <div class="flex items-start justify-between gap-3">
+            <p class="font-medium">{{ $companyToastMessage }}</p>
+            <button
+                type="button"
+                wire:click="hideCompanyToast"
+                class="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-200"
+            >
+                Cerrar
+            </button>
+        </div>
+    </div>
+
     <div class="mx-auto max-w-7xl space-y-5">
         <header class="rounded-3xl border border-slate-200/70 bg-white/90 p-5 shadow-sm backdrop-blur sm:p-6">
             <div class="flex flex-wrap items-start justify-between gap-4">
@@ -13,7 +45,8 @@
                 @can('holidays.manage')
                     <button
                         wire:click="openCreateModal"
-                        class="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                        @disabled(!$hasCompany)
+                        class="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                     >
                         Crear feriado
                     </button>

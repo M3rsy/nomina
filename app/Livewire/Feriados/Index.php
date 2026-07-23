@@ -28,6 +28,10 @@ class Index extends Component
 
     public bool $formIsActive = true;
 
+    public bool $showCompanyToast = false;
+
+    public string $companyToastMessage = '';
+
     public bool $confirmingDelete = false;
 
     public ?int $deleteId = null;
@@ -39,6 +43,13 @@ class Index extends Component
 
     public function openCreateModal(): void
     {
+        if (current_company_id() === null) {
+            $this->emitCompanyToast('Seleccioná una empresa para gestionar feriados.');
+
+            return;
+        }
+
+        $this->hideCompanyToast();
         $this->authorize('create', Holiday::class);
 
         $this->resetForm();
@@ -74,8 +85,12 @@ class Index extends Component
         $companyId = current_company_id();
 
         if ($companyId === null) {
+            $this->emitCompanyToast('Seleccioná una empresa antes de guardar.');
+
             return;
         }
+
+        $this->hideCompanyToast();
 
         $validated = $this->validate([
             'formDate' => ['required', 'date'],
@@ -145,6 +160,18 @@ class Index extends Component
 
         $this->confirmingDelete = false;
         $this->deleteId = null;
+    }
+
+    public function hideCompanyToast(): void
+    {
+        $this->showCompanyToast = false;
+        $this->companyToastMessage = '';
+    }
+
+    private function emitCompanyToast(string $message): void
+    {
+        $this->companyToastMessage = $message;
+        $this->showCompanyToast = true;
     }
 
     public function toggle(int $id): void

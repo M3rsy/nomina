@@ -3,6 +3,78 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+$resolvedPgDumpBinaryPath = (function () {
+    $configuredPath = trim((string) env('PG_DUMP_BINARY_PATH', ''));
+
+    if ($configuredPath !== '') {
+        $configuredPath = str_replace('\\', '/', $configuredPath);
+
+        if (is_file($configuredPath) && is_executable($configuredPath)) {
+            $dir = dirname($configuredPath);
+            return $dir === '/' ? '/' : $dir.'/';
+        }
+
+        $candidateConfiguredPath = str_ends_with($configuredPath, '/')
+            ? $configuredPath
+            : $configuredPath . '/';
+
+        if (is_executable($candidateConfiguredPath.'pg_dump')) {
+            return $candidateConfiguredPath;
+        }
+
+        // Explicit value is not valid, keep searching default paths.
+    }
+
+    $candidatePaths = [
+        '/usr/local/bin/',
+        '/usr/bin/',
+        '/bin/',
+        '/usr/sbin/',
+        '/sbin/',
+        '/opt/homebrew/bin/',
+        '/opt/postgresql/bin/',
+        '/usr/lib/postgresql/bin/',
+        '/usr/local/pgsql/bin/',
+    ];
+
+    foreach ($candidatePaths as $candidatePath) {
+        if (is_executable($candidatePath.'pg_dump')) {
+            return $candidatePath;
+        }
+    }
+
+    $candidateGlobPatterns = [
+        '/usr/pgsql-*/bin/',
+        '/usr/local/pgsql-*/bin/',
+        '/opt/pgsql-*/bin/',
+        '/opt/postgresql-*/bin/',
+        '/usr/lib/postgresql/*/bin/',
+    ];
+
+    foreach ($candidateGlobPatterns as $pattern) {
+        $matches = glob($pattern.'pg_dump');
+        if ($matches === false) {
+            continue;
+        }
+
+        foreach ($matches as $candidatePath) {
+            if (is_executable($candidatePath)) {
+                return dirname($candidatePath).'/';
+            }
+        }
+    }
+
+    $commandPath = trim((string) shell_exec('command -v pg_dump 2>/dev/null'));
+
+    if ($commandPath !== '' && is_executable($commandPath)) {
+        $dirname = dirname($commandPath);
+
+        return $dirname === '/' ? '/' : $dirname . '/';
+    }
+
+    return '';
+})();
+
 return [
 
     /*
@@ -97,6 +169,9 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'dump' => [
+                'dump_binary_path' => $resolvedPgDumpBinaryPath,
+            ],
         ],
 
         'sqlsrv' => [
