@@ -140,6 +140,25 @@ test('company admin cannot download excel export of other company', function () 
         ->assertForbidden();
 });
 
+test('super admin cannot download excel export outside active company', function () {
+    $activeCompany = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $otherPayPeriod = PayPeriod::factory()->forCompany($otherCompany)->create([
+        'start_date' => '2026-03-01',
+        'end_date' => '2026-03-15',
+        'status' => 'approved',
+    ]);
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set($activeCompany);
+
+    $this->actingAs($superAdmin)
+        ->get("/nomina/{$otherPayPeriod->id}/excel")
+        ->assertForbidden();
+
+    expect($otherPayPeriod->fresh()->status)->toBe('approved');
+});
+
 test('user without payroll export permission cannot download excel', function () {
     [$company, $payPeriod, $employee, $admin] = setupExportScenario('processed');
     $admin->roles->first()->revokePermissionTo('payroll.export');

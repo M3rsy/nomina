@@ -105,3 +105,15 @@ test('comprobante download rejects access to other company pay period', function
         ->get("/nomina/{$payPeriodB->id}/empleado/{$employeeB->id}/comprobante")
         ->assertForbidden();
 });
+
+test('super admin cannot download comprobante outside active company', function () {
+    [, $otherPayPeriod, $otherEmployee] = setupStubScenario();
+    $activeCompany = Company::factory()->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set($activeCompany);
+
+    $this->actingAs($superAdmin)
+        ->get("/nomina/{$otherPayPeriod->id}/empleado/{$otherEmployee->id}/comprobante")
+        ->assertForbidden();
+});
