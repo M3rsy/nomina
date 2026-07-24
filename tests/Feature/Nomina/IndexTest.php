@@ -6,6 +6,7 @@ use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\Gate;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -94,19 +95,14 @@ test('company admin cannot view nomina index of other company', function () {
         ->assertDontSee('Empresa B');
 });
 
-test('super admin without active company sees empty nomina index', function () {
-    $company = Company::factory()->create();
-    PayPeriod::factory()->forCompany($company)->create(['name' => 'Hidden period']);
+test('super admin without active company cannot view nomina index', function () {
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     app(CurrentCompany::class)->set(null);
 
-    $this->actingAs($superAdmin);
-
-    Livewire::test(Index::class)
-        ->assertSee('Seleccioná una empresa activa')
-        ->assertDontSee('Hidden period')
-        ->assertDontSee('Pagination Navigation');
+    $this->actingAs($superAdmin)
+        ->get('/nomina')
+        ->assertForbidden();
 });
 
 test('create period control is enabled and connected to the inline form', function () {
@@ -199,23 +195,19 @@ test('super admin creates a period only for the selected active company', functi
         ->and($payPeriod->status)->toBe('draft');
 });
 
-test('super admin without an active company cannot create a period', function () {
+test('super admin without an active company cannot access period creation', function () {
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     $this->actingAs($superAdmin);
     app(CurrentCompany::class)->set(null);
 
-    Livewire::test(Index::class)
-        ->set('name', 'Período sin empresa')
-        ->set('start_date', '2026-09-01')
-        ->set('end_date', '2026-09-30')
-        ->call('store')
-        ->assertStatus(403);
+    $this->get('/nomina')
+        ->assertForbidden();
 
     expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
 });
 
-test('company admin with an unresolvable company cannot create a period', function () {
+test('company admin with an unresolvable company is denied period creation', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $company->delete();
@@ -223,14 +215,8 @@ test('company admin with an unresolvable company cannot create a period', functi
     $this->actingAs($admin);
     app(CurrentCompany::class)->set(null);
 
-    Livewire::test(Index::class)
-        ->set('name', 'Período huérfano')
-        ->set('start_date', '2026-09-01')
-        ->set('end_date', '2026-09-30')
-        ->call('store')
-        ->assertStatus(403);
-
-    expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
+    expect(Gate::forUser($admin)->denies('create', PayPeriod::class))->toBeTrue()
+        ->and(PayPeriod::withoutCompanyScope()->count())->toBe(0);
 });
 
 test('user without manage permission cannot invoke period creation directly', function () {

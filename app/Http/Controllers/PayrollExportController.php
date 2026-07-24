@@ -21,8 +21,7 @@ class PayrollExportController extends Controller
     public function __invoke(PayPeriod $payPeriod): BinaryFileResponse
     {
         Gate::authorize('payroll.export');
-
-        $this->ensureCompanyAccess($payPeriod);
+        Gate::authorize('view', $payPeriod);
 
         [$path, $filename] = DB::transaction(function () use ($payPeriod): array {
             $lockedPeriod = $this->lockPeriodInState($payPeriod, ['approved', 'exported']);
@@ -44,8 +43,7 @@ class PayrollExportController extends Controller
     public function stub(PayPeriod $payPeriod, string $empleado): BinaryFileResponse
     {
         Gate::authorize('payroll.export');
-
-        $this->ensureCompanyAccess($payPeriod);
+        Gate::authorize('view', $payPeriod);
 
         $employee = Employee::withoutCompanyScope()->findOrFail((int) $empleado);
 
@@ -65,19 +63,6 @@ class PayrollExportController extends Controller
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
-    }
-
-    private function ensureCompanyAccess(PayPeriod $payPeriod): void
-    {
-        $currentCompany = current_company();
-
-        if ($currentCompany === null) {
-            abort(403);
-        }
-
-        if ($currentCompany->id !== $payPeriod->company_id && ! auth()->user()?->hasRole('super_admin')) {
-            abort(403);
-        }
     }
 
     /**

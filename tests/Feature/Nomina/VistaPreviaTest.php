@@ -152,6 +152,19 @@ test('company admin cannot access procesar page of other company', function () {
         ->assertForbidden();
 });
 
+test('super admin cannot access procesar page outside active company', function () {
+    $activeCompany = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $otherPayPeriod = PayPeriod::factory()->forCompany($otherCompany)->create(['status' => 'processed']);
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set($activeCompany);
+
+    $this->actingAs($superAdmin)
+        ->get("/nomina/{$otherPayPeriod->id}/procesar")
+        ->assertForbidden();
+});
+
 test('user without payroll process permission cannot access procesar page', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'processed']);

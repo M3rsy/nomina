@@ -28,6 +28,18 @@ test('super admin can render revisar page', function () {
         ->assertOk();
 });
 
+test('super admin without active company cannot render revisar page', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set(null);
+
+    $this->actingAs($superAdmin)
+        ->get("/nomina/{$payPeriod->id}/revisar")
+        ->assertForbidden();
+});
+
 test('company admin can render revisar page of own company', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
