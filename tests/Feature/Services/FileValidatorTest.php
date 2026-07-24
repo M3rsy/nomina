@@ -13,6 +13,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\FileValidator;
 use App\Services\Parsers\RawMarkPayload;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 function buildPayload(string $employeeId, string $eventAt, int $rowNumber): RawMarkPayload
 {
@@ -50,6 +51,107 @@ test('validator marks duplicate records by employee and event time', function ()
     expect(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-01-19'))->toBe(1);
     expect(RawMark::where('uploaded_file_id', $uploadedFile->id)->where('status', 'duplicate')->exists())->toBeTrue();
     expect(RawMark::where('uploaded_file_id', $uploadedFile->id)->where('status', 'valid')->exists())->toBeTrue();
+});
+
+test('validator locks planned payroll parents before creating raw marks', function () {
+    $company = Company::factory()->create(['id' => 301]);
+    $uploadPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'id' => 902,
+        'start_date' => '2026-01-16',
+        'end_date' => '2026-01-31',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'id' => 401,
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-15',
+    ]);
+    Employee::factory()->forCompany($company)->create(['id' => 702, 'external_id' => '200']);
+    Employee::factory()->forCompany($company)->create(['id' => 209, 'external_id' => '100']);
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($uploadPeriod)->create();
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    app(FileValidator::class)->validate($uploadedFile, collect([
+        buildPayload('200', '2026-01-20 08:00:00', 1),
+        buildPayload('100', '2026-01-15 08:00:00', 2),
+    ]));
+
+    $queries = collect(DB::getQueryLog());
+    DB::disableQueryLog();
+    $companyLock = $queries->search(fn (array $query): bool => str_contains($query['query'], 'from "companies"')
+        && $query['bindings'] === [301]);
+    $periodLocks = $queries->search(fn (array $query): bool => str_contains($query['query'], 'from "pay_periods"')
+        && str_contains($query['query'], 'order by "id" asc')
+        && $query['bindings'] === [401, 902]);
+    $employeeLocks = $queries->search(fn (array $query): bool => str_contains($query['query'], 'from "employees"')
+        && str_contains($query['query'], 'order by "id" asc')
+        && $query['bindings'] === [209, 702]);
+    $firstRawMarkWrite = $queries->search(fn (array $query): bool => str_starts_with(
+        $query['query'],
+        'insert into "raw_marks"',
+    ));
+
+    expect($companyLock)->toBeInt()
+        ->and($periodLocks)->toBeInt()
+        ->and($employeeLocks)->toBeInt()
+        ->and($firstRawMarkWrite)->toBeInt()
+        ->and($companyLock < $periodLocks)->toBeTrue()
+        ->and($periodLocks < $employeeLocks)->toBeTrue()
+        ->and($employeeLocks < $firstRawMarkWrite)->toBeTrue();
+});
+
+test('validator advances attendance generations in canonical employee and work-date order', function () {
+    $company = Company::factory()->create(['id' => 302]);
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'id' => 903,
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    $firstEmployee = Employee::factory()->forCompany($company)->create([
+        'id' => 205,
+        'external_id' => '100',
+    ]);
+    $secondEmployee = Employee::factory()->forCompany($company)->create([
+        'id' => 701,
+        'external_id' => '200',
+    ]);
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    $report = app(FileValidator::class)->validate($uploadedFile, collect([
+        buildPayload('200', '2026-01-18 08:00:00', 1),
+        buildPayload('100', '2026-01-21 08:00:00', 2),
+        buildPayload('100', '2026-01-19 08:00:00', 3),
+        buildPayload('200', '2026-01-18 17:00:00', 4),
+        buildPayload('100', '2026-01-19 17:00:00', 5),
+    ]));
+
+    $generationAttempts = collect(DB::getQueryLog())
+        ->filter(fn (array $query): bool => str_starts_with(
+            $query['query'],
+            'insert or ignore into "attendance_fact_generations"',
+        ))
+        ->map(fn (array $query): array => [
+            'employee_id' => $query['bindings'][1],
+            'work_date' => $query['bindings'][2],
+        ])
+        ->values()
+        ->all();
+    DB::disableQueryLog();
+    $generations = app(AttendanceFactGenerationTracker::class);
+
+    expect($report->counts['valid'])->toBe(5)
+        ->and($generationAttempts)->toBe([
+            ['employee_id' => 205, 'work_date' => '2026-01-19'],
+            ['employee_id' => 205, 'work_date' => '2026-01-21'],
+            ['employee_id' => 701, 'work_date' => '2026-01-18'],
+        ])
+        ->and($generations->current($firstEmployee, '2026-01-19'))->toBe(2)
+        ->and($generations->current($firstEmployee, '2026-01-21'))->toBe(1)
+        ->and($generations->current($secondEmployee, '2026-01-18'))->toBe(2);
 });
 
 test('validator detects duplicate observations across payroll periods', function () {
@@ -243,6 +345,34 @@ test('validator sets file status invalid when no valid records', function () {
 
     $uploadedFile->refresh();
     expect($uploadedFile->status)->toBe('invalid');
+});
+
+test('validator ignores soft-deleted locked periods when an active period permits the import', function () {
+    $company = Company::factory()->create();
+    $deletedPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'exported',
+    ]);
+    $currentPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $deletedPeriod->delete();
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($currentPeriod)->create([
+        'status' => 'pending',
+    ]);
+
+    $report = app(FileValidator::class)->validate($uploadedFile, collect([
+        buildPayload('13767', '2026-01-19 14:53:50', 1),
+    ]));
+
+    expect($report->counts['valid'])->toBe(1)
+        ->and($report->counts['invalid_row'])->toBe(0)
+        ->and($report->rowStatuses)->toBe([1 => 'valid'])
+        ->and($uploadedFile->refresh()->status)->toBe('valid');
 });
 
 test('validator cannot add a mark to a locked overnight work date', function () {

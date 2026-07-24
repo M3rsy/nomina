@@ -9,15 +9,18 @@ use App\Models\UploadedFile;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Parsers\RawMarkPayload;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
+use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 class FileValidator
 {
     public function __construct(
         private ShiftOccurrenceResolver $shiftOccurrenceResolver,
         private AttendanceFactGenerationTracker $factGenerations,
+        private PayrollContextLocker $contextLocker,
     ) {}
 
     /**
@@ -25,23 +28,26 @@ class FileValidator
      */
     public function validate(UploadedFile $uploadedFile, Collection $records): ValidationReport
     {
-        DB::transaction(function () use ($uploadedFile, $records) {
-            $this->insertRecords($uploadedFile, $records);
-            $this->runValidation($uploadedFile, $records);
-        });
+        $this->contextLocker->within(
+            $uploadedFile->company_id,
+            fn (): PayrollContextTargets => $this->resolveTargets($uploadedFile, $records),
+            function (LockedPayrollContext $context) use ($uploadedFile, $records): void {
+                $this->insertRecords($uploadedFile, $records);
+                $this->runValidation($uploadedFile, $records, $context);
+            },
+        );
 
         return $this->buildReport($uploadedFile);
     }
 
     private function insertRecords(UploadedFile $uploadedFile, Collection $records): void
     {
-        $payPeriod = $uploadedFile->payPeriod;
         $companyId = $uploadedFile->company_id;
 
         foreach ($records as $record) {
             RawMark::create([
                 'company_id' => $companyId,
-                'pay_period_id' => $payPeriod->id,
+                'pay_period_id' => $uploadedFile->pay_period_id,
                 'uploaded_file_id' => $uploadedFile->id,
                 'employee_external_id' => $record->employee_external_id,
                 'employee_id' => null,
@@ -56,19 +62,14 @@ class FileValidator
         }
     }
 
-    private function runValidation(UploadedFile $uploadedFile, Collection $records): void
-    {
+    private function runValidation(
+        UploadedFile $uploadedFile,
+        Collection $records,
+        LockedPayrollContext $context,
+    ): void {
         $companyId = $uploadedFile->company_id;
-        $payPeriod = PayPeriod::withoutCompanyScope()
-            ->where('company_id', $companyId)
-            ->lockForUpdate()
-            ->findOrFail($uploadedFile->pay_period_id);
-
-        $employees = Employee::withoutCompanyScope()
-            ->where('company_id', $companyId)
-            ->whereNull('deleted_at')
-            ->get()
-            ->keyBy('external_id');
+        $payPeriod = $context->payPeriod($uploadedFile->pay_period_id);
+        $employees = $context->employees->keyBy('external_id');
 
         $existingMarks = RawMark::withoutCompanyScope()
             ->where('company_id', $companyId)
@@ -81,6 +82,7 @@ class FileValidator
         $seen = [];
         $validCount = 0;
         $issueCount = 0;
+        $generationAdvances = collect();
 
         foreach ($records as $record) {
             $status = 'valid';
@@ -96,7 +98,7 @@ class FileValidator
 
             if ($status === 'valid') {
                 $workDate = $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at);
-                $workDateIsLocked = $this->workDateIsLocked($employee, $workDate);
+                $workDateIsLocked = $this->workDateIsLocked($context->payPeriods, $workDate);
 
                 if (! $workDateIsLocked && ($workDate->lt($payPeriod->start_date) || $workDate->gt($payPeriod->end_date))) {
                     $status = 'out_of_period';
@@ -137,11 +139,27 @@ class FileValidator
 
             if ($status === 'valid') {
                 $validCount++;
-                $this->factGenerations->advance($employee, $workDate);
+                $generationAdvances->push(['employee' => $employee, 'work_date' => $workDate]);
             } else {
                 $issueCount++;
             }
         }
+
+        $generationAdvances
+            ->groupBy(fn (array $advance): string => sprintf(
+                '%020d|%s',
+                $advance['employee']->id,
+                $advance['work_date']->toDateString(),
+            ))
+            ->sortKeys()
+            ->each(function (Collection $advances): void {
+                $advance = $advances->first();
+                $this->factGenerations->advanceBy(
+                    $advance['employee'],
+                    $advance['work_date'],
+                    $advances->count(),
+                );
+            });
 
         $uploadedFile->status = $this->computeFileStatus($validCount, $issueCount);
         $uploadedFile->validation_summary = [
@@ -155,19 +173,51 @@ class FileValidator
         $uploadedFile->save();
     }
 
-    private function workDateIsLocked(Employee $employee, CarbonInterface $workDate): bool
+    /** @param Collection<int, PayPeriod> $periods */
+    private function workDateIsLocked(Collection $periods, CarbonInterface $workDate): bool
     {
-        return PayPeriod::withoutCompanyScope()
-            ->where('company_id', $employee->company_id)
-            ->whereDate('start_date', '<=', $workDate->toDateString())
-            ->whereDate('end_date', '>=', $workDate->toDateString())
-            ->lockForUpdate()
-            ->get(['status'])
-            ->contains(fn (PayPeriod $period): bool => in_array(
+        return $periods->contains(fn (PayPeriod $period): bool => $period->start_date->lte($workDate)
+            && $period->end_date->gte($workDate)
+            && in_array(
                 $period->status,
                 PayPeriod::ATTENDANCE_LOCKED_STATUSES,
                 true,
             ));
+    }
+
+    /** @param Collection<int, RawMarkPayload> $records */
+    private function resolveTargets(UploadedFile $uploadedFile, Collection $records): PayrollContextTargets
+    {
+        $employees = Employee::withoutCompanyScope()
+            ->where('company_id', $uploadedFile->company_id)
+            ->whereNull('deleted_at')
+            ->whereIn('external_id', $records->map->employee_external_id->unique())
+            ->orderBy('id')
+            ->get()
+            ->keyBy('external_id');
+        $workDates = $records->map(function (RawMarkPayload $record) use ($employees): ?string {
+            $employee = $employees->get($record->employee_external_id);
+
+            return $employee === null
+                ? null
+                : $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at)->toDateString();
+        })->filter()->unique()->sort()->values();
+        $periodIds = PayPeriod::withoutCompanyScope()
+            ->where('company_id', $uploadedFile->company_id)
+            ->where(function ($query) use ($uploadedFile, $workDates): void {
+                $query->whereKey($uploadedFile->pay_period_id);
+
+                foreach ($workDates as $workDate) {
+                    $query->orWhere(function ($overlap) use ($workDate): void {
+                        $overlap->whereDate('start_date', '<=', $workDate)
+                            ->whereDate('end_date', '>=', $workDate);
+                    });
+                }
+            })
+            ->pluck('id')
+            ->all();
+
+        return new PayrollContextTargets($periodIds, $employees->pluck('id')->all());
     }
 
     private function computeFileStatus(int $validCount, int $issueCount): string
