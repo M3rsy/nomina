@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class AttendanceFactGenerationTracker
 {
@@ -37,9 +38,18 @@ class AttendanceFactGenerationTracker
 
     public function advance(Employee $employee, CarbonInterface|string $workDate): int
     {
+        return $this->advanceBy($employee, $workDate, 1);
+    }
+
+    public function advanceBy(Employee $employee, CarbonInterface|string $workDate, int $count): int
+    {
+        if ($count < 1) {
+            throw new InvalidArgumentException('Attendance fact generation count must be positive.');
+        }
+
         $date = CarbonImmutable::parse($workDate)->toDateString();
 
-        return DB::transaction(function () use ($employee, $date): int {
+        return DB::transaction(function () use ($employee, $date, $count): int {
             DB::table('attendance_fact_generations')->insertOrIgnore([
                 'company_id' => $employee->company_id,
                 'employee_id' => $employee->id,
@@ -56,7 +66,7 @@ class AttendanceFactGenerationTracker
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $generation->increment('generation');
+            $generation->increment('generation', $count);
 
             return $generation->refresh()->generation;
         });
