@@ -6,7 +6,6 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -115,17 +114,13 @@ class Create extends Component
         $reason = $validated['schedule_reason'];
         unset($validated['schedule_profile_id'], $validated['schedule_effective_from'], $validated['schedule_reason']);
 
-        DB::transaction(function () use ($validated, $profile, $effectiveFrom, $reason): void {
-            $employee = Employee::create($validated);
-
-            app(EmployeeScheduleAssigner::class)->assign(
-                $employee,
-                $profile,
-                $effectiveFrom,
-                $reason,
-                auth()->user(),
-            );
-        });
+        app(EmployeeScheduleAssigner::class)->createAndAssign(
+            $validated,
+            $profile,
+            $effectiveFrom,
+            $reason,
+            auth()->user(),
+        );
 
         $this->redirect('/empleados', navigate: true);
     }

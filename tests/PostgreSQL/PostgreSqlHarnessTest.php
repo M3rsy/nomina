@@ -217,6 +217,43 @@ test('audited mark correction serializes behind payroll without an employee-peri
     }
 });
 
+test('assigned schedule serializes behind payroll without an employee-period deadlock', function () {
+    [$company, $period, $employee] = postgresPayrollFixture();
+    $nextProfile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $periodHolder = PostgreSqlWorker::start('pay-period-hold', ['pay_period_id' => $period->id]);
+    $payroll = PostgreSqlWorker::start('payroll', ['pay_period_id' => $period->id]);
+    $assignment = PostgreSqlWorker::start('schedule-assign', [
+        'employee_id' => $employee->id,
+        'profile_id' => $nextProfile->id,
+        'effective_from' => '2026-01-05',
+    ]);
+
+    try {
+        $holderReady = $periodHolder->waitFor('ready');
+        $payrollReady = $payroll->waitFor('ready');
+        $assignmentReady = $assignment->waitFor('ready');
+        $periodHolder->release('start');
+        $periodHolder->waitFor('locked');
+        $payroll->release('start');
+        waitForPostgresBlocker($payrollReady['backend_pid'], $holderReady['backend_pid']);
+        $assignment->release('start');
+        waitForPostgresBlocker($assignmentReady['backend_pid'], $payrollReady['backend_pid']);
+
+        $periodHolder->release('commit');
+        $periodHolder->waitFor('committed');
+        expect($payroll->waitFor('succeeded')['results'])->toBe(1);
+        $failure = $assignment->waitFor('failed');
+
+        expect($failure['message'])->not->toContain('40P01')
+            ->and($failure['exception'])->toBe(ValidationException::class)
+            ->and($employee->scheduleAssignments()->count())->toBe(1);
+    } finally {
+        $periodHolder->stop();
+        $payroll->stop();
+        $assignment->stop();
+    }
+});
+
 test('audited manual mark serializes before payroll without a company-period deadlock', function () {
     app(PermissionRoleSeeder::class)->run();
     [$company, $period, $employee] = postgresPayrollFixture();
