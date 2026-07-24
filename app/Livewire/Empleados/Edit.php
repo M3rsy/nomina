@@ -5,7 +5,6 @@ namespace App\Livewire\Empleados;
 use App\Models\Employee;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -118,13 +117,10 @@ class Edit extends Component
         $reason = $validated['schedule_reason'] ?? null;
         unset($validated['schedule_profile_id'], $validated['schedule_effective_from'], $validated['schedule_reason']);
 
-        DB::transaction(function () use ($validated, $profileId, $effectiveFrom, $reason): void {
+        if ($profileId === null || $effectiveFrom === null || $reason === null) {
             $this->employee->update($validated);
 
-            if ($profileId === null || $effectiveFrom === null || $reason === null) {
-                return;
-            }
-
+        } else {
             $profile = WorkScheduleProfile::withoutCompanyScope()->findOrFail($profileId);
             app(EmployeeScheduleAssigner::class)->assign(
                 $this->employee,
@@ -132,8 +128,9 @@ class Edit extends Component
                 $effectiveFrom,
                 $reason,
                 auth()->user(),
+                mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update($validated),
             );
-        });
+        }
 
         $this->redirect('/empleados', navigate: true);
     }

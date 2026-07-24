@@ -8,8 +8,10 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\User;
+use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
@@ -101,6 +103,20 @@ if ($mode === 'barrier') {
                 User::query()->findOrFail($payload['user_id']),
             ]);
         $emit('succeeded', ['fingerprint' => $decision->fingerprint]);
+    } catch (Throwable $exception) {
+        $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
+} elseif ($mode === 'schedule-assign') {
+    $await('start');
+
+    try {
+        app(EmployeeScheduleAssigner::class)->assign(
+            Employee::withoutCompanyScope()->findOrFail($payload['employee_id']),
+            WorkScheduleProfile::withoutCompanyScope()->findOrFail($payload['profile_id']),
+            $payload['effective_from'],
+            'PostgreSQL canonical lock race',
+        );
+        $emit('succeeded');
     } catch (Throwable $exception) {
         $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
     }

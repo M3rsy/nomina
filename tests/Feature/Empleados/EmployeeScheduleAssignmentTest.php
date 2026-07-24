@@ -26,6 +26,43 @@ test('assigning a new schedule closes the previous assignment without overlap', 
         ->and($second->reason)->toBe('Cambio a turno nocturno');
 });
 
+test('creates an employee and initial assigned schedule inside one payroll context', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+
+    $assignment = app(EmployeeScheduleAssigner::class)->createAndAssign(
+        $attributes,
+        $profile,
+        '2026-07-01',
+        'Jornada asignada al crear el empleado',
+    );
+
+    expect($assignment->employee->company_id)->toBe($company->id)
+        ->and($assignment->employee->external_id)->toBe($attributes['external_id'])
+        ->and($assignment->effective_from->toDateString())->toBe('2026-07-01');
+});
+
+test('updates an employee inside the same payroll context as a new assigned schedule', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create(['first_name' => 'Before']);
+    $profiles = WorkScheduleProfile::factory()->count(2)->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $assigner->assign($employee, $profiles[0], '2026-07-01', 'Jornada inicial');
+
+    $assignment = $assigner->assign(
+        $employee,
+        $profiles[1],
+        '2026-07-15',
+        'Cambio de jornada y datos',
+        mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update(['first_name' => 'After']),
+    );
+
+    expect($employee->fresh()->first_name)->toBe('After')
+        ->and($assignment->employee_id)->toBe($employee->id)
+        ->and($assignment->effective_from->toDateString())->toBe('2026-07-15');
+});
+
 test('a backdated schedule assignment is bounded by its neighboring assignments', function () {
     $company = Company::factory()->create();
     $employee = Employee::factory()->forCompany($company)->create();
