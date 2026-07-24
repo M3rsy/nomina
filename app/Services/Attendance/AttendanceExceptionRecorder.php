@@ -8,7 +8,6 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\Payroll\BandSplit;
-use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -20,7 +19,7 @@ class AttendanceExceptionRecorder
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceShiftAnalyzer $analyzer,
-        private PayrollRules $rules,
+        private HolidayCalendar $holidayCalendar,
     ) {}
 
     public function decide(
@@ -47,8 +46,13 @@ class AttendanceExceptionRecorder
         }
 
         $date = CarbonImmutable::parse($workDate)->startOfDay();
+        $calendarContext = $this->holidayCalendar->capture(
+            Company::query()->findOrFail($payPeriod->company_id),
+            $date,
+            $date,
+        );
 
-        return DB::transaction(function () use ($payPeriod, $employee, $date, $deficitKey, $decision, $reason, $actor): AttendanceException {
+        return DB::transaction(function () use ($payPeriod, $employee, $date, $deficitKey, $decision, $reason, $actor, $calendarContext): AttendanceException {
             $lockedPeriod = PayPeriod::withoutCompanyScope()
                 ->withTrashed()
                 ->whereKey($payPeriod->id)
@@ -68,7 +72,8 @@ class AttendanceExceptionRecorder
             $occurrence = $this->resolver->resolve($lockedEmployee, $date);
             $analysis = $this->analyzer->analyze(
                 $occurrence,
-                $this->rules->isHoliday($company, $date),
+                $calendarContext->isHoliday($date),
+                $calendarContext->generation($date),
             );
             $deficit = $analysis->deficits->firstWhere('key', $deficitKey);
 

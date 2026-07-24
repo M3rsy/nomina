@@ -15,8 +15,11 @@ class AttendanceShiftAnalyzer
         private PayrollRules $rules,
     ) {}
 
-    public function analyze(ShiftOccurrence $occurrence, bool $isHoliday = false): AttendanceShiftAnalysis
-    {
+    public function analyze(
+        ShiftOccurrence $occurrence,
+        bool $isHoliday = false,
+        int $calendarGeneration = 0,
+    ): AttendanceShiftAnalysis {
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
             $scheduledMinutes = 0;
             $scheduledRates = new BandSplit;
@@ -56,7 +59,7 @@ class AttendanceShiftAnalyzer
                         'full_day_absence',
                         $occurrence->scheduledStart,
                         $occurrence->scheduledEnd,
-                        $this->fingerprint($occurrence, $isHoliday),
+                        $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
                         $scheduledRates,
                     ));
                 }
@@ -145,7 +148,7 @@ class AttendanceShiftAnalyzer
                 false,
                 $isHoliday,
             );
-            $fingerprint = $this->fingerprint($occurrence, $isHoliday);
+            $fingerprint = $this->fingerprint($occurrence, $isHoliday, $calendarGeneration);
             $scheduledDuration = $this->minutes($scheduledStart, $scheduledEnd);
             $missingScheduledMinutes = max(0, $scheduledDuration - $scheduledMinutes);
             $lateMinutes = min(
@@ -204,7 +207,7 @@ class AttendanceShiftAnalyzer
                 'non_working',
                 $entry,
                 $payableEnd,
-                $this->fingerprint($occurrence, $isHoliday),
+                $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
                 $this->ratesFor($occurrence, $entry, $payableEnd, true, $isHoliday),
             ));
         }
@@ -228,9 +231,9 @@ class AttendanceShiftAnalyzer
         return $end->gt($start) ? (int) floor($start->diffInSeconds($end) / 60) : 0;
     }
 
-    private function fingerprint(ShiftOccurrence $occurrence, bool $isHoliday): string
+    private function fingerprint(ShiftOccurrence $occurrence, bool $isHoliday, int $calendarGeneration): string
     {
-        return hash('sha256', implode('|', [
+        $parts = [
             $occurrence->assignment?->id,
             $occurrence->schedule?->id,
             $occurrence->schedule?->start_time,
@@ -245,7 +248,13 @@ class AttendanceShiftAnalyzer
             $occurrence->exitMark()?->id,
             $occurrence->exitMark()?->event_at?->toIso8601String(),
             $this->markRevisionGeneration($occurrence->exitMark()),
-        ]));
+        ];
+
+        if ($calendarGeneration > 0) {
+            $parts[] = $calendarGeneration;
+        }
+
+        return hash('sha256', implode('|', $parts));
     }
 
     private function markRevisionGeneration(?RawMark $mark): string

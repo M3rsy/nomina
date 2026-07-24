@@ -13,6 +13,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
@@ -394,6 +395,33 @@ test('processor stores rules version from config', function () {
     $processor->processPayPeriod($payPeriod);
 
     expect(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->first()->rules_version)->toBe('2026-01');
+});
+
+test('processor stores the captured calendar generation for every result date', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-06');
+    processorEmployee($company);
+    app(HolidayCalendar::class)->save($company, null, [
+        'date' => '2026-01-06',
+        'name' => 'Inactive calendar fact',
+        'description' => null,
+        'is_active' => false,
+    ]);
+
+    app(CurrentCompany::class)->set($company);
+    app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+
+    $generations = PayrollResult::withoutCompanyScope()
+        ->where('pay_period_id', $payPeriod->id)
+        ->get()
+        ->mapWithKeys(fn (PayrollResult $result): array => [
+            $result->date->toDateString() => $result->calendar_generation,
+        ]);
+
+    expect($generations->all())->toBe([
+        '2026-01-05' => 0,
+        '2026-01-06' => 1,
+    ]);
 });
 
 test('processor is idempotent and updates existing rows', function () {

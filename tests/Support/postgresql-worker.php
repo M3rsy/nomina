@@ -1,10 +1,12 @@
 <?php
 
+use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
+use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Payroll\PayrollProcessor;
 use Illuminate\Contracts\Console\Kernel;
@@ -61,21 +63,29 @@ $runPayroll = static function (bool $hold = false) use ($await, $emit, $payload)
 if ($mode === 'barrier') {
     $await('finish');
     $emit('finished');
-} elseif ($mode === 'holiday-activate') {
+} elseif ($mode === 'holiday-activate-hold') {
     $await('start');
-    Holiday::withoutCompanyScope()->findOrFail($payload['holiday_id'])->update(['is_active' => true]);
-    $emit('committed');
-} elseif ($mode === 'payroll-holiday-probe') {
-    $paused = false;
-    DB::listen(function ($query) use (&$paused, $await, $emit): void {
-        if (! $paused && str_contains($query->sql, 'holidays')) {
-            $paused = true;
-            $emit('holiday-read');
-            $await('continue');
-        }
-    });
-    $await('start');
-    $runPayroll();
+    DB::beginTransaction();
+
+    try {
+        $holiday = Holiday::withoutCompanyScope()->findOrFail($payload['holiday_id']);
+        $company = Company::query()->findOrFail($holiday->company_id);
+        $calendar = app(HolidayCalendar::class);
+        $calendar->save($company, $holiday, [
+            'date' => $holiday->date,
+            'name' => $holiday->name,
+            'description' => $holiday->description,
+            'is_active' => true,
+        ]);
+        $generation = $calendar->capture($company, $holiday->date)->generation($holiday->date);
+        $emit('mutated', ['generation' => $generation]);
+        $await('commit');
+        DB::commit();
+        $emit('committed');
+    } catch (Throwable $exception) {
+        DB::rollBack();
+        $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
 } elseif ($mode === 'raw-mark-hold') {
     $await('start');
     DB::beginTransaction();

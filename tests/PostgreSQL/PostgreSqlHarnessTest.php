@@ -163,26 +163,27 @@ test('payroll waits for a committed audited manual mark correction', function ()
     }
 });
 
-test('payroll cannot persist a result from stale holiday context', function () {
+test('payroll waits for a committed holiday mutation and uses its captured context', function () {
     [$company, $period] = postgresPayrollFixture();
     $holiday = Holiday::factory()->forCompany($company)->inactive()->create(['date' => '2026-01-05']);
-    $payroll = PostgreSqlWorker::start('payroll-holiday-probe', ['pay_period_id' => $period->id]);
-    $mutation = PostgreSqlWorker::start('holiday-activate', ['holiday_id' => $holiday->id]);
+    $mutation = PostgreSqlWorker::start('holiday-activate-hold', ['holiday_id' => $holiday->id]);
+    $payroll = PostgreSqlWorker::start('payroll', ['pay_period_id' => $period->id]);
 
     try {
-        $payroll->waitFor('ready');
-        $mutation->waitFor('ready');
-        $payroll->release('start');
-        $payroll->waitFor('holiday-read');
+        $mutationReady = $mutation->waitFor('ready');
+        $payrollReady = $payroll->waitFor('ready');
         $mutation->release('start');
+        expect($mutation->waitFor('mutated')['generation'])->toBe(1);
+        $payroll->release('start');
+        waitForPostgresBlocker($payrollReady['backend_pid'], $mutationReady['backend_pid']);
+        $mutation->release('commit');
         $mutation->waitFor('committed');
-        $payroll->release('continue');
-        $payroll->waitFor('succeeded');
 
-        expect($holiday->fresh()->is_active)->toBeTrue()
+        expect($payroll->waitFor('succeeded')['results'])->toBe(0)
+            ->and($holiday->fresh()->is_active)->toBeTrue()
             ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBe(0);
     } finally {
-        $payroll->stop();
         $mutation->stop();
+        $payroll->stop();
     }
-})->fails('Failed asserting that 1 is identical to 0.');
+});

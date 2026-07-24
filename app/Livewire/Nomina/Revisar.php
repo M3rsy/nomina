@@ -9,6 +9,8 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
+use App\Services\Attendance\HolidayCalendar;
+use App\Services\Attendance\HolidayCalendarContext;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
@@ -1251,10 +1253,15 @@ class Revisar extends Component
 
     private function moveToReady(): void
     {
-        $moved = DB::transaction(function (): bool {
+        $calendarContext = app(HolidayCalendar::class)->capture(
+            $this->payPeriod->company,
+            $this->payPeriod->start_date,
+            $this->payPeriod->end_date,
+        );
+        $moved = DB::transaction(function () use ($calendarContext): bool {
             $payPeriod = $this->lockMutablePayPeriod();
 
-            if ($payPeriod === null || $this->loadReadinessBlockers($payPeriod)) {
+            if ($payPeriod === null || $this->loadReadinessBlockers($payPeriod, $calendarContext)) {
                 return false;
             }
 
@@ -1274,10 +1281,12 @@ class Revisar extends Component
         session()->flash('success', 'Período listo para procesar.');
     }
 
-    private function loadReadinessBlockers(?PayPeriod $payPeriod = null): bool
-    {
+    private function loadReadinessBlockers(
+        ?PayPeriod $payPeriod = null,
+        ?HolidayCalendarContext $calendarContext = null,
+    ): bool {
         $this->readinessBlockers = app(PayrollReadinessChecker::class)
-            ->blockers($payPeriod ?? $this->payPeriod)
+            ->blockers($payPeriod ?? $this->payPeriod, $calendarContext)
             ->values()
             ->all();
 
