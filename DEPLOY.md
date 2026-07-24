@@ -97,19 +97,21 @@ Iniciar sesión con el super admin configurado en `.env.production`.
 ## 7. Cron y tareas programadas
 
 El stack incluye un servicio `scheduler` que ejecuta `crond` con el archivo
-`docker/cron/nomina`. Este ya contiene:
+`docker/cron/nomina`. Cron solo invoca Laravel scheduler cada minuto. Laravel registra:
 
-- Laravel scheduler cada minuto.
-- Respaldo Spatie cada hora.
+- `backup:run` cada hora.
+- `backup:clean` diariamente a la 01:15.
+- `backup:monitor` diariamente a la 01:30.
+
+Las tres tareas usan bloqueo para evitar ejecuciones solapadas.
+Los bloqueos expiran tras 120 minutos; si un proceso termina abruptamente, confirma que
+no haya una tarea activa antes de liberar el bloqueo con `php artisan schedule:clear-cache`.
 
 Alternativa: si prefieres cron en el host, agrega:
 
 ```cron
 # Laravel scheduler
 * * * * * cd /var/www/nomina && php artisan schedule:run >> /dev/null 2>&1
-
-# Respaldo horario
-0 * * * * /bin/sh /var/www/nomina/scripts/backup-cron.sh >> /dev/null 2>&1
 ```
 
 ## 8. Renovación automática de certificados
@@ -121,6 +123,14 @@ Agrega un cron en el host:
 ```
 
 ## 9. Respaldos y restauración
+
+Cada respaldo normal incluye el dump completo de PostgreSQL y los TXT/DAT originales de
+`storage/app/private/uploads`. Se excluyen `.env*`, dependencias reinstalables, cachés,
+logs, archivos temporales y el propio destino de respaldos.
+
+> **Antes del primer despliegue con limpieza programada:** ejecuta `backup:list`,
+> inventaría los ZIP históricos y copia fuera del volumen cualquier archivo que deba
+> conservarse. `backup:clean` aplicará automáticamente la política de retención.
 
 ### Crear respaldo manual
 
@@ -148,7 +158,7 @@ spatie/laravel-backup no incluye restauración automática. Para restaurar:
 1. Detener el servicio `app`.
 2. Extraer el ZIP de respaldo.
 3. Restaurar el dump `.sql` en PostgreSQL con `psql` o `pg_restore`.
-4. Restaurar archivos de `storage/app` si aplica.
+4. Restaurar `storage/app/private/uploads` desde el ZIP.
 5. Reiniciar el contenedor.
 
 ## 10. Actualización

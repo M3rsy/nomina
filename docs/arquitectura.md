@@ -37,6 +37,17 @@ Resumen técnico de las fases de construcción y de la arquitectura vigente.
 
 El TXT/DAT, cada línea importada y la identidad física del archivo son evidencia inmutable. Las asignaciones y correcciones actúan sobre registros normalizados y conservan actor, motivo, valores aplicados y fecha de auditoría. Una marca manual auditada solo incorpora una entrada o salida real omitida por el reloj, sin archivo, fila ni `raw_line`; no ingresa horas pagables ni reemplaza una excepción de asistencia.
 
+## Respaldo operativo
+
+Cada respaldo programado contiene la base de datos completa y los TXT/DAT originales de
+`storage/app/private/uploads`. Así, la evidencia física inmutable se conserva junto con
+los registros normalizados que la referencian.
+
+El ZIP excluye secretos `.env*`, dependencias reinstalables (`vendor`, `node_modules`),
+cachés, logs, el directorio temporal y el destino de respaldos. Laravel es dueño de las
+tres tareas (`backup:run`, `backup:clean`, `backup:monitor`); el cron del contenedor solo
+invoca `schedule:run`.
+
 ## Estado de período de nómina
 
 ```text

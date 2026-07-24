@@ -38,10 +38,14 @@ return [
                  * Directories used by the backup process will automatically be excluded.
                  */
                 'exclude' => [
+                    base_path('.env*'),
                     base_path('vendor'),
                     base_path('node_modules'),
-                    storage_path('app'),
+                    base_path('bootstrap/cache'),
+                    storage_path('app/backup-temp'),
+                    storage_path('app/nomina-backups'),
                     storage_path('framework'),
+                    storage_path('logs'),
                 ],
 
                 /*
@@ -300,7 +304,7 @@ return [
     'monitor_backups' => [
         [
             'name' => env('APP_NAME', 'laravel-backup'),
-            'disks' => ['local'],
+            'disks' => ['backups'],
             'health_checks' => [
                 MaximumAgeInDays::class => 1,
                 MaximumStorageInMegabytes::class => 5000,
