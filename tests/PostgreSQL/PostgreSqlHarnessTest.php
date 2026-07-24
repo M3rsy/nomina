@@ -17,6 +17,7 @@ use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Tests\Support\PostgreSqlWorker;
 
 function postgresPayrollFixture(): array
@@ -164,6 +165,55 @@ test('payroll waits for a committed audited manual mark correction', function ()
     } finally {
         $mutation->stop();
         $payroll->stop();
+    }
+});
+
+test('audited mark correction serializes behind payroll without an employee-period deadlock', function () {
+    [$company, $period, $employee] = postgresPayrollFixture();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $actor = User::factory()->forCompany($company)->create();
+    RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)
+        ->forEmployee($employee)->create(['event_at' => '2026-01-05 06:00:00', 'status' => 'valid']);
+    $manual = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+        'uploaded_file_id' => null,
+        'event_at' => '2026-01-05 14:00:00',
+        'source' => RawMark::SOURCE_MANUAL,
+        'status' => 'corrected',
+        'metadata' => ['revisions' => [['action' => 'manual_create', 'user_id' => $actor->id]]],
+    ]);
+    app(AttendanceFactGenerationTracker::class)->advance($employee, '2026-01-05');
+    $periodHolder = PostgreSqlWorker::start('pay-period-hold', ['pay_period_id' => $period->id]);
+    $payroll = PostgreSqlWorker::start('payroll', ['pay_period_id' => $period->id]);
+    $correction = PostgreSqlWorker::start('raw-mark-hold', [
+        'raw_mark_id' => $manual->id,
+        'event_at' => '2026-01-05 13:30:00',
+        'user_id' => $actor->id,
+    ]);
+
+    try {
+        $holderReady = $periodHolder->waitFor('ready');
+        $payrollReady = $payroll->waitFor('ready');
+        $correctionReady = $correction->waitFor('ready');
+        $periodHolder->release('start');
+        $periodHolder->waitFor('locked');
+        $payroll->release('start');
+        waitForPostgresBlocker($payrollReady['backend_pid'], $holderReady['backend_pid']);
+        $correction->release('start');
+        waitForPostgresBlocker($correctionReady['backend_pid'], $payrollReady['backend_pid']);
+
+        $periodHolder->release('commit');
+        $periodHolder->waitFor('committed');
+        expect($payroll->waitFor('succeeded')['results'])->toBe(1);
+        $failure = $correction->waitFor('failed');
+
+        expect($failure['message'])->not->toContain('40P01')
+            ->and($failure['exception'])->toBe(ValidationException::class)
+            ->and($manual->fresh()->event_at->toDateTimeString())->toBe('2026-01-05 14:00:00')
+            ->and(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-01-05'))->toBe(1);
+    } finally {
+        $periodHolder->stop();
+        $payroll->stop();
+        $correction->stop();
     }
 });
 
