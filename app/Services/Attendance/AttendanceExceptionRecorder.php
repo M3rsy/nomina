@@ -8,18 +8,21 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\Payroll\BandSplit;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
+use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 
 class AttendanceExceptionRecorder
 {
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceShiftAnalyzer $analyzer,
-        private HolidayCalendar $holidayCalendar,
+        private PayrollContextLocker $contextLocker,
     ) {}
 
     public function decide(
@@ -46,84 +49,82 @@ class AttendanceExceptionRecorder
         }
 
         $date = CarbonImmutable::parse($workDate)->startOfDay();
-        $calendarContext = $this->holidayCalendar->capture(
-            Company::query()->findOrFail($payPeriod->company_id),
-            $date,
-            $date,
+
+        return $this->contextLocker->within(
+            $payPeriod->company_id,
+            fn (): PayrollContextTargets => new PayrollContextTargets(
+                payPeriodIds: [$payPeriod->id],
+                employeeIds: [$employee->id],
+                rawMarkIds: $this->resolver->resolve($employee, $date)->marks->pluck('id')->all(),
+                holidayStart: $date,
+            ),
+            function (LockedPayrollContext $context) use ($payPeriod, $employee, $date, $deficitKey, $decision, $reason, $actor): AttendanceException {
+                $lockedPeriod = $context->payPeriod($payPeriod->id);
+                $lockedEmployee = $context->employee($employee->id);
+                $calendarContext = $context->holidayCalendar
+                    ?? throw new LogicException('Attendance exception requires holiday context.');
+                $currentActor = User::query()->findOrFail($actor->id);
+                $company = $context->company;
+
+                $this->validateContext($lockedPeriod, $lockedEmployee, $date);
+                $this->authorize($currentActor, $company);
+
+                $occurrence = $this->resolver->resolve($lockedEmployee, $date);
+                $analysis = $this->analyzer->analyze(
+                    $occurrence,
+                    $calendarContext->isHoliday($date),
+                    $calendarContext->generation($date),
+                );
+                $deficit = $analysis->deficits->firstWhere('key', $deficitKey);
+
+                if ($deficit === null || $deficit->rateMinutes->totalMinutes() !== $deficit->minutes) {
+                    throw ValidationException::withMessages([
+                        'deficit_key' => 'El déficit ya no coincide con las marcas y la jornada vigentes.',
+                    ]);
+                }
+
+                $previous = AttendanceException::withoutCompanyScope()
+                    ->where('company_id', $company->id)
+                    ->where('pay_period_id', $lockedPeriod->id)
+                    ->where('employee_id', $lockedEmployee->id)
+                    ->whereDate('work_date', $date->toDateString())
+                    ->where('deficit_key', $deficit->key)
+                    ->current()
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($previous?->decision === $decision) {
+                    throw ValidationException::withMessages([
+                        'decision' => 'El déficit ya tiene esa decisión vigente.',
+                    ]);
+                }
+
+                if ($decision === AttendanceException::REVOKED
+                    && $previous?->decision !== AttendanceException::GRANTED) {
+                    throw ValidationException::withMessages([
+                        'decision' => 'No existe una excepción vigente para revocar.',
+                    ]);
+                }
+
+                return AttendanceException::withoutCompanyScope()->create([
+                    'company_id' => $company->id,
+                    'pay_period_id' => $lockedPeriod->id,
+                    'employee_id' => $lockedEmployee->id,
+                    'work_date' => $date->toDateString(),
+                    'deficit_key' => $deficit->key,
+                    'fingerprint' => $deficit->fingerprint,
+                    'segment_kind' => $deficit->kind,
+                    'starts_at' => $deficit->start,
+                    'ends_at' => $deficit->end,
+                    'minutes' => $deficit->minutes,
+                    'rate_minutes' => $this->rateMinutes($deficit->rateMinutes),
+                    'decision' => $decision,
+                    'reason' => $reason,
+                    'decided_by' => $currentActor->id,
+                    'supersedes_id' => $previous?->id,
+                ]);
+            },
         );
-
-        return DB::transaction(function () use ($payPeriod, $employee, $date, $deficitKey, $decision, $reason, $actor, $calendarContext): AttendanceException {
-            $lockedPeriod = PayPeriod::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($payPeriod->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $lockedEmployee = Employee::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($employee->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $currentActor = User::query()->findOrFail($actor->id);
-            $company = Company::query()->findOrFail($lockedPeriod->company_id);
-
-            $this->validateContext($lockedPeriod, $lockedEmployee, $date);
-            $this->authorize($currentActor, $company);
-
-            $occurrence = $this->resolver->resolve($lockedEmployee, $date);
-            $analysis = $this->analyzer->analyze(
-                $occurrence,
-                $calendarContext->isHoliday($date),
-                $calendarContext->generation($date),
-            );
-            $deficit = $analysis->deficits->firstWhere('key', $deficitKey);
-
-            if ($deficit === null || $deficit->rateMinutes->totalMinutes() !== $deficit->minutes) {
-                throw ValidationException::withMessages([
-                    'deficit_key' => 'El déficit ya no coincide con las marcas y la jornada vigentes.',
-                ]);
-            }
-
-            $previous = AttendanceException::withoutCompanyScope()
-                ->where('company_id', $company->id)
-                ->where('pay_period_id', $lockedPeriod->id)
-                ->where('employee_id', $lockedEmployee->id)
-                ->whereDate('work_date', $date->toDateString())
-                ->where('deficit_key', $deficit->key)
-                ->current()
-                ->lockForUpdate()
-                ->first();
-
-            if ($previous?->decision === $decision) {
-                throw ValidationException::withMessages([
-                    'decision' => 'El déficit ya tiene esa decisión vigente.',
-                ]);
-            }
-
-            if ($decision === AttendanceException::REVOKED
-                && $previous?->decision !== AttendanceException::GRANTED) {
-                throw ValidationException::withMessages([
-                    'decision' => 'No existe una excepción vigente para revocar.',
-                ]);
-            }
-
-            return AttendanceException::withoutCompanyScope()->create([
-                'company_id' => $company->id,
-                'pay_period_id' => $lockedPeriod->id,
-                'employee_id' => $lockedEmployee->id,
-                'work_date' => $date->toDateString(),
-                'deficit_key' => $deficit->key,
-                'fingerprint' => $deficit->fingerprint,
-                'segment_kind' => $deficit->kind,
-                'starts_at' => $deficit->start,
-                'ends_at' => $deficit->end,
-                'minutes' => $deficit->minutes,
-                'rate_minutes' => $this->rateMinutes($deficit->rateMinutes),
-                'decision' => $decision,
-                'reason' => $reason,
-                'decided_by' => $currentActor->id,
-                'supersedes_id' => $previous?->id,
-            ]);
-        });
     }
 
     private function validateContext(PayPeriod $payPeriod, Employee $employee, CarbonImmutable $date): void

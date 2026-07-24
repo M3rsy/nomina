@@ -549,46 +549,44 @@ class Revisar extends Component
         $reason = $this->absenceReason;
 
         try {
-            $saved = DB::transaction(function () use ($employeeId, $date, $reason, $notes): bool {
-                $payPeriod = $this->lockMutablePayPeriod();
+            $payPeriod = PayPeriod::withoutCompanyScope()->whereKey($this->payPeriod->id)->first();
 
-                if ($payPeriod === null) {
-                    return false;
-                }
+            if ($payPeriod === null || in_array($payPeriod->status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true)) {
+                $this->locked = true;
 
-                $employee = Employee::withoutCompanyScope()
-                    ->where('company_id', $payPeriod->company_id)
-                    ->find($employeeId);
+                return;
+            }
 
-                if ($employee === null) {
-                    return false;
-                }
+            $employee = Employee::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->find($employeeId);
 
-                $review = app(PayrollShiftEvaluationResolver::class)->review(
-                    $payPeriod,
-                    $employee,
-                    CarbonImmutable::parse($date)->startOfDay(),
-                );
-                $deficit = $review->analysis->deficits->firstWhere('kind', 'full_day_absence');
+            if ($employee === null) {
+                return;
+            }
 
-                if ($deficit === null) {
-                    $this->addError('absenceReason', 'La falta debe corresponder a una jornada programada completa y vigente.');
+            $review = app(PayrollShiftEvaluationResolver::class)->review(
+                $payPeriod,
+                $employee,
+                CarbonImmutable::parse($date)->startOfDay(),
+            );
+            $deficit = $review->analysis->deficits->firstWhere('kind', 'full_day_absence');
 
-                    return false;
-                }
+            if ($deficit === null) {
+                $this->addError('absenceReason', 'La falta debe corresponder a una jornada programada completa y vigente.');
 
-                app(AttendanceExceptionRecorder::class)->decide(
-                    $payPeriod,
-                    $employee,
-                    $date,
-                    $deficit->key,
-                    AttendanceException::GRANTED,
-                    $notes ? sprintf('%s: %s', $reason, $notes) : $reason,
-                    Auth::user(),
-                );
+                return;
+            }
 
-                return true;
-            });
+            app(AttendanceExceptionRecorder::class)->decide(
+                $payPeriod,
+                $employee,
+                $date,
+                $deficit->key,
+                AttendanceException::GRANTED,
+                $notes ? sprintf('%s: %s', $reason, $notes) : $reason,
+                Auth::user(),
+            );
         } catch (ValidationException $exception) {
             if ($exception->errors()['pay_period'] ?? false) {
                 return;
@@ -596,10 +594,6 @@ class Revisar extends Component
 
             throw $exception;
         } catch (InvalidArgumentException) {
-            return;
-        }
-
-        if (! $saved) {
             return;
         }
 

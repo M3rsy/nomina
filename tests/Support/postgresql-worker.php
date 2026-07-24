@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceException;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -7,6 +8,7 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\User;
+use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\OvertimeDecisionRecorder;
@@ -74,19 +76,29 @@ if ($mode === 'barrier') {
     $await('commit');
     DB::commit();
     $emit('committed');
-} elseif ($mode === 'overtime-decision') {
+} elseif (in_array($mode, ['overtime-decision', 'attendance-exception'], true)) {
     $await('start');
 
     try {
-        $decision = app(OvertimeDecisionRecorder::class)->decide(
+        $arguments = [
             PayPeriod::withoutCompanyScope()->findOrFail($payload['pay_period_id']),
             Employee::withoutCompanyScope()->findOrFail($payload['employee_id']),
             $payload['work_date'],
             $payload['attendance_fact_key'],
-            OvertimeDecision::APPROVED,
-            'PostgreSQL canonical lock race',
-            User::query()->findOrFail($payload['user_id']),
-        );
+        ];
+        $decision = $mode === 'overtime-decision'
+            ? app(OvertimeDecisionRecorder::class)->decide(...[
+                ...$arguments,
+                OvertimeDecision::APPROVED,
+                'PostgreSQL canonical lock race',
+                User::query()->findOrFail($payload['user_id']),
+            ])
+            : app(AttendanceExceptionRecorder::class)->decide(...[
+                ...$arguments,
+                AttendanceException::GRANTED,
+                'PostgreSQL canonical lock race',
+                User::query()->findOrFail($payload['user_id']),
+            ]);
         $emit('succeeded', ['fingerprint' => $decision->fingerprint]);
     } catch (Throwable $exception) {
         $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
