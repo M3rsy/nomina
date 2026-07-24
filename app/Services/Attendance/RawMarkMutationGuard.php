@@ -28,39 +28,71 @@ class RawMarkMutationGuard
         ?Employee $targetEmployee = null,
         CarbonInterface|string|null $targetEventAt = null,
     ): mixed {
-        return $this->contextLocker->within(
+        return $this->mutateResolved(
             $rawMark->company_id,
+            fn (): array => [$rawMark->id],
+            $mutation,
+            $targetEmployee,
+            $targetEventAt,
+        )->first();
+    }
+
+    public function mutateBatch(
+        int $companyId,
+        Closure $resolveRawMarkIds,
+        Closure $mutation,
+        ?Employee $targetEmployee = null,
+    ): void {
+        $this->mutateResolved($companyId, $resolveRawMarkIds, $mutation, $targetEmployee);
+    }
+
+    /** @return Collection<int, mixed> */
+    private function mutateResolved(
+        int $companyId,
+        Closure $resolveRawMarkIds,
+        Closure $mutation,
+        ?Employee $targetEmployee,
+        CarbonInterface|string|null $targetEventAt = null,
+    ): Collection {
+        return $this->contextLocker->within(
+            $companyId,
             fn (): PayrollContextTargets => $this->resolveTargets(
-                $rawMark->company_id,
-                $rawMark->id,
+                $companyId,
+                $resolveRawMarkIds(),
                 $targetEmployee,
                 $targetEventAt,
             ),
-            function (LockedPayrollContext $context) use ($rawMark, $mutation, $targetEmployee, $targetEventAt): mixed {
-                $lockedMark = $context->rawMark($rawMark->id);
-                $currentEmployee = $lockedMark->employee_id === null
-                    ? null
-                    : $context->employee($lockedMark->employee_id);
-                $nextEmployee = $targetEmployee === null
-                    ? $currentEmployee
-                    : $context->employee($targetEmployee->id);
+            function (LockedPayrollContext $context) use ($mutation, $targetEmployee, $targetEventAt): Collection {
+                $plans = $context->rawMarks->map(function (RawMark $lockedMark) use ($context, $targetEmployee, $targetEventAt): array {
+                    $currentEmployee = $lockedMark->employee_id === null
+                        ? null
+                        : $context->employee($lockedMark->employee_id);
+                    $nextEmployee = $targetEmployee === null
+                        ? $currentEmployee
+                        : $context->employee($targetEmployee->id);
 
-                if ($targetEmployee !== null
-                    && ($nextEmployee->trashed() || $nextEmployee->company_id !== $lockedMark->company_id)) {
-                    throw ValidationException::withMessages([
-                        'raw_mark' => 'El empleado ya no admite cambios de marcas para esta empresa.',
-                    ]);
-                }
+                    if ($targetEmployee !== null
+                        && ($nextEmployee->trashed() || $nextEmployee->company_id !== $lockedMark->company_id)) {
+                        throw ValidationException::withMessages([
+                            'raw_mark' => 'El empleado ya no admite cambios de marcas para esta empresa.',
+                        ]);
+                    }
 
-                $nextEventAt = $targetEventAt === null
-                    ? CarbonImmutable::instance($lockedMark->event_at)
-                    : CarbonImmutable::parse($targetEventAt);
-                $affectedOccurrences = $this->affectedOccurrences(
-                    $lockedMark,
-                    $currentEmployee,
-                    $nextEmployee,
-                    $nextEventAt,
-                );
+                    $nextEventAt = $targetEventAt === null
+                        ? CarbonImmutable::instance($lockedMark->event_at)
+                        : CarbonImmutable::parse($targetEventAt);
+
+                    return [
+                        'mark' => $lockedMark,
+                        'next_employee' => $nextEmployee,
+                        'occurrences' => $this->affectedOccurrences(
+                            $lockedMark,
+                            $currentEmployee,
+                            $nextEmployee,
+                            $nextEventAt,
+                        ),
+                    ];
+                });
 
                 if ($context->payPeriods->contains(fn (PayPeriod $period): bool => in_array(
                     $period->status,
@@ -72,28 +104,50 @@ class RawMarkMutationGuard
                     ]);
                 }
 
-                $result = $mutation($lockedMark);
-                $lockedMark->refresh();
+                $generationAdvances = $plans->pluck('occurrences')->collapse()
+                    ->groupBy(fn (array $occurrence): string => $this->occurrenceKey($occurrence))
+                    ->sortKeys();
+                $affectedOccurrences = $generationAdvances
+                    ->map(fn (Collection $advances): array => $advances->first())
+                    ->values();
+                $results = $plans->map(fn (array $plan): mixed => $mutation($plan['mark']));
 
-                $this->assertManualPairIntegrity($affectedOccurrences, $lockedMark, $nextEmployee);
-
-                foreach ($affectedOccurrences as $occurrence) {
-                    $this->factGenerations->advance($occurrence['employee'], $occurrence['work_date']);
+                foreach ($plans as $plan) {
+                    $plan['mark']->refresh();
+                    $this->assertManualPairIntegrity(
+                        $affectedOccurrences,
+                        $plan['mark'],
+                        $plan['next_employee'],
+                    );
                 }
 
-                return $result;
+                $generationAdvances->each(function (Collection $advances): void {
+                    $occurrence = $advances->first();
+
+                    foreach ($advances as $_) {
+                        $this->factGenerations->advance($occurrence['employee'], $occurrence['work_date']);
+                    }
+                });
+
+                return $results;
             },
         );
     }
 
     private function resolveTargets(
         int $companyId,
-        int $rawMarkId,
+        iterable $rawMarkIds,
         ?Employee $targetEmployee,
         CarbonInterface|string|null $targetEventAt,
     ): PayrollContextTargets {
-        $rawMark = RawMark::withoutCompanyScope()->whereKey($rawMarkId)->firstOrFail();
-        $employeeIds = collect([$rawMark->employee_id, $targetEmployee?->id])
+        $rawMarkIds = collect($rawMarkIds)
+            ->map(fn (mixed $target): int => (int) ($target instanceof RawMark ? $target->id : $target))
+            ->unique()
+            ->sort()
+            ->values();
+        $marks = RawMark::withoutCompanyScope()->whereIn('id', $rawMarkIds)->orderBy('id')->get();
+        $employeeIds = $marks->pluck('employee_id')
+            ->push($targetEmployee?->id)
             ->filter()
             ->map(fn (mixed $id): int => (int) $id)
             ->unique()
@@ -103,25 +157,23 @@ class RawMarkMutationGuard
             ->whereIn('id', $employeeIds)
             ->get()
             ->keyBy('id');
-        $currentEmployee = $rawMark->employee_id === null
-            ? null
-            : $employees->get($rawMark->employee_id);
-        $nextEmployee = $targetEmployee === null
-            ? $currentEmployee
-            : $employees->get($targetEmployee->id);
-        $nextEventAt = $targetEventAt === null
-            ? CarbonImmutable::instance($rawMark->event_at)
-            : CarbonImmutable::parse($targetEventAt);
-        $workDates = $this->affectedOccurrences($rawMark, $currentEmployee, $nextEmployee, $nextEventAt)
-            ->pluck('work_date')
-            ->map(fn (CarbonImmutable $date): string => $date->toDateString())
+        $workDates = $marks->flatMap(function (RawMark $mark) use ($employees, $targetEmployee, $targetEventAt): Collection {
+            $currentEmployee = $mark->employee_id === null ? null : $employees->get($mark->employee_id);
+            $nextEmployee = $targetEmployee === null ? $currentEmployee : $employees->get($targetEmployee->id);
+            $nextEventAt = $targetEventAt === null
+                ? CarbonImmutable::instance($mark->event_at)
+                : CarbonImmutable::parse($targetEventAt);
+
+            return $this->affectedOccurrences($mark, $currentEmployee, $nextEmployee, $nextEventAt)
+                ->pluck('work_date');
+        })->map(fn (CarbonImmutable $date): string => $date->toDateString())
             ->unique()
             ->values();
-        $payPeriodIds = PayPeriod::withoutCompanyScope()
+        $payPeriodIds = $marks->isEmpty() ? [] : PayPeriod::withoutCompanyScope()
             ->withTrashed()
             ->where('company_id', $companyId)
-            ->where(function ($query) use ($rawMark, $workDates): void {
-                $query->whereKey($rawMark->pay_period_id);
+            ->where(function ($query) use ($marks, $workDates): void {
+                $query->whereIn('id', $marks->pluck('pay_period_id'));
 
                 foreach ($workDates as $workDate) {
                     $query->orWhere(function ($dateQuery) use ($workDate): void {
@@ -140,7 +192,7 @@ class RawMarkMutationGuard
         return new PayrollContextTargets(
             payPeriodIds: $payPeriodIds,
             employeeIds: $employeeIds->all(),
-            rawMarkIds: [$rawMarkId],
+            rawMarkIds: $rawMarkIds->all(),
         );
     }
 

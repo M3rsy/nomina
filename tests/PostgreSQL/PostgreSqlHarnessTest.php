@@ -217,6 +217,46 @@ test('audited mark correction serializes behind payroll without an employee-peri
     }
 });
 
+test('audited manual mark serializes before payroll without a company-period deadlock', function () {
+    app(PermissionRoleSeeder::class)->run();
+    [$company, $period, $employee] = postgresPayrollFixture();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)
+        ->forEmployee($employee)->create(['event_at' => '2026-01-05 06:00:00', 'status' => 'valid']);
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $periodHolder = PostgreSqlWorker::start('pay-period-hold', ['pay_period_id' => $period->id]);
+    $manualMark = PostgreSqlWorker::start('manual-mark', [
+        'pay_period_id' => $period->id,
+        'employee_id' => $employee->id,
+        'work_date' => '2026-01-05',
+        'event_at' => '2026-01-05 14:00:00',
+        'user_id' => $actor->id,
+    ]);
+    $payroll = PostgreSqlWorker::start('payroll', ['pay_period_id' => $period->id]);
+
+    try {
+        $holderReady = $periodHolder->waitFor('ready');
+        $manualReady = $manualMark->waitFor('ready');
+        $payrollReady = $payroll->waitFor('ready');
+        $periodHolder->release('start');
+        $periodHolder->waitFor('locked');
+        $manualMark->release('start');
+        waitForPostgresBlocker($manualReady['backend_pid'], $holderReady['backend_pid']);
+        $payroll->release('start');
+        waitForPostgresBlocker($payrollReady['backend_pid'], $manualReady['backend_pid']);
+
+        $periodHolder->release('commit');
+        $periodHolder->waitFor('committed');
+        expect($manualMark->waitFor('succeeded')['generation'])->toBe(1)
+            ->and($payroll->waitFor('succeeded')['results'])->toBe(1)
+            ->and(RawMark::withoutCompanyScope()->where('employee_id', $employee->id)->count())->toBe(2);
+    } finally {
+        $periodHolder->stop();
+        $manualMark->stop();
+        $payroll->stop();
+    }
+});
+
 test('payroll waits for a committed holiday mutation and uses its captured context', function () {
     [$company, $period] = postgresPayrollFixture();
     $holiday = Holiday::factory()->forCompany($company)->inactive()->create(['date' => '2026-01-05']);

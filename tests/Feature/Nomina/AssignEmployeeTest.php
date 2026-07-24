@@ -7,6 +7,8 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
+use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
@@ -120,6 +122,42 @@ test('assignApplyAll assigns employee to every raw mark with same external id an
         ->and($differentExternal->employee_id)->toBeNull()
         ->and($alreadyAssigned->employee_id)->not->toBe($employee->id)
         ->and($alreadyAssigned->status)->toBe('valid');
+});
+
+test('batch assignment resolves once and mutates deduplicated marks in canonical order', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $marks = collect(['2026-01-05 08:00:00', '2026-01-05 17:00:00'])->map(
+        fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+            ->forUploadedFile($file)->create([
+                'employee_id' => null,
+                'status' => 'unknown_employee',
+                'event_at' => $eventAt,
+            ]),
+    );
+    $resolutions = 0;
+    $mutatedIds = [];
+
+    app(RawMarkMutationGuard::class)->mutateBatch(
+        $company->id,
+        function () use ($marks, &$resolutions): array {
+            $resolutions++;
+
+            return [$marks[1]->id, $marks[0]->id, $marks[1]->id];
+        },
+        function (RawMark $mark) use ($employee, &$mutatedIds): void {
+            $mutatedIds[] = $mark->id;
+            $mark->update(['employee_id' => $employee->id, 'status' => 'corrected']);
+        },
+        targetEmployee: $employee,
+    );
+
+    expect($resolutions)->toBe(1)
+        ->and($mutatedIds)->toBe($marks->pluck('id')->sort()->values()->all())
+        ->and($marks->map->fresh()->pluck('employee_id')->all())->toBe([$employee->id, $employee->id])
+        ->and(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-01-05'))->toBe(2);
 });
 
 test('cannot assign employee from another company to raw mark', function () {

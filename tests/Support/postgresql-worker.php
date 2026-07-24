@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\HolidayCalendar;
+use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Payroll\PayrollProcessor;
@@ -100,6 +101,26 @@ if ($mode === 'barrier') {
                 User::query()->findOrFail($payload['user_id']),
             ]);
         $emit('succeeded', ['fingerprint' => $decision->fingerprint]);
+    } catch (Throwable $exception) {
+        $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
+} elseif ($mode === 'manual-mark') {
+    $await('start');
+
+    try {
+        app(ManualRawMarkRecorder::class)->record(
+            PayPeriod::withoutCompanyScope()->findOrFail($payload['pay_period_id']),
+            Employee::withoutCompanyScope()->findOrFail($payload['employee_id']),
+            $payload['work_date'],
+            $payload['event_at'],
+            'PostgreSQL canonical lock race',
+            User::query()->findOrFail($payload['user_id']),
+        );
+        $generation = app(AttendanceFactGenerationTracker::class)->current(
+            Employee::withoutCompanyScope()->findOrFail($payload['employee_id']),
+            $payload['work_date'],
+        );
+        $emit('succeeded', ['generation' => $generation]);
     } catch (Throwable $exception) {
         $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
     }

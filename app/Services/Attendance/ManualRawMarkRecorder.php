@@ -7,10 +7,12 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\User;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
+use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ManualRawMarkRecorder
@@ -18,6 +20,7 @@ class ManualRawMarkRecorder
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceFactGenerationTracker $factGenerations,
+        private PayrollContextLocker $contextLocker,
     ) {}
 
     public function record(
@@ -39,77 +42,77 @@ class ManualRawMarkRecorder
         $date = CarbonImmutable::parse($workDate)->startOfDay();
         $timestamp = CarbonImmutable::parse($eventAt);
 
-        return DB::transaction(function () use ($payPeriod, $employee, $date, $timestamp, $reason, $actor): RawMark {
-            $lockedPeriod = PayPeriod::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($payPeriod->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $lockedEmployee = Employee::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($employee->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $currentActor = User::query()->findOrFail($actor->id);
-            $company = Company::query()->findOrFail($lockedPeriod->company_id);
+        return $this->contextLocker->within(
+            $payPeriod->company_id,
+            fn (): PayrollContextTargets => new PayrollContextTargets(
+                payPeriodIds: [$payPeriod->id],
+                employeeIds: [$employee->id],
+                rawMarkIds: $this->resolver->resolve($employee, $date)->marks->pluck('id')->all(),
+            ),
+            function (LockedPayrollContext $context) use ($payPeriod, $employee, $date, $timestamp, $reason, $actor): RawMark {
+                $lockedPeriod = $context->payPeriod($payPeriod->id);
+                $lockedEmployee = $context->employee($employee->id);
+                $currentActor = User::query()->findOrFail($actor->id);
+                $company = $context->company;
 
-            $this->validateContext($lockedPeriod, $lockedEmployee, $date);
-            $this->authorize($currentActor, $company);
+                $this->validateContext($lockedPeriod, $lockedEmployee, $date);
+                $this->authorize($currentActor, $company);
 
-            $before = $this->resolver->resolve($lockedEmployee, $date);
+                $before = $this->resolver->resolve($lockedEmployee, $date);
 
-            $observedMark = $before->marks->first();
+                $observedMark = $before->marks->first();
 
-            if ($before->status !== ShiftOccurrence::MISSING_PAIR
-                || $before->marks->count() !== 1
-                || $observedMark?->source === RawMark::SOURCE_MANUAL) {
-                throw ValidationException::withMessages([
-                    'work_date' => 'Solo puede completarse un par incompleto que ya contiene una marca observada.',
+                if ($before->status !== ShiftOccurrence::MISSING_PAIR
+                    || $before->marks->count() !== 1
+                    || $observedMark?->source === RawMark::SOURCE_MANUAL) {
+                    throw ValidationException::withMessages([
+                        'work_date' => 'Solo puede completarse un par incompleto que ya contiene una marca observada.',
+                    ]);
+                }
+
+                if ($before->marks->contains(fn (RawMark $mark) => $mark->event_at->equalTo($timestamp))) {
+                    throw ValidationException::withMessages([
+                        'event_at' => 'Ya existe una marca a esa fecha y hora.',
+                    ]);
+                }
+
+                $createdAt = now();
+                $mark = RawMark::withoutCompanyScope()->create([
+                    'company_id' => $company->id,
+                    'pay_period_id' => $lockedPeriod->id,
+                    'uploaded_file_id' => null,
+                    'employee_external_id' => $lockedEmployee->external_id,
+                    'employee_id' => $lockedEmployee->id,
+                    'event_at' => $timestamp,
+                    'raw_line' => null,
+                    'source' => RawMark::SOURCE_MANUAL,
+                    'row_number' => null,
+                    'status' => 'corrected',
+                    'notes' => 'Marca manual auditada',
+                    'metadata' => [
+                        'revisions' => [[
+                            'action' => 'manual_create',
+                            'user_id' => $currentActor->id,
+                            'work_date' => $date->toDateString(),
+                            'event_at' => $timestamp->toDateTimeString(),
+                            'reason' => $reason,
+                            'at' => $createdAt->toDateTimeString(),
+                        ]],
+                    ],
                 ]);
-            }
 
-            if ($before->marks->contains(fn (RawMark $mark) => $mark->event_at->equalTo($timestamp))) {
-                throw ValidationException::withMessages([
-                    'event_at' => 'Ya existe una marca a esa fecha y hora.',
-                ]);
-            }
+                $after = $this->resolver->resolve($lockedEmployee, $date);
+                if ($after->status !== ShiftOccurrence::RESOLVED || ! $after->marks->contains('id', $mark->id)) {
+                    throw ValidationException::withMessages([
+                        'event_at' => 'La fecha y hora no pertenecen a la jornada laboral seleccionada.',
+                    ]);
+                }
 
-            $createdAt = now();
-            $mark = RawMark::withoutCompanyScope()->create([
-                'company_id' => $company->id,
-                'pay_period_id' => $lockedPeriod->id,
-                'uploaded_file_id' => null,
-                'employee_external_id' => $lockedEmployee->external_id,
-                'employee_id' => $lockedEmployee->id,
-                'event_at' => $timestamp,
-                'raw_line' => null,
-                'source' => RawMark::SOURCE_MANUAL,
-                'row_number' => null,
-                'status' => 'corrected',
-                'notes' => 'Marca manual auditada',
-                'metadata' => [
-                    'revisions' => [[
-                        'action' => 'manual_create',
-                        'user_id' => $currentActor->id,
-                        'work_date' => $date->toDateString(),
-                        'event_at' => $timestamp->toDateTimeString(),
-                        'reason' => $reason,
-                        'at' => $createdAt->toDateTimeString(),
-                    ]],
-                ],
-            ]);
+                $this->factGenerations->advance($lockedEmployee, $date);
 
-            $after = $this->resolver->resolve($lockedEmployee, $date);
-            if ($after->status !== ShiftOccurrence::RESOLVED || ! $after->marks->contains('id', $mark->id)) {
-                throw ValidationException::withMessages([
-                    'event_at' => 'La fecha y hora no pertenecen a la jornada laboral seleccionada.',
-                ]);
-            }
-
-            $this->factGenerations->advance($lockedEmployee, $date);
-
-            return $mark;
-        });
+                return $mark;
+            },
+        );
     }
 
     private function validateContext(PayPeriod $payPeriod, Employee $employee, CarbonImmutable $date): void
