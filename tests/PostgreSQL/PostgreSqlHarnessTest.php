@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AttendanceException;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -191,11 +192,17 @@ test('payroll waits for a committed holiday mutation and uses its captured conte
     }
 });
 
-test('holiday mutation waits while an audited attendance decision owns its payroll context (overtime authorization)', function () {
+test('holiday mutation waits while an audited attendance decision owns its payroll context', function (
+    string $workerMode,
+    string $entryAt,
+    string $exitAt,
+    string $analysisCollection,
+    string $decisionModel,
+) {
     app(PermissionRoleSeeder::class)->run();
     [$company, $period, $employee] = postgresPayrollFixture();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
-    collect(['2026-01-05 06:00:00', '2026-01-05 14:30:00'])->each(
+    collect([$entryAt, $exitAt])->each(
         fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($period)
             ->forUploadedFile($file)->forEmployee($employee)->create([
                 'event_at' => $eventAt,
@@ -203,15 +210,18 @@ test('holiday mutation waits while an audited attendance decision owns its payro
             ]),
     );
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
-    $candidate = app(PayrollShiftEvaluationResolver::class)
-        ->review($period, $employee, '2026-01-05')->analysis->overtimeCandidates->sole();
+    $attendanceFact = app(PayrollShiftEvaluationResolver::class)
+        ->review($period, $employee, '2026-01-05')
+        ->analysis
+        ->{$analysisCollection}
+        ->sole();
     $holiday = Holiday::factory()->forCompany($company)->inactive()->create(['date' => '2026-01-05']);
     $periodHolder = PostgreSqlWorker::start('pay-period-hold', ['pay_period_id' => $period->id]);
-    $authorization = PostgreSqlWorker::start('overtime-decision', [
+    $authorization = PostgreSqlWorker::start($workerMode, [
         'pay_period_id' => $period->id,
         'employee_id' => $employee->id,
         'work_date' => '2026-01-05',
-        'attendance_fact_key' => $candidate->key,
+        'attendance_fact_key' => $attendanceFact->key,
         'user_id' => $actor->id,
     ]);
     $mutation = PostgreSqlWorker::start('holiday-activate-hold', ['holiday_id' => $holiday->id]);
@@ -229,16 +239,25 @@ test('holiday mutation waits while an audited attendance decision owns its payro
 
         $periodHolder->release('commit');
         $periodHolder->waitFor('committed');
-        expect($authorization->waitFor('succeeded')['fingerprint'])->toBe($candidate->fingerprint);
+        expect($authorization->waitFor('succeeded')['fingerprint'])->toBe($attendanceFact->fingerprint);
         expect($mutation->waitFor('mutated')['generation'])->toBe(1);
         $mutation->release('commit');
         $mutation->waitFor('committed');
 
-        expect(OvertimeDecision::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBe(1)
+        expect($decisionModel::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBe(1)
             ->and($holiday->fresh()->is_active)->toBeTrue();
     } finally {
         $periodHolder->stop();
         $authorization->stop();
         $mutation->stop();
     }
-});
+})->with([
+    'overtime authorization' => [
+        'overtime-decision', '2026-01-05 06:00:00', '2026-01-05 14:30:00',
+        'overtimeCandidates', OvertimeDecision::class,
+    ],
+    'attendance exception' => [
+        'attendance-exception', '2026-01-05 06:15:00', '2026-01-05 14:00:00',
+        'deficits', AttendanceException::class,
+    ],
+]);

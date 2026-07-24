@@ -12,6 +12,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\CurrentCompany;
@@ -65,6 +66,36 @@ test('justifyAbsence grants an append-only full-day attendance exception', funct
             'extra100' => 0,
         ])
         ->and(JustifiedAbsence::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->exists())->toBeFalse();
+});
+
+test('justifyAbsence enters the attendance recorder without an outer payroll-period transaction', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-11',
+    ]);
+    $employee = absenceEmployeeWithDefaultSchedule($company);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $baselineTransactionLevel = DB::transactionLevel();
+    $transactionLevel = null;
+    $recorder = Mockery::mock(AttendanceExceptionRecorder::class);
+    $recorder->shouldReceive('decide')->once()->andReturnUsing(
+        function () use (&$transactionLevel): AttendanceException {
+            $transactionLevel = DB::transactionLevel();
+
+            return new AttendanceException;
+        },
+    );
+    app()->instance(AttendanceExceptionRecorder::class, $recorder);
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->set('absenceReason', 'permission')
+        ->call('justifyAbsence', $employee->id, '2026-01-05', 'permission')
+        ->assertHasNoErrors();
+
+    expect($transactionLevel)->toBe($baselineTransactionLevel);
 });
 
 test('justifyAbsence cannot write after the period becomes processed', function () {
