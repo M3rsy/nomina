@@ -3,10 +3,13 @@
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Models\User;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\HolidayCalendar;
+use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Payroll\PayrollProcessor;
 use Illuminate\Contracts\Console\Kernel;
@@ -63,6 +66,31 @@ $runPayroll = static function (bool $hold = false) use ($await, $emit, $payload)
 if ($mode === 'barrier') {
     $await('finish');
     $emit('finished');
+} elseif ($mode === 'pay-period-hold') {
+    $await('start');
+    DB::beginTransaction();
+    PayPeriod::withoutCompanyScope()->whereKey($payload['pay_period_id'])->lockForUpdate()->firstOrFail();
+    $emit('locked');
+    $await('commit');
+    DB::commit();
+    $emit('committed');
+} elseif ($mode === 'overtime-decision') {
+    $await('start');
+
+    try {
+        $decision = app(OvertimeDecisionRecorder::class)->decide(
+            PayPeriod::withoutCompanyScope()->findOrFail($payload['pay_period_id']),
+            Employee::withoutCompanyScope()->findOrFail($payload['employee_id']),
+            $payload['work_date'],
+            $payload['attendance_fact_key'],
+            OvertimeDecision::APPROVED,
+            'PostgreSQL canonical lock race',
+            User::query()->findOrFail($payload['user_id']),
+        );
+        $emit('succeeded', ['fingerprint' => $decision->fingerprint]);
+    } catch (Throwable $exception) {
+        $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
 } elseif ($mode === 'holiday-activate-hold') {
     $await('start');
     DB::beginTransaction();

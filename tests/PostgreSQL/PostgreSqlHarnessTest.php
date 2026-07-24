@@ -3,6 +3,7 @@
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\RawMark;
@@ -12,6 +13,8 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Tests\Support\PostgreSqlWorker;
 
@@ -185,5 +188,57 @@ test('payroll waits for a committed holiday mutation and uses its captured conte
     } finally {
         $mutation->stop();
         $payroll->stop();
+    }
+});
+
+test('holiday mutation waits while an audited attendance decision owns its payroll context (overtime authorization)', function () {
+    app(PermissionRoleSeeder::class)->run();
+    [$company, $period, $employee] = postgresPayrollFixture();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    collect(['2026-01-05 06:00:00', '2026-01-05 14:30:00'])->each(
+        fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($period)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]),
+    );
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $candidate = app(PayrollShiftEvaluationResolver::class)
+        ->review($period, $employee, '2026-01-05')->analysis->overtimeCandidates->sole();
+    $holiday = Holiday::factory()->forCompany($company)->inactive()->create(['date' => '2026-01-05']);
+    $periodHolder = PostgreSqlWorker::start('pay-period-hold', ['pay_period_id' => $period->id]);
+    $authorization = PostgreSqlWorker::start('overtime-decision', [
+        'pay_period_id' => $period->id,
+        'employee_id' => $employee->id,
+        'work_date' => '2026-01-05',
+        'attendance_fact_key' => $candidate->key,
+        'user_id' => $actor->id,
+    ]);
+    $mutation = PostgreSqlWorker::start('holiday-activate-hold', ['holiday_id' => $holiday->id]);
+
+    try {
+        $holderReady = $periodHolder->waitFor('ready');
+        $authorizationReady = $authorization->waitFor('ready');
+        $mutationReady = $mutation->waitFor('ready');
+        $periodHolder->release('start');
+        $periodHolder->waitFor('locked');
+        $authorization->release('start');
+        waitForPostgresBlocker($authorizationReady['backend_pid'], $holderReady['backend_pid']);
+        $mutation->release('start');
+        waitForPostgresBlocker($mutationReady['backend_pid'], $authorizationReady['backend_pid']);
+
+        $periodHolder->release('commit');
+        $periodHolder->waitFor('committed');
+        expect($authorization->waitFor('succeeded')['fingerprint'])->toBe($candidate->fingerprint);
+        expect($mutation->waitFor('mutated')['generation'])->toBe(1);
+        $mutation->release('commit');
+        $mutation->waitFor('committed');
+
+        expect(OvertimeDecision::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBe(1)
+            ->and($holiday->fresh()->is_active)->toBeTrue();
+    } finally {
+        $periodHolder->stop();
+        $authorization->stop();
+        $mutation->stop();
     }
 });

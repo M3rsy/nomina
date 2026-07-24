@@ -8,18 +8,21 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\Payroll\BandSplit;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
+use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 
 class OvertimeDecisionRecorder
 {
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
         private AttendanceShiftAnalyzer $analyzer,
-        private HolidayCalendar $holidayCalendar,
+        private PayrollContextLocker $contextLocker,
     ) {}
 
     public function decide(
@@ -46,77 +49,75 @@ class OvertimeDecisionRecorder
         }
 
         $date = CarbonImmutable::parse($workDate)->startOfDay();
-        $calendarContext = $this->holidayCalendar->capture(
-            Company::query()->findOrFail($payPeriod->company_id),
-            $date,
-            $date,
+
+        return $this->contextLocker->within(
+            $payPeriod->company_id,
+            fn (): PayrollContextTargets => new PayrollContextTargets(
+                payPeriodIds: [$payPeriod->id],
+                employeeIds: [$employee->id],
+                rawMarkIds: $this->resolver->resolve($employee, $date)->marks->pluck('id')->all(),
+                holidayStart: $date,
+            ),
+            function (LockedPayrollContext $context) use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor): OvertimeDecision {
+                $lockedPeriod = $context->payPeriod($payPeriod->id);
+                $lockedEmployee = $context->employee($employee->id);
+                $calendarContext = $context->holidayCalendar
+                    ?? throw new LogicException('Overtime authorization requires holiday context.');
+                $currentActor = User::query()->findOrFail($actor->id);
+                $company = $context->company;
+
+                $this->validateContext($lockedPeriod, $lockedEmployee, $date);
+                $this->authorize($currentActor, $company);
+
+                $occurrence = $this->resolver->resolve($lockedEmployee, $date);
+                $analysis = $this->analyzer->analyze(
+                    $occurrence,
+                    $calendarContext->isHoliday($date),
+                    $calendarContext->generation($date),
+                );
+                $candidate = $analysis->overtimeCandidates->firstWhere('key', $candidateKey);
+
+                if ($candidate === null || $candidate->rateMinutes->totalMinutes() !== $candidate->minutes) {
+                    throw ValidationException::withMessages([
+                        'candidate_key' => 'El candidato ya no coincide con las marcas y la jornada vigentes.',
+                    ]);
+                }
+
+                $previous = OvertimeDecision::withoutCompanyScope()
+                    ->where('company_id', $company->id)
+                    ->where('pay_period_id', $lockedPeriod->id)
+                    ->where('employee_id', $lockedEmployee->id)
+                    ->whereDate('work_date', $date->toDateString())
+                    ->where('candidate_key', $candidate->key)
+                    ->current()
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($previous?->decision === $decision) {
+                    throw ValidationException::withMessages([
+                        'decision' => 'El candidato ya tiene esa decisión vigente.',
+                    ]);
+                }
+
+                return OvertimeDecision::withoutCompanyScope()->create([
+                    'company_id' => $company->id,
+                    'pay_period_id' => $lockedPeriod->id,
+                    'employee_id' => $lockedEmployee->id,
+                    'work_date' => $date->toDateString(),
+                    'candidate_key' => $candidate->key,
+                    'fingerprint' => $candidate->fingerprint,
+                    'segment_kind' => $candidate->kind,
+                    'starts_at' => $candidate->start,
+                    'ends_at' => $candidate->end,
+                    'minutes' => $candidate->minutes,
+                    'rate_minutes' => $this->rateMinutes($candidate->rateMinutes),
+                    'decision' => $decision,
+                    'reason' => $reason,
+                    'decided_by' => $currentActor->id,
+                    'supersedes_id' => $previous?->id,
+                ]);
+            },
         );
-
-        return DB::transaction(function () use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor, $calendarContext): OvertimeDecision {
-            $lockedPeriod = PayPeriod::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($payPeriod->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $lockedEmployee = Employee::withoutCompanyScope()
-                ->withTrashed()
-                ->whereKey($employee->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $currentActor = User::query()->findOrFail($actor->id);
-            $company = Company::query()->findOrFail($lockedPeriod->company_id);
-
-            $this->validateContext($lockedPeriod, $lockedEmployee, $date);
-            $this->authorize($currentActor, $company);
-
-            $occurrence = $this->resolver->resolve($lockedEmployee, $date);
-            $analysis = $this->analyzer->analyze(
-                $occurrence,
-                $calendarContext->isHoliday($date),
-                $calendarContext->generation($date),
-            );
-            $candidate = $analysis->overtimeCandidates->firstWhere('key', $candidateKey);
-
-            if ($candidate === null || $candidate->rateMinutes->totalMinutes() !== $candidate->minutes) {
-                throw ValidationException::withMessages([
-                    'candidate_key' => 'El candidato ya no coincide con las marcas y la jornada vigentes.',
-                ]);
-            }
-
-            $previous = OvertimeDecision::withoutCompanyScope()
-                ->where('company_id', $company->id)
-                ->where('pay_period_id', $lockedPeriod->id)
-                ->where('employee_id', $lockedEmployee->id)
-                ->whereDate('work_date', $date->toDateString())
-                ->where('candidate_key', $candidate->key)
-                ->current()
-                ->lockForUpdate()
-                ->first();
-
-            if ($previous?->decision === $decision) {
-                throw ValidationException::withMessages([
-                    'decision' => 'El candidato ya tiene esa decisión vigente.',
-                ]);
-            }
-
-            return OvertimeDecision::withoutCompanyScope()->create([
-                'company_id' => $company->id,
-                'pay_period_id' => $lockedPeriod->id,
-                'employee_id' => $lockedEmployee->id,
-                'work_date' => $date->toDateString(),
-                'candidate_key' => $candidate->key,
-                'fingerprint' => $candidate->fingerprint,
-                'segment_kind' => $candidate->kind,
-                'starts_at' => $candidate->start,
-                'ends_at' => $candidate->end,
-                'minutes' => $candidate->minutes,
-                'rate_minutes' => $this->rateMinutes($candidate->rateMinutes),
-                'decision' => $decision,
-                'reason' => $reason,
-                'decided_by' => $currentActor->id,
-                'supersedes_id' => $previous?->id,
-            ]);
-        });
     }
 
     private function validateContext(PayPeriod $payPeriod, Employee $employee, CarbonImmutable $date): void
