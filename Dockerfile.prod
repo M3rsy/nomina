@@ -2,7 +2,7 @@ FROM php:8.5-fpm-alpine
 
 # Install system dependencies and PHP extensions required for production.
 RUN apk add --no-cache \
-    postgresql-dev \
+    postgresql-dev postgresql-client \
     libzip-dev \
     libpng-dev \
     libjpeg-turbo-dev \
@@ -20,11 +20,8 @@ RUN apk add --no-cache \
     pgsql \
     zip \
     gd \
-    opcache \
     intl \
-    mbstring \
-    bcmath \
-    xml
+    bcmath
 
 # Install Composer.
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

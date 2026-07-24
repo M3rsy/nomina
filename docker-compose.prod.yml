@@ -103,6 +103,8 @@ services:
         container_name: nomina-scheduler-prod
         env_file:
             - .env.production
+        environment:
+            RUN_APP_BOOTSTRAP: "false"
         restart: unless-stopped
         depends_on:
             db:
@@ -111,12 +113,12 @@ services:
             - .:/var/www/html:ro
             - ./storage:/var/www/html/storage
             - ./bootstrap/cache:/var/www/html/bootstrap/cache
-            - ./docker/cron/nomina:/etc/crontabs/www-data:ro
-        entrypoint: [""]
+            - nomina-backups:/var/www/html/storage/app/nomina-backups
+            - ./docker/cron/nomina:/etc/cron.d/nomina:ro
         command:
             - /bin/sh
             - -c
-            - "crontab /etc/crontabs/www-data && crond -f -l 2"
+            - "crontab -u www-data /etc/cron.d/nomina && exec crond -f -l 2"
         networks:
             - nomina-prod
 
