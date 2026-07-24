@@ -10,17 +10,23 @@ run_as_www_data() {
     su-exec www-data:www-data "$@"
 }
 
-# Run database migrations idempotently.
-run_as_www_data php artisan migrate --force --ansi
+if [ "${RUN_APP_BOOTSTRAP:-true}" = "true" ]; then
+    # Run database migrations idempotently.
+    run_as_www_data php artisan migrate --force --ansi
 
-# Seed production defaults (roles, permissions, super admin, first company) idempotently.
-run_as_www_data php artisan db:seed --class=ProductionSeeder --force --ansi
+    # Seed production defaults (roles, permissions, super admin, first company) idempotently.
+    run_as_www_data php artisan db:seed --class=ProductionSeeder --force --ansi
 
-# Cache framework artifacts for production performance.
-run_as_www_data php artisan config:cache --ansi
-run_as_www_data php artisan route:cache --ansi
-run_as_www_data php artisan view:cache --ansi
-run_as_www_data php artisan event:cache --ansi
+    # Cache framework artifacts for production performance.
+    run_as_www_data php artisan config:cache --ansi
+    run_as_www_data php artisan route:cache --ansi
+    run_as_www_data php artisan view:cache --ansi
+    run_as_www_data php artisan event:cache --ansi
+fi
 
-# Keep the container alive by running php-fpm as root; workers will drop to www-data.
-exec php-fpm
+# Default to php-fpm while allowing other image roles to provide their own command.
+if [ "$#" -eq 0 ]; then
+    set -- php-fpm
+fi
+
+exec "$@"
