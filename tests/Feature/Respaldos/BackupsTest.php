@@ -195,7 +195,10 @@ test('super admin sees restore button', function () {
 
 test('super admin can generate backup', function () {
     Storage::fake('backups');
-    config(['backup.enabled' => true]);
+    config([
+        'backup.enabled' => true,
+        'backup.backup.password' => 'phase7-test-passphrase',
+    ]);
 
     Artisan::shouldReceive('call')
         ->once()
@@ -213,8 +216,11 @@ test('super admin can generate backup', function () {
 
 test('super admin sees error when backup command exits with non-zero code', function () {
     Storage::fake('backups');
-    config(['backup.enabled' => true]);
-    $failureOutput = 'Backup command failed: permission denied';
+    config([
+        'backup.enabled' => true,
+        'backup.backup.password' => 'phase7-test-passphrase',
+    ]);
+    $failureOutput = 'Backup command failed: secret=must-not-reach-the-browser';
 
     Artisan::shouldReceive('call')
         ->once()
@@ -228,13 +234,37 @@ test('super admin sees error when backup command exits with non-zero code', func
     Livewire::actingAs($super)
         ->test(Index::class)
         ->call('generate')
-        ->assertSee('Error al generar el respaldo')
-        ->assertSee($failureOutput);
+        ->assertSee('No se pudo generar el respaldo')
+        ->assertDontSee('must-not-reach-the-browser');
+});
+
+test('backup exceptions do not expose details to the operator', function () {
+    Storage::fake('backups');
+    config([
+        'backup.enabled' => true,
+        'backup.backup.password' => 'phase7-test-passphrase',
+    ]);
+
+    Artisan::shouldReceive('call')
+        ->once()
+        ->andThrow(new RuntimeException('credential=must-not-reach-the-browser'));
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+
+    Livewire::actingAs($super)
+        ->test(Index::class)
+        ->call('generate')
+        ->assertSee('No se pudo generar el respaldo')
+        ->assertDontSee('must-not-reach-the-browser');
 });
 
 test('successful generation result appears in rendered backup list', function () {
     Storage::fake('backups');
-    config(['backup.enabled' => true]);
+    config([
+        'backup.enabled' => true,
+        'backup.backup.password' => 'phase7-test-passphrase',
+    ]);
 
     $generatedFile = 'nomina-generated.zip';
 
@@ -297,6 +327,24 @@ test('backup generation is skipped when disabled', function () {
         ->test(Index::class)
         ->call('generate')
         ->assertSee('deshabilitados');
+});
+
+test('backup generation fails safely when archive encryption is not configured', function () {
+    Storage::fake('backups');
+    config([
+        'backup.enabled' => true,
+        'backup.backup.password' => null,
+    ]);
+
+    Artisan::shouldReceive('call')->never();
+
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+
+    Livewire::actingAs($super)
+        ->test(Index::class)
+        ->call('generate')
+        ->assertSee('no está configurado de forma segura');
 });
 
 test('known and unknown direct downloads are denied before storage access', function () {

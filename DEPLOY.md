@@ -31,6 +31,7 @@ Completar obligatoriamente:
 - `APP_KEY` — generar con `php artisan key:generate --show` (o dentro del contenedor).
 - `APP_URL` — URL pública, por ejemplo `https://planilla.tu-dominio.com`.
 - `DB_PASSWORD` y `POSTGRES_PASSWORD` — misma contraseña segura.
+- `BACKUP_ARCHIVE_PASSWORD` — frase secreta fuerte para cifrar los ZIP; guardarla fuera del servidor y del volumen de respaldos.
 - `SUPER_ADMIN_PASSWORD` — contraseña inicial del super administrador.
 - `DOMAIN` — dominio público, por ejemplo `planilla.tu-dominio.com`.
 - `EMAIL` — correo para Let's Encrypt.
@@ -69,7 +70,7 @@ Después de la primera configuración manual del certificado:
 
 El script:
 
-1. Valida que existan `.env.production`, `DOMAIN`, `DB_PASSWORD` y `APP_KEY`.
+1. Valida que existan `.env.production`, `DOMAIN`, `DB_PASSWORD`, `APP_KEY` y `BACKUP_ARCHIVE_PASSWORD`.
 2. Hace `git pull`.
 3. Construye imágenes de producción.
 4. Levanta servicios.
@@ -128,6 +129,9 @@ Cada respaldo normal incluye el dump completo de PostgreSQL y los TXT/DAT origin
 `storage/app/private/uploads`. Se excluyen `.env*`, dependencias reinstalables, cachés,
 logs, archivos temporales y el propio destino de respaldos.
 
+Los ZIP usan AES-256 y cada contenido descifrado se compara con su tamaño y CRC de origen.
+El despliegue, el entrypoint de producción y la interfaz exigen `BACKUP_ARCHIVE_PASSWORD`.
+
 > **Antes del primer despliegue con limpieza programada:** ejecuta `backup:list`,
 > inventaría los ZIP históricos y copia fuera del volumen cualquier archivo que deba
 > conservarse. `backup:clean` aplicará automáticamente la política de retención.
@@ -151,6 +155,25 @@ docker compose -f docker-compose.prod.yml exec app php artisan backup:list
 # Copiar desde el volumen o desde storage/app/nomina-backups.
 ```
 
+### Verificar recuperación
+
+Prueba periódicamente una copia desechable sin pasar la contraseña como argumento ni escribirla en el historial:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app sh
+umask 077; export BACKUP_TEST_ARCHIVE='storage/app/nomina-backups/<ruta-del-zip>'
+printf 'Contraseña del respaldo: '; stty -echo; read BACKUP_TEST_PASSWORD; stty echo; printf '\n'
+export BACKUP_TEST_PASSWORD; mkdir -p /tmp/nomina-restore-drill
+php -r '$zip = new ZipArchive; $opened = $zip->open(getenv("BACKUP_TEST_ARCHIVE"), ZipArchive::RDONLY); if ($opened !== true) { exit(1); } $zip->setPassword(getenv("BACKUP_TEST_PASSWORD")); if (! $zip->extractTo("/tmp/nomina-restore-drill")) { exit(2); } $zip->close();'
+status=$?; unset BACKUP_TEST_PASSWORD BACKUP_TEST_ARCHIVE; rm -rf /tmp/nomina-restore-drill
+exit "$status"
+```
+
+### Rotar la contraseña
+
+Conserva la contraseña anterior, cambia `BACKUP_ARCHIVE_PASSWORD`, despliega, crea y verifica un respaldo nuevo. Retira la anterior solo tras eliminar o recifrar sus ZIP.
+La rotación no recifra archivos existentes; registra qué contraseña corresponde a cada uno.
+
 ### Restaurar
 
 spatie/laravel-backup no incluye restauración automática. Para restaurar:
@@ -162,6 +185,8 @@ spatie/laravel-backup no incluye restauración automática. Para restaurar:
 5. Reiniciar el contenedor.
 
 ## 10. Actualización
+
+En la primera actualización que incorpora `BACKUP_ARCHIVE_PASSWORD`, configúrala en `.env.production` y comprueba que no esté vacía antes de ejecutar el script antiguo.
 
 ```bash
 cd /var/www/nomina
