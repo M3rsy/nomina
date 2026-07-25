@@ -18,8 +18,8 @@ if [ ! -f .env.production ]; then
     exit 1
 fi
 
-# shellcheck source=/dev/null
 unset BACKUP_ARCHIVE_PASSWORD
+# shellcheck source=/dev/null
 source .env.production
 
 missing=()
