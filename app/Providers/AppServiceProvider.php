@@ -3,12 +3,16 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\BackupArchiveVerifier;
 use App\Services\CurrentCompany;
 use App\View\Components\AppLayout;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\View\View as ViewInstance;
+use Spatie\Backup\Events\BackupManifestWasCreated;
+use Spatie\Backup\Events\BackupZipWasCreated;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CurrentCompany::class, function (): CurrentCompany {
             return new CurrentCompany;
         });
+        $this->app->singleton(BackupArchiveVerifier::class);
 
         if ($this->shouldUseFileCacheForMaintenanceCommands()) {
             config(['cache.default' => 'file']);
@@ -34,8 +39,11 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Bootstrap any application services.
      */
-    public function boot(): void
+    public function boot(BackupArchiveVerifier $backupArchiveVerifier): void
     {
+        Event::listen(BackupManifestWasCreated::class, [$backupArchiveVerifier, 'captureManifest']);
+        Event::listen(BackupZipWasCreated::class, [$backupArchiveVerifier, 'verifyArchive']);
+
         Gate::define('backups.manage-global', fn (User $user): bool => self::canManageGlobalBackups($user));
 
         // Livewire renders full-page layouts as views, so it does not instantiate AppLayout as a Blade component.

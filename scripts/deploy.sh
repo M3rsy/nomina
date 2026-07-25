@@ -18,6 +18,7 @@ if [ ! -f .env.production ]; then
     exit 1
 fi
 
+unset BACKUP_ARCHIVE_PASSWORD
 # shellcheck source=/dev/null
 source .env.production
 
@@ -25,6 +26,7 @@ missing=()
 [ -z "${DOMAIN:-}" ] && missing+=("DOMAIN")
 [ -z "${DB_PASSWORD:-}" ] && missing+=("DB_PASSWORD")
 [ -z "${APP_KEY:-}" ] && missing+=("APP_KEY")
+[ -z "${BACKUP_ARCHIVE_PASSWORD:-}" ] && missing+=("BACKUP_ARCHIVE_PASSWORD")
 
 if [ ${#missing[@]} -ne 0 ]; then
     echo "ERROR: The following required variables are missing in .env.production: ${missing[*]}"

@@ -1,0 +1,4 @@
+.env*
+bootstrap/cache/*.php
+!.env.example
+!.env.production.example

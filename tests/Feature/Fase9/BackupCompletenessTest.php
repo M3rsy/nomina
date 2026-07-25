@@ -1,12 +1,20 @@
 <?php
 
+use App\Services\BackupArchiveVerifier;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Spatie\Backup\Config\Config;
+use Spatie\Backup\Events\BackupZipWasCreated;
 use Symfony\Component\Process\Process;
+
+test('backup archives use AES-256 encryption and built-in verification', function () {
+    expect(config('backup.backup.encryption'))->toBe('aes256')
+        ->and(config('backup.backup.verify_backup'))->toBeTrue();
+});
 
 test('files backup preserves immutable attendance evidence without runtime or secret files', function () {
     $sandbox = sys_get_temp_dir().'/nomina-phase6-'.Str::uuid();
@@ -51,8 +59,7 @@ test('files backup preserves immutable attendance evidence without runtime or se
         $backupConfig['backup']['destination']['filename_prefix'] = '';
         $backupConfig['backup']['destination']['disks'] = [$disk];
         $backupConfig['backup']['temporary_directory'] = $sandbox.'/storage/app/backup-temp';
-        $backupConfig['backup']['password'] = null;
-        $backupConfig['backup']['encryption'] = 'none';
+        $backupConfig['backup']['password'] = 'phase7-test-passphrase';
 
         config([
             "filesystems.disks.{$disk}" => [
@@ -83,6 +90,11 @@ test('files backup preserves immutable attendance evidence without runtime or se
         $zip = new ZipArchive;
         expect($zip->open(Storage::disk($disk)->path($archivePath)))->toBeTrue();
 
+        $evidencePath = 'storage/app/private/uploads/acme/period/evidence.txt';
+        expect($zip->getFromName($evidencePath))->toBeFalse();
+        $zip->setPassword('phase7-test-passphrase');
+        expect($zip->getFromName($evidencePath))->toBe('immutable-attendance-evidence');
+
         $entries = collect();
 
         for ($index = 0; $index < $zip->numFiles; $index++) {
@@ -90,7 +102,7 @@ test('files backup preserves immutable attendance evidence without runtime or se
         }
 
         expect($entries)
-            ->toContain('storage/app/private/uploads/acme/period/evidence.txt')
+            ->toContain($evidencePath)
             ->not->toContain('.env.production')
             ->not->toContain('storage/app/nomina-backups/old.zip')
             ->not->toContain('storage/app/backup-temp/transient.tmp')
@@ -108,6 +120,76 @@ test('files backup preserves immutable attendance evidence without runtime or se
         File::deleteDirectory($sandbox);
     }
 });
+
+test('integrity verification rejects unsafe archives before storage', function (?string $password, string $tamper) {
+    $sandbox = sys_get_temp_dir().'/nomina-phase7-corrupt-'.Str::uuid();
+    $disk = 'phase7-corrupt-backups';
+
+    try {
+        File::ensureDirectoryExists($sandbox.'/source');
+        File::put($sandbox.'/source/evidence.txt', 'evidence');
+        File::put($sandbox.'/source/retained.txt', 'retained');
+
+        $backupConfig = config('backup');
+        $backupConfig['backup']['name'] = 'phase7-integrity';
+        $backupConfig['backup']['source']['files']['include'] = [$sandbox.'/source'];
+        $backupConfig['backup']['source']['files']['exclude'] = [];
+        $backupConfig['backup']['source']['files']['relative_path'] = $sandbox;
+        $backupConfig['backup']['source']['databases'] = [];
+        $backupConfig['backup']['destination']['filename_prefix'] = '';
+        $backupConfig['backup']['destination']['compression_method'] = ZipArchive::CM_STORE;
+        $backupConfig['backup']['destination']['disks'] = [$disk];
+        $backupConfig['backup']['temporary_directory'] = $sandbox.'/temporary';
+        $backupConfig['backup']['password'] = $password;
+
+        config([
+            "filesystems.disks.{$disk}" => [
+                'driver' => 'local',
+                'root' => $sandbox.'/destination',
+                'throw' => true,
+            ],
+            'phase7_integrity_test' => $backupConfig,
+        ]);
+
+        Storage::forgetDisk($disk);
+        app()->instance(Config::class, Config::fromArray($backupConfig));
+        Event::forget(BackupZipWasCreated::class);
+        Event::listen(BackupZipWasCreated::class, function (BackupZipWasCreated $event) use ($tamper): void {
+            $bytes = File::get($event->pathToZip);
+            $header = unpack('vname_length/vextra_length', substr($bytes, 26, 4));
+            $offset = 30 + $header['name_length'] + $header['extra_length'] + 20;
+            $bytes = match ($tamper) {
+                'payload' => substr_replace($bytes, chr(ord($bytes[$offset]) ^ 1), $offset, 1),
+                'rename' => str_replace('evidence.txt', 'renamed_.txt', $bytes),
+                default => $bytes,
+            };
+            File::put($event->pathToZip, $bytes);
+
+            $zip = new ZipArchive;
+            expect($zip->open($event->pathToZip, ZipArchive::RDONLY))->toBeTrue()
+                ->and($zip->numFiles)->toBe(2);
+            $zip->close();
+        });
+        Event::listen(BackupZipWasCreated::class, [app(BackupArchiveVerifier::class), 'verifyArchive']);
+
+        $exitCode = Artisan::call('backup:run', [
+            '--config' => 'phase7_integrity_test',
+            '--filename' => 'corrupt.zip',
+            '--only-files' => true,
+            '--disable-notifications' => true,
+        ]);
+
+        expect($exitCode)->not->toBe(0)
+            ->and(Storage::disk($disk)->allFiles())->toBe([]);
+    } finally {
+        Storage::forgetDisk($disk);
+        File::deleteDirectory($sandbox);
+    }
+})->with([
+    'payload corruption' => ['phase7-test-passphrase', 'payload'],
+    'entry rename' => ['phase7-test-passphrase', 'rename'],
+    'missing archive password' => [null, 'none'],
+]);
 
 test('the Laravel scheduler owns overlap protected backup maintenance', function () {
     $scheduledCommands = collect(app(Schedule::class)->events());
