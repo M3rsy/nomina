@@ -39,17 +39,23 @@ class Index extends Component
             return;
         }
 
+        if (blank(config('backup.backup.password'))) {
+            $this->message = 'El respaldo no está configurado de forma segura.';
+            $this->messageType = 'danger';
+            Log::warning('Backup generation blocked because archive encryption is not configured');
+
+            return;
+        }
+
         try {
             $exitCode = Artisan::call('backup:run', ['--disable-notifications' => true]);
 
             if ($exitCode !== 0) {
-                $commandOutput = trim(Artisan::output());
-                $this->message = 'Error al generar el respaldo: '.($commandOutput !== '' ? $commandOutput : "código {$exitCode}");
+                $this->message = 'No se pudo generar el respaldo. Revisa los registros del servidor.';
                 $this->messageType = 'danger';
 
                 Log::warning('Backup generation reported error', [
                     'exit_code' => $exitCode,
-                    'output' => $commandOutput,
                 ]);
 
                 return;
@@ -58,9 +64,9 @@ class Index extends Component
             $this->message = 'Respaldo generado correctamente.';
             $this->messageType = 'success';
         } catch (\Throwable $exception) {
-            $this->message = 'Error al generar el respaldo: '.$exception->getMessage();
+            $this->message = 'No se pudo generar el respaldo. Revisa los registros del servidor.';
             $this->messageType = 'danger';
-            Log::error('Backup generation failed', ['exception' => $exception]);
+            Log::error('Backup generation failed', ['exception_class' => $exception::class]);
         }
     }
 

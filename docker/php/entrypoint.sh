@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+if [ -z "${BACKUP_ARCHIVE_PASSWORD:-}" ]; then
+    echo "ERROR: BACKUP_ARCHIVE_PASSWORD is required in the production runtime." >&2
+    exit 1
+fi
+
 # Ensure Laravel writable directories are owned by the php-fpm user.
 chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache

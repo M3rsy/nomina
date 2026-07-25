@@ -48,6 +48,9 @@ cachés, logs, el directorio temporal y el destino de respaldos. Laravel es due�
 tres tareas (`backup:run`, `backup:clean`, `backup:monitor`); el cron del contenedor solo
 invoca `schedule:run`.
 
+Los ZIP usan AES-256, exigen contraseña y verifican identidad, tamaño y CRC antes de publicarse.
+La contraseña se guarda aparte y su rotación no recifra archivos anteriores.
+
 ## Estado de período de nómina
 
 ```text
@@ -72,6 +75,7 @@ draft → validating → ready → processing → processed → approved → exp
 ## Limitaciones conocidas
 
 - La restauración de respaldos es manual: spatie/laravel-backup crea ZIPs pero no provee restore automático.
+- No existe un catálogo persistente de archivos ni versiones de contraseña: el evento de ZIP identifica solo la ruta temporal y el evento de éxito no identifica un archivo final exacto.
 - Cada respaldo contiene la base de datos completa; no separamos por empresa aún.
 - El portal de comprobantes para empleados aún no existe.
 - Deducciones y salario final aún no se calculan en el motor de planilla.

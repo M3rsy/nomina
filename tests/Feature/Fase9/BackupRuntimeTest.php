@@ -56,7 +56,10 @@ test('the production entrypoint defaults safely and can skip app bootstrap for t
         );
 
         $entrypoint = dirname(__DIR__, 3).'/docker/php/entrypoint.sh';
-        $environment = ['PATH' => $directory.':'.getenv('PATH')];
+        $environment = [
+            'PATH' => $directory.':'.getenv('PATH'),
+            'BACKUP_ARCHIVE_PASSWORD' => 'phase7-test-passphrase',
+        ];
 
         $default = new Process([$entrypoint], env: $environment);
         $default->mustRun();
@@ -82,10 +85,93 @@ test('the production entrypoint defaults safely and can skip app bootstrap for t
     }
 });
 
+test('the production runtime stops before bootstrap when the archive password is missing', function () {
+    $directory = sys_get_temp_dir().'/nomina-entrypoint-preflight-'.bin2hex(random_bytes(8));
+    $activity = $directory.'/activity';
+    mkdir($directory, 0700);
+
+    try {
+        foreach (['chown', 'chmod', 'phase-seven-probe'] as $command) {
+            writePhaseFiveExecutable($directory, $command, "#!/bin/sh\nprintf '{$command}\\n' >> ".escapeshellarg($activity)."\n");
+        }
+
+        $entrypoint = dirname(__DIR__, 3).'/docker/php/entrypoint.sh';
+        $process = new Process(
+            [$entrypoint, 'phase-seven-probe'],
+            env: [
+                'PATH' => $directory.':'.getenv('PATH'),
+                'RUN_APP_BOOTSTRAP' => 'false',
+            ],
+        );
+        $process->run();
+
+        expect($process->isSuccessful())->toBeFalse()
+            ->and($process->getOutput().$process->getErrorOutput())->toContain('BACKUP_ARCHIVE_PASSWORD')
+            ->and($activity)->not->toBeFile();
+    } finally {
+        foreach (glob($directory.'/*') ?: [] as $path) {
+            @unlink($path);
+        }
+
+        @rmdir($directory);
+    }
+});
+
 test('the production image installs the PostgreSQL runtime client package', function () {
     $dockerfile = file_get_contents(dirname(__DIR__, 3).'/Dockerfile.prod');
 
     expect($dockerfile)->toMatch('/RUN apk add --no-cache(?:(?!&&).)*\bpostgresql-client\b/s');
+});
+
+test('the production Docker context excludes runtime environment files', function () {
+    expect(base_path('.dockerignore'))->toBeFile();
+
+    $patterns = file(base_path('.dockerignore'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+    expect($patterns)->toContain('.env', '.env.*')
+        ->toContain('!.env.example', '!.env.production.example');
+});
+
+test('deploy stops before repository mutation when the archive password is missing', function () {
+    $directory = sys_get_temp_dir().'/nomina-deploy-preflight-'.bin2hex(random_bytes(8));
+    $scripts = $directory.'/scripts';
+    $bin = $directory.'/bin';
+    $gitActivity = $directory.'/git-activity';
+    mkdir($scripts, 0700, true);
+    mkdir($bin, 0700);
+
+    try {
+        copy(dirname(__DIR__, 3).'/scripts/deploy.sh', $scripts.'/deploy.sh');
+        chmod($scripts.'/deploy.sh', 0700);
+        file_put_contents($directory.'/.env.production', implode("\n", [
+            'DOMAIN=example.test',
+            'DB_PASSWORD=database-secret',
+            'APP_KEY=base64:application-key',
+            '',
+        ]));
+        writePhaseFiveExecutable($bin, 'git', "#!/bin/sh\nprintf 'git\\n' >> ".escapeshellarg($gitActivity)."\n");
+
+        $process = new Process(
+            [$scripts.'/deploy.sh'],
+            $directory,
+            ['PATH' => $bin.':'.getenv('PATH'), 'BACKUP_ARCHIVE_PASSWORD' => 'inherited-must-not-count'],
+        );
+        $process->run();
+
+        expect($process->isSuccessful())->toBeFalse()
+            ->and($process->getOutput().$process->getErrorOutput())->toContain('BACKUP_ARCHIVE_PASSWORD')
+            ->and($gitActivity)->not->toBeFile();
+    } finally {
+        foreach (glob($bin.'/*') ?: [] as $path) {
+            @unlink($path);
+        }
+
+        @unlink($directory.'/.env.production');
+        @unlink($scripts.'/deploy.sh');
+        @rmdir($bin);
+        @rmdir($scripts);
+        @rmdir($directory);
+    }
 });
 
 /**
