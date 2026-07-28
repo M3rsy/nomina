@@ -5,8 +5,6 @@ use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
-use App\Services\Attendance\PayrollShiftEvaluation;
-use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\ShiftOccurrence;
 use Carbon\CarbonImmutable;
 
@@ -94,6 +92,21 @@ test('detects a complete post-shift overtime candidate', function () {
         ->and($candidate->rateMinutes->ordinaryMinutes)->toBe(0)
         ->and($candidate->fingerprint)->toHaveLength(64)
         ->and($candidate->key)->toHaveLength(64);
+});
+
+test('classifies a six to seventeen shift as eight ordinary hours and three candidate hours at twenty five percent', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 17:00:00',
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($candidate->kind)->toBe('post_shift')
+        ->and($candidate->minutes)->toBe(180)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(180);
 });
 
 test('keeps pre-shift and post-shift candidates as separate decisions', function () {
@@ -219,7 +232,7 @@ test('changes candidate identity when the attendance fact generation advances', 
         ->and($changed->fingerprint)->not->toBe($original->fingerprint);
 });
 
-test('uses the assigned schedule version rate bands', function () {
+test('ignores historical custom schedule bands in prospective calculations', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         workDate: '2026-07-20',
         entryAt: '2026-07-20 08:00:00',
@@ -234,12 +247,13 @@ test('uses the assigned schedule version rate bands', function () {
         ],
     ));
 
-    expect($analysis->scheduledRates->extra25Minutes)->toBe(120)
-        ->and($analysis->scheduledRates->extra50Minutes)->toBe(120)
+    expect($analysis->scheduledRates->ordinaryMinutes)->toBe(240)
+        ->and($analysis->scheduledRates->extra25Minutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra50Minutes)->toBe(0)
         ->and($analysis->scheduledRates->totalMinutes())->toBe(240);
 });
 
-test('blocks persisted rate bands that do not cover the complete day', function () {
+test('ignores incomplete historical rate bands and uses canonical coverage', function () {
     $occurrence = attendanceOccurrence(
         workDate: '2026-07-20',
         entryAt: '2026-07-20 06:00:00',
@@ -251,12 +265,9 @@ test('blocks persisted rate bands that do not cover the complete day', function 
         ],
     );
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
-    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect());
-
-    expect($analysis->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
-        ->and($analysis->scheduledRates->totalMinutes())->toBe(0)
-        ->and($evaluation->status)->toBe(PayrollShiftEvaluation::BLOCKED)
-        ->and($evaluation->blockers->sole()['code'])->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS);
+    expect($analysis->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(480);
 });
 
 test('propagates an unresolved occurrence without inventing observed time', function () {

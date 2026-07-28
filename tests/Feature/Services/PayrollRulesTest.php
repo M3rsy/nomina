@@ -37,39 +37,23 @@ test('overtime bands fallback to defaults when no config is provided', function 
         ->and($bands[1]['bucket'])->toBe('ordinary');
 });
 
-test('overtime bands normalize configured schedule JSON', function () {
+test('overtime bands ignore historical per-schedule configuration', function () {
     $rules = new PayrollRules;
 
     $bands = $rules->normalizedOvertimeBands([
-        ['start' => '08:00', 'end' => '12:00', 'rate' => 25],
-        ['start' => '12:00', 'end' => '20:00', 'rate' => 50],
+        ['start' => '00:00', 'end' => '24:00', 'rate' => 100],
     ]);
 
     expect($bands)->toBeArray()
-        ->and($bands)->toHaveCount(2)
-        ->and($bands[0]['start'])->toBe(480)
-        ->and($bands[0]['bucket'])->toBe('extra25')
-        ->and($bands[1]['start'])->toBe(720)
-        ->and($bands[1]['bucket'])->toBe('extra50');
+        ->and($bands)->toHaveCount(4)
+        ->and($bands[0])->toMatchArray(['start' => 0, 'end' => 360, 'bucket' => 'extra75', 'extra_percent' => 75])
+        ->and($bands[1])->toMatchArray(['start' => 360, 'end' => 840, 'bucket' => 'ordinary', 'extra_percent' => 0])
+        ->and($bands[2])->toMatchArray(['start' => 840, 'end' => 1080, 'bucket' => 'extra25', 'extra_percent' => 25])
+        ->and($bands[3])->toMatchArray(['start' => 1080, 'end' => 1440, 'bucket' => 'extra50', 'extra_percent' => 50]);
 });
 
-test('rate bands must cover every minute exactly once', function (array $bands, bool $expected) {
-    expect((new PayrollRules)->hasCompleteRateBandCoverage($bands))->toBe($expected);
-})->with([
-    'complete day' => [[
-        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
-        ['start' => '06:00', 'end' => '14:00', 'rate' => 0],
-        ['start' => '14:00', 'end' => '18:00', 'rate' => 25],
-        ['start' => '18:00', 'end' => '00:00', 'rate' => 50],
-    ], true],
-    'gap' => [[
-        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
+test('canonical global rate bands always provide complete coverage', function () {
+    expect((new PayrollRules)->hasCompleteRateBandCoverage([
         ['start' => '06:00', 'end' => '12:00', 'rate' => 0],
-        ['start' => '14:00', 'end' => '00:00', 'rate' => 50],
-    ], false],
-    'overlap' => [[
-        ['start' => '00:00', 'end' => '06:00', 'rate' => 75],
-        ['start' => '06:00', 'end' => '14:00', 'rate' => 0],
-        ['start' => '12:00', 'end' => '00:00', 'rate' => 50],
-    ], false],
-]);
+    ]))->toBeTrue();
+});

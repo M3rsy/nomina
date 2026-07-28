@@ -7,7 +7,7 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
-use App\Services\PayrollRules;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -64,7 +64,7 @@ class Index extends Component
         'La jornada ordinaria vigente es 06:00-14:00 y se completa con 25%, 50% y 75% en la lógica de cálculo.',
         'Domingos y feriados se tratan como jornada 100% extra en el motor de nómina.',
         'Los cambios de `is_working_day` y `base_ordinary_hours` sí pueden cambiar resultados futuros.',
-        'Los tramos de recargo deben cubrir las 24 horas exactamente una vez, sin huecos ni superposiciones.',
+        'Los recargos son globales y no se editan por jornada.',
     ];
 
     public function mount(): void
@@ -261,8 +261,8 @@ class Index extends Component
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, \App\Models\WorkSchedule>|array<int, \App\Models\WorkSchedule>  $existing
-     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $defaults
+     * @param  Collection<int, WorkSchedule>|array<int, WorkSchedule>  $existing
+     * @param  Collection<int, array<string, mixed>>  $defaults
      * @param  array<int, string>  $dayNames
      */
     private function loadSchedulesFromRows($existing, $defaults, array $dayNames): void
@@ -398,32 +398,11 @@ class Index extends Component
             'schedules.*.start_time' => ['nullable', 'date_format:H:i'],
             'schedules.*.end_time' => ['nullable', 'date_format:H:i'],
             'schedules.*.notes' => 'nullable|string|max:500',
-            'schedules.*.banding_json' => [
-                'nullable',
-                'string',
-                'max:5000',
-                function (string $attribute, mixed $value, callable $fail): void {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-
-                    if (! is_string($value) || json_decode($value, true) === null && json_last_error() !== JSON_ERROR_NONE) {
-                        $fail('El JSON de tramos debe ser válido.');
-                    }
-                },
-            ],
         ]);
 
         $errors = [];
 
         foreach ($this->schedules as $index => $row) {
-            $rawBands = $row['banding_json'] ?? null;
-
-            if (! blank($rawBands)
-                && ! app(PayrollRules::class)->hasCompleteRateBandCoverage($this->normalizeBandingJson($rawBands))) {
-                $errors["schedules.$index.banding_json"] = 'Los tramos deben cubrir las 24 horas sin huecos ni superposiciones.';
-            }
-
             if (! (bool) $row['is_working_day']) {
                 continue;
             }
@@ -448,6 +427,7 @@ class Index extends Component
         return collect($this->schedules)
             ->map(function (array $row) use ($companyId): array {
                 $isWorkingDay = (bool) $row['is_working_day'];
+                $original = $this->originalSchedules[(int) $row['day_of_week']] ?? [];
 
                 return [
                     'company_id' => $companyId,
@@ -459,7 +439,7 @@ class Index extends Component
                     'start_time' => $isWorkingDay ? $this->normalizeTime($row['start_time']) : null,
                     'end_time' => $isWorkingDay ? $this->normalizeTime($row['end_time']) : null,
                     'notes' => $row['notes'] ?: null,
-                    'banding_json' => $this->normalizeBandingJson($row['banding_json'] ?? null),
+                    'banding_json' => $this->normalizeBandingJson($original['banding_json'] ?? null),
                 ];
             })
             ->toArray();
@@ -500,11 +480,6 @@ class Index extends Component
                 continue;
             }
 
-            if ($this->normalizedBandingSignature($original['banding_json'] ?? null)
-                !== $this->normalizedBandingSignature($schedule['banding_json'] ?? null)) {
-                return true;
-            }
-
             if ($currentBase !== $originalBase) {
                 return true;
             }
@@ -516,31 +491,6 @@ class Index extends Component
         }
 
         return false;
-    }
-
-    private function normalizedBandingSignature(mixed $value): string
-    {
-        $bands = $this->normalizeBandingJson($value);
-
-        if (empty($bands)) {
-            return '[]';
-        }
-
-        if (! array_is_list($bands)) {
-            $bands = $bands['bands'] ?? [];
-        }
-
-        if (! is_array($bands)) {
-            return '[]';
-        }
-
-        $normalized = array_values(
-            array_filter($bands, static fn (mixed $band): bool => is_array($band)),
-        );
-
-        usort($normalized, static fn (array $left, array $right): int => ($left['start'] ?? 0) <=> ($right['start'] ?? 0));
-
-        return json_encode($normalized) ?: '[]';
     }
 
     private function loadHistoricalContext(int $companyId): void
