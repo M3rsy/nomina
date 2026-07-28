@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ProcessOvertimeDecisionBatch;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
@@ -17,10 +18,29 @@ use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
-beforeEach(fn () => $this->seed(PermissionRoleSeeder::class));
+beforeEach(function () {
+    $this->seed(PermissionRoleSeeder::class);
+    Queue::fake();
+});
+test('dispatches new and queued retries after commit but not completed batches', function () {
+    $context = batchRequestFixture();
+    $key = (string) Str::uuid();
+    DB::transaction(function () use ($context, $key): void {
+        requestBatch($context, ['key' => $key]);
+        Queue::assertNothingPushed();
+    });
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
+    $batch = requestBatch($context, ['key' => $key]);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
+    $batch->update(['status' => OvertimeDecisionBatch::COMPLETED]);
+    requestBatch($context, ['key' => $key]);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
+});
 test('freezes authoritative pending candidates in a queued batch', function () {
     $context = batchRequestFixture();
     $batch = requestBatch($context);
@@ -29,6 +49,102 @@ test('freezes authoritative pending candidates in a queued batch', function () {
         ->and($batch->items)->toHaveCount(1)
         ->and($batch->items->sole()->fingerprint)->toBe($context['candidate']->fingerprint)
         ->and($batch->items->sole()->status)->toBe('pending');
+});
+test('recorder safely reuses the decision linked to the same batch item', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    $item = $batch->items->sole();
+    $recorder = app(OvertimeDecisionRecorder::class);
+    $arguments = [
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate']->key,
+        OvertimeDecision::APPROVED, 'Cobertura extraordinaria confirmada', $context['actor'], $item->id,
+    ];
+    $first = $recorder->decide(...$arguments);
+    expect($recorder->decide(...$arguments)->is($first))->toBeTrue()
+        ->and($first->batch_item_id)->toBe($item->id)
+        ->and(OvertimeDecision::query()->count())->toBe(1);
+    $arguments[5] = 'Un motivo distinto';
+    expect(fn () => $recorder->decide(...$arguments))->toThrow(LogicException::class)
+        ->and(OvertimeDecision::query()->count())->toBe(1);
+});
+test('processes approved and rejected batches to completion', function (string $action) {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context, ['decision' => $action]);
+    (new ProcessOvertimeDecisionBatch($batch->id))->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('completed')
+        ->and($batch->fresh()->finished_at)->not->toBeNull()
+        ->and($batch->items()->sole()->status)->toBe('succeeded')
+        ->and($batch->items()->sole()->attempts)->toBe(1)
+        ->and($batch->items()->sole()->decision->decision)->toBe($action);
+})->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
+test('continues after a stale item and reports partial completion', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context, ['targets' => [batchTarget($context), batchTarget(addBatchCandidate($context))]]);
+    $context['exit_mark']->update(['event_at' => '2026-07-20 14:45:00', 'status' => 'corrected']);
+    (new ProcessOvertimeDecisionBatch($batch->id))->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('completed_with_errors')
+        ->and($batch->items()->pluck('status')->sort()->values()->all())->toBe(['failed', 'succeeded'])
+        ->and($batch->items()->where('status', 'failed')->sole()->last_error)->not->toBeNull()
+        ->and(OvertimeDecision::query()->count())->toBe(1);
+});
+test('resumes after a decision was created before item completion without duplicates', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    $item = $batch->items->sole();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate']->key,
+        $batch->decision, $batch->reason, $context['actor'], $item->id,
+    );
+    $job = new ProcessOvertimeDecisionBatch($batch->id);
+    $job->handle(app(OvertimeDecisionRecorder::class));
+    $job->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('completed')
+        ->and($item->fresh()->status)->toBe('succeeded')
+        ->and($item->fresh()->attempts)->toBe(1)
+        ->and(OvertimeDecision::query()->count())->toBe(1);
+});
+test('records revoked authorization as an item failure', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    $context['actor']->update(['is_active' => false]);
+    (new ProcessOvertimeDecisionBatch($batch->id))->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('completed_with_errors')
+        ->and($batch->items()->sole()->status)->toBe('failed')
+        ->and(OvertimeDecision::query()->count())->toBe(0);
+});
+test('terminalizes exhausted infrastructure failures and retries the same request', function () {
+    $context = batchRequestFixture();
+    $key = (string) Str::uuid();
+    $batch = requestBatch($context, ['key' => $key]);
+    $recorder = Mockery::mock(OvertimeDecisionRecorder::class);
+    $recorder->shouldReceive('decide')->once()->andThrow(new RuntimeException('database unavailable'));
+    $job = new ProcessOvertimeDecisionBatch($batch->id);
+    expect(fn () => $job->handle($recorder))
+        ->toThrow(RuntimeException::class);
+    $job->failed(new RuntimeException('database unavailable'));
+    $job->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('failed')
+        ->and($batch->fresh()->finished_at)->not->toBeNull()
+        ->and($batch->items()->sole()->status)->toBe('pending');
+    $retry = requestBatch($context, ['key' => $key]);
+    expect([$retry->status, $retry->finished_at, $retry->last_error])->toBe(['queued', null, null]);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
+});
+test('processes bounded chunks and redispatches until terminal', function () {
+    $context = batchRequestFixture();
+    $targets = [batchTarget($context)];
+    foreach (range(2, 21) as $_) {
+        $targets[] = batchTarget(addBatchCandidate($context));
+    }
+    $batch = requestBatch($context, ['targets' => $targets]);
+    $job = new ProcessOvertimeDecisionBatch($batch->id);
+    $job->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->items()->where('status', 'succeeded')->count())->toBe(20)
+        ->and($batch->items()->where('status', 'pending')->count())->toBe(1);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
+    $job->handle(app(OvertimeDecisionRecorder::class));
+    expect($batch->fresh()->status)->toBe('completed')
+        ->and($batch->items()->where('status', 'succeeded')->count())->toBe(21);
 });
 test('returns the original batch for an exact idempotent retry', function () {
     $context = batchRequestFixture();
@@ -134,5 +250,17 @@ function batchRequestFixture(string $periodStatus = 'uploaded'): array
         ->analyze(app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20'))
         ->overtimeCandidates->sole();
 
-    return compact('company', 'employee', 'period', 'actor', 'candidate') + ['exit_mark' => $marks->last()];
+    return compact('company', 'profile', 'employee', 'period', 'file', 'actor', 'candidate') + ['exit_mark' => $marks->last()];
+}
+function addBatchCandidate(array $context): array
+{
+    $employee = Employee::factory()->forCompany($context['company'])->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $context['profile'], '2026-07-01', 'Jornada diurna');
+    $marks = collect(['2026-07-20 06:00:00', '2026-07-20 15:00:00'])
+        ->map(fn (string $eventAt) => RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+            ->forUploadedFile($context['file'])->forEmployee($employee)->create(['event_at' => $eventAt, 'status' => 'valid']));
+    $candidate = app(AttendanceShiftAnalyzer::class)
+        ->analyze(app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20'))->overtimeCandidates->sole();
+
+    return compact('employee', 'candidate') + ['exit_mark' => $marks->last()];
 }

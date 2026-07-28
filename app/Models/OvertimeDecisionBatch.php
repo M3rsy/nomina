@@ -12,6 +12,12 @@ class OvertimeDecisionBatch extends Model
 
     public const QUEUED = 'queued';
 
+    public const PROCESSING = 'processing';
+
+    public const COMPLETED = 'completed';
+
+    public const COMPLETED_WITH_ERRORS = 'completed_with_errors';
+
     public const STATUSES = ['queued', 'processing', 'completed', 'completed_with_errors', 'failed'];
 
     protected $fillable = [

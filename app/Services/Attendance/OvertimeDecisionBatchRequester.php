@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Jobs\ProcessOvertimeDecisionBatch;
 use App\Models\Company;
 use App\Models\OvertimeDecision;
 use App\Models\OvertimeDecisionBatch;
@@ -35,7 +36,7 @@ final class OvertimeDecisionBatchRequester
             $period->id, $actor->id, $decision, $reason, $canonical->all(),
         ], JSON_THROW_ON_ERROR));
         if ($existing = $this->existing($idempotencyKey, $payloadHash)) {
-            return $existing;
+            return $this->recover($existing);
         }
 
         try {
@@ -69,12 +70,30 @@ final class OvertimeDecisionBatchRequester
                     'status' => OvertimeDecisionBatch::QUEUED, 'total_items' => $items->count(),
                 ]);
                 $batch->items()->createMany($items->all());
+                DB::afterCommit(fn () => ProcessOvertimeDecisionBatch::dispatch($batch->id));
 
                 return $batch->load('items');
             });
         } catch (UniqueConstraintViolationException $exception) {
-            return $this->existing($idempotencyKey, $payloadHash) ?? throw $exception;
+            return ($existing = $this->existing($idempotencyKey, $payloadHash))
+                ? $this->recover($existing) : throw $exception;
         }
+    }
+
+    private function recover(OvertimeDecisionBatch $batch): OvertimeDecisionBatch
+    {
+        return DB::transaction(function () use ($batch): OvertimeDecisionBatch {
+            $batch = OvertimeDecisionBatch::withoutCompanyScope()->lockForUpdate()->findOrFail($batch->id);
+            if ($batch->status === 'failed') {
+                $batch->items()->where('status', 'processing')->update(['status' => 'pending', 'last_error' => null]);
+                $batch->update(['status' => OvertimeDecisionBatch::QUEUED, 'started_at' => null, 'finished_at' => null, 'last_error' => null]);
+            }
+            if ($batch->status === OvertimeDecisionBatch::QUEUED) {
+                DB::afterCommit(fn () => ProcessOvertimeDecisionBatch::dispatch($batch->id));
+            }
+
+            return $batch->load('items');
+        });
     }
 
     private function authorize(User $actor, Company $company): void

@@ -5,6 +5,7 @@ namespace App\Services\Attendance;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
+use App\Models\OvertimeDecisionBatchItem;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Services\Payroll\BandSplit;
@@ -33,6 +34,7 @@ class OvertimeDecisionRecorder
         string $decision,
         string $reason,
         User $actor,
+        ?int $batchItemId = null,
     ): OvertimeDecision {
         if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)) {
             throw ValidationException::withMessages([
@@ -49,6 +51,20 @@ class OvertimeDecisionRecorder
         }
 
         $date = CarbonImmutable::parse($workDate)->startOfDay();
+        $batchItem = $batchItemId === null ? null : OvertimeDecisionBatchItem::query()
+            ->with('batch')->findOrFail($batchItemId);
+        if ($batchItem !== null) {
+            $batch = $batchItem->batch;
+            if ($batch->company_id !== $payPeriod->company_id || $batch->pay_period_id !== $payPeriod->id
+                || $batch->requested_by !== $actor->id || $batch->decision !== $decision || $batch->reason !== $reason
+                || $batchItem->employee_id !== $employee->id || ! $batchItem->work_date->isSameDay($date)
+                || $batchItem->candidate_key !== $candidateKey) {
+                throw new LogicException('Batch item identity does not match the decision context.');
+            }
+            if ($linked = OvertimeDecision::withoutCompanyScope()->where('batch_item_id', $batchItem->id)->first()) {
+                return $this->verifiedLinkedDecision($linked, $batchItem, $payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor);
+            }
+        }
 
         return $this->contextLocker->within(
             $payPeriod->company_id,
@@ -58,7 +74,7 @@ class OvertimeDecisionRecorder
                 rawMarkIds: $this->resolver->resolve($employee, $date)->marks->pluck('id')->all(),
                 holidayStart: $date,
             ),
-            function (LockedPayrollContext $context) use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor): OvertimeDecision {
+            function (LockedPayrollContext $context) use ($payPeriod, $employee, $date, $candidateKey, $decision, $reason, $actor, $batchItem): OvertimeDecision {
                 $lockedPeriod = $context->payPeriod($payPeriod->id);
                 $lockedEmployee = $context->employee($employee->id);
                 $calendarContext = $context->holidayCalendar
@@ -68,6 +84,10 @@ class OvertimeDecisionRecorder
 
                 $this->validateContext($lockedPeriod, $lockedEmployee, $date);
                 $this->authorize($currentActor, $company);
+                if ($batchItem !== null && ($linked = OvertimeDecision::withoutCompanyScope()
+                    ->where('batch_item_id', $batchItem->id)->lockForUpdate()->first())) {
+                    return $this->verifiedLinkedDecision($linked, $batchItem, $lockedPeriod, $lockedEmployee, $date, $candidateKey, $decision, $reason, $currentActor);
+                }
 
                 $occurrence = $this->resolver->resolve($lockedEmployee, $date);
                 $analysis = $this->analyzer->analyze(
@@ -115,9 +135,31 @@ class OvertimeDecisionRecorder
                     'reason' => $reason,
                     'decided_by' => $currentActor->id,
                     'supersedes_id' => $previous?->id,
+                    'batch_item_id' => $batchItem?->id,
                 ]);
             },
         );
+    }
+
+    private function verifiedLinkedDecision(
+        OvertimeDecision $linked,
+        OvertimeDecisionBatchItem $item,
+        PayPeriod $period,
+        Employee $employee,
+        CarbonImmutable $date,
+        string $candidateKey,
+        string $decision,
+        string $reason,
+        User $actor,
+    ): OvertimeDecision {
+        if ($linked->company_id !== $period->company_id || $linked->pay_period_id !== $period->id
+            || $linked->employee_id !== $employee->id || ! $linked->work_date->isSameDay($date)
+            || $linked->candidate_key !== $candidateKey || $linked->fingerprint !== $item->fingerprint
+            || $linked->decision !== $decision || $linked->reason !== $reason || $linked->decided_by !== $actor->id) {
+            throw new LogicException('Linked batch decision does not match its immutable context.');
+        }
+
+        return $linked;
     }
 
     private function validateContext(PayPeriod $payPeriod, Employee $employee, CarbonImmutable $date): void
