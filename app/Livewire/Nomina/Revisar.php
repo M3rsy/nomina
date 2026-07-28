@@ -35,6 +35,8 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -155,9 +157,8 @@ class Revisar extends Component
 
     public ?int $activeOvertimeBatchId = null;
 
-    public array $overtimeBatchProgress = [];
-
-    public array $overtimeBatchErrors = [];
+    #[Locked]
+    public ?int $refreshedOvertimeBatchId = null;
 
     public bool $showAttendanceExceptionModal = false;
 
@@ -394,28 +395,42 @@ class Revisar extends Component
             $this->overtimeBatchReason, Auth::user(), $this->overtimeBatchRequestKey,
         );
         $this->activeOvertimeBatchId = $batch->id;
+        $this->refreshedOvertimeBatchId = null;
         $this->showOvertimeBatchModal = false;
         $this->resetOvertimeSelection();
-        $this->refreshOvertimeBatch($batch);
         session()->flash('success', 'El lote fue enviado y se procesará en segundo plano.');
     }
 
-    public function pollOvertimeBatch(): void
+    #[On('overtime-batch-terminal')]
+    public function refreshAfterOvertimeBatch(int $batchId): void
     {
-        if ($this->activeOvertimeBatchId === null) {
+        if ($this->activeOvertimeBatchId !== $batchId || $this->refreshedOvertimeBatchId === $batchId) {
             return;
         }
 
-        $batch = $this->actorOvertimeBatches()->find($this->activeOvertimeBatchId);
-        if ($batch === null) {
-            $this->activeOvertimeBatchId = null;
-            $this->overtimeBatchProgress = [];
-            $this->overtimeBatchErrors = [];
-
+        $batch = $this->actorOvertimeBatches()->find($batchId);
+        if ($batch === null || ! in_array($batch->status, [
+            OvertimeDecisionBatch::COMPLETED,
+            OvertimeDecisionBatch::COMPLETED_WITH_ERRORS,
+            'failed',
+        ], true)) {
             return;
         }
 
-        $this->refreshOvertimeBatch($batch);
+        $this->refreshedOvertimeBatchId = $batchId;
+        $this->periodReviewSnapshot = null;
+        $this->resetPage('overtimePage');
+    }
+
+    #[On('overtime-batch-unavailable')]
+    public function clearUnavailableOvertimeBatch(int $batchId): void
+    {
+        if ($this->activeOvertimeBatchId !== $batchId || $this->actorOvertimeBatches()->find($batchId) !== null) {
+            return;
+        }
+
+        $this->activeOvertimeBatchId = null;
+        $this->refreshedOvertimeBatchId = null;
     }
 
     public function openEditRawMark(int $id): void
@@ -1565,7 +1580,6 @@ class Revisar extends Component
             ->latest('id')->first();
         if ($batch !== null) {
             $this->activeOvertimeBatchId = $batch->id;
-            $this->refreshOvertimeBatch($batch);
         }
     }
 
@@ -1575,25 +1589,6 @@ class Revisar extends Component
             ->where('company_id', $this->payPeriod->company_id)
             ->where('pay_period_id', $this->payPeriod->id)
             ->where('requested_by', Auth::id());
-    }
-
-    private function refreshOvertimeBatch(OvertimeDecisionBatch $batch): void
-    {
-        $wasTerminal = (bool) ($this->overtimeBatchProgress['terminal'] ?? false);
-        $terminal = in_array($batch->status, ['completed', 'completed_with_errors', 'failed'], true);
-        $counts = $batch->items()->selectRaw('status, count(*) as total')->groupBy('status')
-            ->pluck('total', 'status');
-        $this->overtimeBatchProgress = [
-            'status' => $batch->status, 'total' => $batch->total_items,
-            'pending' => (int) ($counts['pending'] ?? 0), 'processing' => (int) ($counts['processing'] ?? 0),
-            'succeeded' => (int) ($counts['succeeded'] ?? 0), 'failed' => (int) ($counts['failed'] ?? 0),
-            'terminal' => $terminal,
-        ];
-        $this->overtimeBatchErrors = $batch->items()->where('status', 'failed')
-            ->whereNotNull('last_error')->limit(5)->pluck('last_error')->all();
-        if ($terminal && ! $wasTerminal) {
-            $this->resetPage('overtimePage');
-        }
     }
 
     private function overtimeBatchConfirmation(Collection $targets): string
