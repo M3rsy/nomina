@@ -12,10 +12,14 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceReviewQuery;
+use App\Services\Attendance\AttendanceSegment;
+use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
 use App\Services\Attendance\OvertimeDecisionRecorder;
+use App\Services\Attendance\PayrollShiftReview;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
@@ -230,7 +234,7 @@ test('queues only authoritative selected overtime candidates with stable idempot
         ->assertSet('selectedOvertimeCandidates', [$token])
         ->call('openOvertimeBatch', $decision)
         ->assertSet('overtimeBatchCount', 1)
-        ->assertSet('overtimeBatchSelection', [$token.'|'.$context['candidate']->fingerprint])
+        ->assertSet('overtimeBatchSelection', fn ($value) => is_string($value) && strlen($value) === 64)
         ->call('saveOvertimeBatch')
         ->assertHasErrors(['overtimeBatchReason'])
         ->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada');
@@ -249,6 +253,140 @@ test('queues only authoritative selected overtime candidates with stable idempot
         ->reason->toBe('Cobertura extraordinaria confirmada')
         ->total_items->toBe(1);
 })->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
+test('selects every filtered overtime match across pages with compact public state', function () {
+    $context = batchRequestFixture();
+    foreach (range(1, 25) as $_) {
+        addBatchCandidate($context);
+    }
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('selectCurrentOvertimePage')
+        ->assertCount('selectedOvertimeCandidates', 25)
+        ->assertSee('Seleccionar los 26 resultados')
+        ->call('selectAllFilteredOvertime')
+        ->assertSet('allFilteredOvertimeSelected', true)
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->assertSeeHtml('checked disabled')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->assertSet('overtimeBatchCount', 26);
+
+    expect($component->get('overtimeBatchSelection'))->toBeString()->toHaveLength(64);
+
+    $component->set('overtimeBatchReason', 'Cobertura masiva confirmada')
+        ->call('saveOvertimeBatch')
+        ->assertHasNoErrors();
+
+    expect(OvertimeDecisionBatch::query()->sole()->total_items)->toBe(26);
+});
+test('all-match batches are bounded by active filters and ignore forged selected tokens', function () {
+    $context = batchRequestFixture();
+    $target = addBatchCandidate($context);
+    $otherFile = UploadedFile::factory()->forCompany($context['company'])->forPayPeriod($context['period'])->create();
+    $otherFileCandidate = addBatchCandidate($context, $otherFile);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $forgedTokens = [
+        implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]),
+        implode('|', [$otherFileCandidate['employee']->id, '2026-07-20', $otherFileCandidate['candidate']->key]),
+    ];
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->set('overtimeSearch', $target['employee']->external_id)
+        ->set('overtimeStatus', 'pending')
+        ->set('overtimeDate', '2026-07-20')
+        ->set('overtimeRate', 'extra25')
+        ->set('uploaded_file_id', $context['file']->id)
+        ->call('selectAllFilteredOvertime')
+        ->set('selectedOvertimeCandidates', $forgedTokens)
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->assertSet('overtimeBatchCount', 1)
+        ->assertSee('Empleado: '.$target['employee']->external_id)
+        ->assertSee('Archivo: '.$context['file']->original_name)
+        ->set('overtimeBatchReason', 'Filtro auditado')
+        ->call('saveOvertimeBatch')
+        ->assertHasNoErrors();
+
+    expect(OvertimeDecisionBatch::query()->sole()->items()->sole()->employee_id)
+        ->toBe($target['employee']->id);
+});
+test('changing overtime filters clears all-match mode and clear returns to subset selection', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('selectAllFilteredOvertime')
+        ->assertSet('allFilteredOvertimeSelected', true)
+        ->set('overtimeRate', 'extra25')
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->call('selectAllFilteredOvertime')
+        ->call('clearOvertimeSelection')
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->call('selectCurrentOvertimePage');
+
+    expect($component->get('selectedOvertimeCandidates'))->toHaveCount(1);
+});
+test('rejects more than 500 filtered overtime matches without creating a batch', function () {
+    $context = batchRequestFixture();
+    $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
+    $candidates = collect(range(1, 501))->map(fn (int $index) => new AttendanceSegment(
+        $review->analysis->overtimeCandidates->sole()->kind,
+        $review->analysis->overtimeCandidates->sole()->start,
+        $review->analysis->overtimeCandidates->sole()->end,
+        hash('sha256', "candidate-{$index}"),
+        $review->analysis->overtimeCandidates->sole()->rateMinutes,
+    ));
+    $analysis = new AttendanceShiftAnalysis(
+        $review->analysis->status, $review->analysis->workDate, $review->analysis->entryAt,
+        $review->analysis->exitAt, $review->analysis->workedMinutes, $review->analysis->scheduledMinutes,
+        $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
+    );
+    $bulkReview = new PayrollShiftReview(
+        $review->employee, $review->occurrence, $analysis, collect(), collect(),
+    );
+    $query = Mockery::mock(AttendanceReviewQuery::class);
+    $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));
+    app()->instance(AttendanceReviewQuery::class, $query);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('selectAllFilteredOvertime')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->assertHasErrors(['selectedOvertimeCandidates'])
+        ->assertSee('Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.')
+        ->assertSet('showOvertimeBatchModal', false);
+
+    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+});
+test('all-match confirmation rejects candidate drift and filter changes before queueing', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('selectAllFilteredOvertime')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->set('overtimeBatchReason', 'Confirmación congelada');
+    $context['exit_mark']->update(['event_at' => '2026-07-20 14:45:00']);
+    $component->call('saveOvertimeBatch')
+        ->assertHasErrors(['selectedOvertimeCandidates']);
+    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+
+    $context['exit_mark']->update(['event_at' => '2026-07-20 14:30:00']);
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('selectAllFilteredOvertime')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->set('overtimeSearch', 'otro empleado')
+        ->assertSet('showOvertimeBatchModal', false)
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->call('saveOvertimeBatch');
+
+    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+});
 test('resets overtime pagination and stale selection when its source or an individual decision changes', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
@@ -328,13 +466,13 @@ function batchRequestFixture(string $periodStatus = 'uploaded'): array
 
     return compact('company', 'profile', 'employee', 'period', 'file', 'actor', 'candidate') + ['exit_mark' => $marks->last()];
 }
-function addBatchCandidate(array $context): array
+function addBatchCandidate(array $context, ?UploadedFile $file = null): array
 {
     $employee = Employee::factory()->forCompany($context['company'])->create();
     app(EmployeeScheduleAssigner::class)->assign($employee, $context['profile'], '2026-07-01', 'Jornada diurna');
     $marks = collect(['2026-07-20 06:00:00', '2026-07-20 15:00:00'])
         ->map(fn (string $eventAt) => RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
-            ->forUploadedFile($context['file'])->forEmployee($employee)->create(['event_at' => $eventAt, 'status' => 'valid']));
+            ->forUploadedFile($file ?? $context['file'])->forEmployee($employee)->create(['event_at' => $eventAt, 'status' => 'valid']));
     $candidate = app(AttendanceShiftAnalyzer::class)
         ->analyze(app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20'))->overtimeCandidates->sole();
 
