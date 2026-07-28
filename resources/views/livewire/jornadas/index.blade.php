@@ -38,6 +38,13 @@
             </section>
         @endif
 
+        @if ($showRetirementSuccess)
+            <section class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800 shadow-sm">
+                <p class="font-semibold">Jornada retirada</p>
+                <p class="mt-1">Las asignaciones vigentes y futuras ahora usan la jornada reemplazante.</p>
+            </section>
+        @endif
+
         @if ($requiresProfileMigration)
             <section class="rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900 shadow-sm">
                 <p class="font-semibold">Faltan migraciones de jornadas</p>
@@ -109,6 +116,18 @@
                         </label>
                         @if ($canManageSchedules)
                             <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" @disabled($requiresProfileMigration)>Nueva plantilla</button>
+                            @if ($selectedProfileId)
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked="true"
+                                    wire:click="openRetireProfile({{ $selectedProfileId }})"
+                                    class="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                                >
+                                    <span class="h-3 w-3 rounded-full bg-emerald-500"></span>
+                                    Disponible
+                                </button>
+                            @endif
                             @if ($requiresProfileMigration)
                                 <p class="text-xs text-slate-500">No se puede crear o versionar plantillas hasta aplicar migraciones pendientes.</p>
                             @endif
@@ -124,6 +143,40 @@
                         </label>
                         <button type="button" wire:click="createProfile" class="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</button>
                         <button type="button" wire:click="cancelCreateProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-indigo-700">Cancelar</button>
+                    </div>
+                @endif
+
+                @if ($showRetireProfile)
+                    <div class="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                        <div class="grid gap-3 md:grid-cols-2">
+                            <label class="text-sm font-semibold text-amber-950">
+                                Jornada reemplazante
+                                <select wire:model="replacementProfileId" class="mt-1 w-full rounded-xl border-amber-300 bg-white">
+                                    <option value="">Seleccioná una jornada</option>
+                                    @foreach ($profiles as $profile)
+                                        @if ($profile['id'] !== $retiringProfileId)
+                                            <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                @error('replacementProfileId') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                            </label>
+
+                            <label class="text-sm font-semibold text-amber-950">
+                                Motivo del retiro
+                                <input type="text" wire:model="retirementReason" maxlength="500" class="mt-1 w-full rounded-xl border-amber-300 bg-white" />
+                                @error('retirementReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                            </label>
+                        </div>
+
+                        <p class="mt-3 text-sm text-amber-900">
+                            Se reasignarán {{ $retirementAffectedEmployeeCount }} empleados con referencias vigentes o futuras. Esta acción no se puede revertir.
+                        </p>
+
+                        <div class="mt-3 flex justify-end gap-2">
+                            <button type="button" wire:click="cancelRetireProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-amber-800">Cancelar</button>
+                            <button type="button" wire:click="retireProfile" class="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">Retirar y reasignar</button>
+                        </div>
                     </div>
                 @endif
 
@@ -283,5 +336,43 @@
                 </article>
             </aside>
         </section>
+
+        @if ($profileHistory !== [])
+            <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-xl font-semibold text-slate-900">Historial de jornadas</h2>
+                <p class="mt-1 text-sm text-slate-600">Las jornadas retiradas y las versiones reemplazadas son de solo lectura.</p>
+
+                <div class="mt-4 overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            <tr>
+                                <th class="px-3 py-2">Jornada</th>
+                                <th class="px-3 py-2">Estado</th>
+                                <th class="px-3 py-2">Fecha</th>
+                                <th class="px-3 py-2">Responsable</th>
+                                <th class="px-3 py-2">Motivo</th>
+                                <th class="px-3 py-2">Reemplazo</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            @foreach ($profileHistory as $profile)
+                                <tr>
+                                    <td class="px-3 py-3 font-semibold text-slate-900">{{ $profile['name'] }} · v{{ $profile['version'] }}</td>
+                                    <td class="px-3 py-3">
+                                        <span class="rounded-full px-2 py-1 text-xs font-semibold {{ $profile['status'] === 'retired' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700' }}">
+                                            {{ $profile['status'] === 'retired' ? 'Retirada' : 'Versión reemplazada' }}
+                                        </span>
+                                    </td>
+                                    <td class="px-3 py-3 text-slate-600">{{ $profile['date'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-slate-600">{{ $profile['actor'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-slate-600">{{ $profile['reason'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-slate-600">{{ $profile['replacement'] ?? '—' }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        @endif
     </div>
 </div>

@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\WorkScheduleProfileRetirer;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function (): void {
@@ -121,4 +123,114 @@ test('a locked payroll period rolls back the complete profile retirement', funct
         ->and($source->fresh()->retired_at)->toBeNull()
         ->and($assignment->fresh()->work_schedule_profile_id)->toBe($source->id)
         ->and($assignment->fresh()->effective_to)->toBeNull();
+});
+
+test('retirement locks payroll periods before employees', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id,
+        'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $source->id,
+        'effective_from' => '2026-01-01',
+        'effective_to' => null,
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-02-01',
+        'end_date' => '2026-02-28',
+        'status' => 'draft',
+    ]);
+
+    $queries = [];
+    DB::listen(static function (QueryExecuted $query) use (&$queries): void {
+        $queries[] = $query->sql;
+    });
+
+    app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $replacement,
+        'Orden canónico de bloqueos.',
+        $actor,
+    );
+
+    $periodQueryIndex = collect($queries)->search(
+        fn (string $sql): bool => str_contains($sql, 'from "pay_periods"'),
+    );
+    $employeeQueryIndex = collect($queries)->search(
+        fn (string $sql): bool => str_contains($sql, 'from "employees"'),
+    );
+    $assignmentQueryIndexes = collect($queries)
+        ->filter(fn (string $sql): bool => str_contains($sql, 'from "employee_schedule_assignments"'))
+        ->keys()
+        ->values();
+    $assignmentSnapshotQueryIndex = $assignmentQueryIndexes->get(0);
+    $assignmentLockQueryIndex = $assignmentQueryIndexes->get(1);
+
+    expect($periodQueryIndex)->toBeInt()
+        ->and($employeeQueryIndex)->toBeInt()
+        ->and($assignmentQueryIndexes)->toHaveCount(2)
+        ->and($assignmentSnapshotQueryIndex)->toBeInt()
+        ->and($assignmentLockQueryIndex)->toBeInt()
+        ->and($queries[$assignmentSnapshotQueryIndex])->not->toStartWith('select *')
+        ->and($queries[$assignmentLockQueryIndex])->toStartWith('select *')
+        ->and($assignmentSnapshotQueryIndex)->toBeLessThan($periodQueryIndex)
+        ->and($periodQueryIndex)->toBeLessThan($employeeQueryIndex)
+        ->and($employeeQueryIndex)->toBeLessThan($assignmentLockQueryIndex);
+});
+
+test('an unrelated locked payroll period does not block an unused profile retirement', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-02-01',
+        'end_date' => '2026-02-28',
+        'status' => 'processed',
+    ]);
+
+    $retired = app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $replacement,
+        'Retiro de una jornada sin asignaciones vigentes.',
+        $actor,
+    );
+
+    expect($retired->is_active)->toBeFalse()
+        ->and($retired->replacement_profile_id)->toBe($replacement->id);
+});
+
+test('repeating the same retirement is idempotent while changing its replacement conflicts', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $differentReplacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    $first = app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $replacement,
+        'Jornada reemplazada.',
+        $actor,
+    );
+    $second = app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $replacement,
+        'Este texto no debe reescribir la auditoría.',
+        $actor,
+    );
+
+    expect($second->id)->toBe($first->id)
+        ->and($second->replacement_profile_id)->toBe($replacement->id)
+        ->and($second->retirement_reason)->toBe('Jornada reemplazada.');
+
+    expect(fn () => app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $differentReplacement,
+        'Intento conflictivo.',
+        $actor,
+    ))->toThrow(ValidationException::class);
 });
