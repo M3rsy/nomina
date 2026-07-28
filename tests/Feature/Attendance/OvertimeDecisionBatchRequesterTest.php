@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\ProcessOvertimeDecisionBatch;
+use App\Livewire\Nomina\OvertimeBatchProgress;
 use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
@@ -246,7 +247,7 @@ test('queues only authoritative selected overtime candidates with stable idempot
     $component->call('saveOvertimeBatch')
         ->assertHasNoErrors()
         ->assertSet('selectedOvertimeCandidates', [])
-        ->assertSet('overtimeBatchProgress.status', 'queued');
+        ->assertSet('activeOvertimeBatchId', fn ($value) => is_int($value));
     expect(OvertimeDecisionBatch::query()->sole())
         ->request_key->toBe($requestKey)
         ->decision->toBe($decision)
@@ -431,32 +432,106 @@ test('resets overtime pagination and stale selection when its source or an indiv
         ->set('overtimeDecisionReason', 'Decisión individual')->call('saveOvertimeDecision');
     $component->assertSet('paginators.overtimePage', 1)->assertSet('selectedOvertimeCandidates', []);
 });
-test('polls only the actors period batch and reports bounded terminal errors', function () {
+test('renders actor scoped batch progress in an isolated livewire module', function () {
     $context = batchRequestFixture();
     $second = addBatchCandidate($context);
     $batch = requestBatch($context, ['targets' => [batchTarget($context), batchTarget($second)]]);
+    $items = $batch->items()->orderBy('id')->get();
+    $items[0]->update(['status' => 'succeeded']);
+    $items[1]->update(['status' => 'failed', 'last_error' => 'Las marcas cambiaron.']);
+    $batch->update(['status' => 'processing']);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(OvertimeBatchProgress::class, [
+        'payPeriod' => $context['period'], 'batchId' => $batch->id,
+    ])
+        ->assertSet('progress.status', 'processing')
+        ->assertSee('1 de 2 procesados')
+        ->assertSee('Las marcas cambiaron.')
+        ->assertSeeHtml('wire:poll.3s="poll"');
+    expect(strlen($component->html()))->toBeLessThan(12_000);
+
+    $otherPeriod = PayPeriod::factory()->forCompany($context['company'])->create();
+    Livewire::test(OvertimeBatchProgress::class, ['payPeriod' => $otherPeriod, 'batchId' => $batch->id])
+        ->assertSet('batchId', null)
+        ->assertDontSee('Las marcas cambiaron.');
+
+    $this->actingAs(User::factory()->forCompany($context['company'])->create()->assignRole('company_admin'));
+    Livewire::test(OvertimeBatchProgress::class, ['payPeriod' => $context['period'], 'batchId' => $batch->id])
+        ->assertSet('batchId', null)
+        ->assertDontSee('Las marcas cambiaron.');
+
+    $foreign = batchRequestFixture();
+    $superAdmin = User::factory()->create()->assignRole('super_admin');
+    $foreignBatch = requestBatch($foreign, ['actor' => $superAdmin]);
+    $this->actingAs($superAdmin);
+    Livewire::test(OvertimeBatchProgress::class, ['payPeriod' => $context['period'], 'batchId' => $foreignBatch->id])
+        ->assertSet('batchId', null);
+});
+test('mounts progress polling outside the parent payroll review module', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertSet('activeOvertimeBatchId', $batch->id)
+        ->assertSeeLivewire(OvertimeBatchProgress::class)
+        ->assertDontSeeHtml('wire:poll.3s="pollOvertimeBatch"');
+});
+test('stops isolated polling and notifies the parent when the batch becomes terminal', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    $batch->update(['status' => 'processing']);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+    $component = Livewire::test(OvertimeBatchProgress::class, [
+        'payPeriod' => $context['period'], 'batchId' => $batch->id,
+    ]);
+    $batch->items()->sole()->update(['status' => 'succeeded']);
+    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+
+    $component->call('poll')
+        ->assertSet('progress.terminal', true)
+        ->assertDontSeeHtml('wire:poll.3s="poll"')
+        ->assertDispatched('overtime-batch-terminal', batchId: $batch->id);
+});
+test('refreshes the parent once only after a verified terminal child event', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
     $this->actingAs($context['actor']);
     $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->assertSet('activeOvertimeBatchId', $batch->id)
-        ->set('paginators.overtimePage', 2)->call('pollOvertimeBatch')
-        ->assertSet('overtimeBatchProgress.status', 'processing');
-    $items = $batch->items()->orderBy('id')->get();
-    $items[0]->update(['status' => 'succeeded']);
-    $items[1]->update(['status' => 'failed', 'last_error' => 'Las marcas cambiaron.']);
-    $batch->update(['status' => 'completed_with_errors', 'finished_at' => now()]);
-    $component->call('pollOvertimeBatch')
-        ->assertSet('overtimeBatchProgress.failed', 1)
-        ->assertSet('overtimeBatchProgress.terminal', true)
+        ->set('paginators.overtimePage', 2)
+        ->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertSet('paginators.overtimePage', 2);
+    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
         ->assertSet('paginators.overtimePage', 1)
-        ->assertSet('overtimeBatchErrors.0', 'Las marcas cambiaron.');
-    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])->assertSet('activeOvertimeBatchId', null);
+        ->set('paginators.overtimePage', 2)
+        ->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertSet('paginators.overtimePage', 2);
+});
+test('clears only a verified unavailable active batch from the parent', function () {
+    $context = batchRequestFixture();
+    $batch = requestBatch($context);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->dispatch('overtime-batch-unavailable', batchId: $batch->id)
+        ->assertSet('activeOvertimeBatchId', $batch->id);
     $foreignCompany = Company::factory()->create();
-    $batch->update(['company_id' => $foreignCompany->id,
+    $batch->update([
+        'company_id' => $foreignCompany->id,
         'pay_period_id' => PayPeriod::factory()->forCompany($foreignCompany)->create()->id,
-        'requested_by' => User::factory()->forCompany($foreignCompany)->create()->id]);
-    $component->call('pollOvertimeBatch')->assertSet('activeOvertimeBatchId', null);
+        'requested_by' => User::factory()->forCompany($foreignCompany)->create()->id,
+    ]);
+
+    $component->dispatch('overtime-batch-unavailable', batchId: $batch->id)
+        ->assertSet('activeOvertimeBatchId', null);
 });
 function requestBatch(array $context, array $overrides = []): OvertimeDecisionBatch
 {

@@ -182,26 +182,11 @@
         </div>
 
         @if ($activeOvertimeBatchId)
-            <div
-                @if (!($overtimeBatchProgress['terminal'] ?? true)) wire:poll.3s="pollOvertimeBatch" @endif
-                aria-live="polite"
-                class="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950"
-            >
-                <div class="flex items-center justify-between gap-3">
-                    <p class="font-bold">Lote #{{ $activeOvertimeBatchId }} · {{ $overtimeBatchProgress['status'] ?? 'cargando' }}</p>
-                    <p>{{ $overtimeBatchProgress['succeeded'] ?? 0 }} de {{ $overtimeBatchProgress['total'] ?? 0 }} procesados</p>
-                </div>
-                @if (($overtimeBatchProgress['failed'] ?? 0) > 0)
-                    <p class="mt-2 font-semibold text-rose-800">{{ $overtimeBatchProgress['failed'] }} candidatos no pudieron procesarse.</p>
-                    <ul class="mt-1 list-disc pl-5 text-rose-800">
-                        @foreach ($overtimeBatchErrors as $error)<li>{{ $error }}</li>@endforeach
-                    </ul>
-                @elseif (($overtimeBatchProgress['status'] ?? null) === 'failed')
-                    <p class="mt-2 font-semibold text-rose-800">El lote no pudo completarse. Puede intentarlo nuevamente.</p>
-                @elseif ($overtimeBatchProgress['terminal'] ?? false)
-                    <p class="mt-2 font-semibold text-emerald-800">El lote terminó correctamente.</p>
-                @endif
-            </div>
+            <livewire:nomina.overtime-batch-progress
+                :pay-period="$payPeriod"
+                :batch-id="$activeOvertimeBatchId"
+                :key="'overtime-batch-'.$activeOvertimeBatchId"
+            />
         @endif
 
         <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
