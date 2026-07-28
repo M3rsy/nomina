@@ -51,7 +51,9 @@ test('company admin can access jornadas page of own company', function () {
     app(CurrentCompany::class)->set($company);
     $this->actingAs($admin)
         ->get('/jornadas')
-        ->assertOk();
+        ->assertOk()
+        ->assertDontSee('Nueva plantilla')
+        ->assertDontSee('Crear nueva versión');
 });
 
 test('super admin without active company sees empty jornadas page', function () {
@@ -63,7 +65,7 @@ test('super admin without active company sees empty jornadas page', function () 
         ->assertOk();
 });
 
-test('company admin can save work schedules for own company', function () {
+test('company admin cannot save work schedules for own company', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
 
@@ -72,14 +74,14 @@ test('company admin can save work schedules for own company', function () {
     Livewire::actingAs($admin)
         ->test(WorkSchedulesIndex::class)
         ->call('save')
-        ->assertSet('showSuccess', true);
+        ->assertForbidden();
 
-    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
+    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(0);
 });
 
-test('saving a schedule profile creates an audited immutable version', function () {
+test('super admin saving a schedule profile creates an audited immutable version', function () {
     $company = Company::factory()->create();
-    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     $this->seed(WorkScheduleSeeder::class);
     $originalProfile = WorkScheduleProfile::withoutCompanyScope()
@@ -118,9 +120,9 @@ test('saving a schedule profile creates an audited immutable version', function 
         ->assertHasErrors(['schedules.1.end_time']);
 });
 
-test('company admin can duplicate the selected schedule into a reusable profile', function () {
+test('super admin can duplicate the selected schedule into a reusable profile', function () {
     $company = Company::factory()->create();
-    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     $this->seed(WorkScheduleSeeder::class);
     app(CurrentCompany::class)->set($company);

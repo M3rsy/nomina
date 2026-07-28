@@ -1,8 +1,10 @@
 <?php
 
 use App\Models\Company;
+use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Policies\WorkSchedulePolicy;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Database\Seeders\WorkScheduleSeeder;
@@ -175,4 +177,23 @@ test('work schedule can persist configurable banding json', function () {
     expect($schedule->banding_json)->toBeArray()
         ->and($schedule->banding_json[0]['extra_percent'])->toBe(0)
         ->and($schedule->notes)->toBe('Pro bands');
+});
+
+test('only super administrators can manage work schedule profiles', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $companyAdmin = User::factory()->create();
+    $companyAdmin->assignRole('company_admin');
+    $companyAdmin->givePermissionTo('work_schedules.manage');
+
+    $superAdmin = User::factory()->create();
+    $superAdmin->assignRole('super_admin');
+
+    $policy = new WorkSchedulePolicy;
+
+    expect($policy->create($companyAdmin))->toBeFalse()
+        ->and($policy->create($superAdmin))->toBeTrue()
+        ->and($companyAdmin->can('retire', $profile))->toBeFalse()
+        ->and($superAdmin->can('retire', $profile))->toBeTrue()
+        ->and($companyAdmin->fresh()->can('work_schedules.view'))->toBeTrue();
 });

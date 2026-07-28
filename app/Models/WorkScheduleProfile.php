@@ -20,6 +20,10 @@ class WorkScheduleProfile extends Model
         'is_active',
         'created_by',
         'change_reason',
+        'retired_at',
+        'retired_by',
+        'retirement_reason',
+        'replacement_profile_id',
     ];
 
     protected function casts(): array
@@ -27,6 +31,7 @@ class WorkScheduleProfile extends Model
         return [
             'version' => 'integer',
             'is_active' => 'boolean',
+            'retired_at' => 'datetime',
         ];
     }
 
@@ -48,5 +53,15 @@ class WorkScheduleProfile extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function retiredBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'retired_by');
+    }
+
+    public function replacementProfile(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'replacement_profile_id');
     }
 }
