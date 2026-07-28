@@ -12,7 +12,24 @@ use Illuminate\Support\Collection;
 
 class ShiftOccurrenceResolver
 {
+    private ?PayrollPeriodSnapshotData $snapshot = null;
+
     public function __construct(private AttendanceFactGenerationTracker $factGenerations) {}
+
+    public function resolveFromSnapshot(
+        Employee $employee,
+        CarbonInterface|string $workDate,
+        PayrollPeriodSnapshotData $snapshot,
+    ): ShiftOccurrence {
+        $previous = $this->snapshot;
+        $this->snapshot = $snapshot;
+
+        try {
+            return $this->resolve($employee, $workDate);
+        } finally {
+            $this->snapshot = $previous;
+        }
+    }
 
     public function resolve(Employee $employee, CarbonInterface|string $workDate): ShiftOccurrence
     {
@@ -30,15 +47,16 @@ class ShiftOccurrenceResolver
         }
 
         [$scheduledStart, $scheduledEnd, $windowStart, $windowEnd] = $this->bounds($employee, $date, $schedule);
-        $marks = RawMark::withoutCompanyScope()
-            ->where('company_id', $employee->company_id)
-            ->where('employee_id', $employee->id)
-            ->whereIn('status', ['valid', 'corrected'])
-            ->where('event_at', '>=', $windowStart)
-            ->where('event_at', '<', $windowEnd)
-            ->orderBy('event_at')
-            ->orderBy('id')
-            ->get();
+        $marks = $this->snapshot?->marks($employee, $windowStart, $windowEnd)
+            ?? RawMark::withoutCompanyScope()
+                ->where('company_id', $employee->company_id)
+                ->where('employee_id', $employee->id)
+                ->whereIn('status', ['valid', 'corrected'])
+                ->where('event_at', '>=', $windowStart)
+                ->where('event_at', '<', $windowEnd)
+                ->orderBy('event_at')
+                ->orderBy('id')
+                ->get();
 
         return new ShiftOccurrence(
             workDate: $date,
@@ -54,11 +72,8 @@ class ShiftOccurrenceResolver
                 default => ShiftOccurrence::AMBIGUOUS,
             },
             // Adjacent facts can move a boundary, so they also invalidate this occurrence identity.
-            factGeneration: $this->factGenerations->currentForDates($employee, [
-                $date->subDay(),
-                $date,
-                $date->addDay(),
-            ]),
+            factGeneration: $this->snapshot?->factGeneration($employee, [$date->subDay(), $date, $date->addDay()])
+                ?? $this->factGenerations->currentForDates($employee, [$date->subDay(), $date, $date->addDay()]),
         );
     }
 
@@ -96,6 +111,10 @@ class ShiftOccurrenceResolver
 
     private function assignmentFor(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
     {
+        if ($this->snapshot !== null) {
+            return $this->snapshot->assignment($employee, $date);
+        }
+
         return EmployeeScheduleAssignment::withoutCompanyScope()
             ->where('company_id', $employee->company_id)
             ->where('employee_id', $employee->id)
@@ -152,15 +171,19 @@ class ShiftOccurrenceResolver
 
         $windowStart = $this->defaultBoundaryBetween($employee, $leftDate->subDay(), $leftDate);
         $windowEnd = $this->defaultBoundaryBetween($employee, $rightDate, $rightDate->addDay());
-        $markInstants = RawMark::withoutCompanyScope()
-            ->where('company_id', $employee->company_id)
-            ->where('employee_id', $employee->id)
-            ->whereIn('status', ['valid', 'corrected'])
-            ->when($ignoreRawMarkId !== null, fn ($query) => $query->whereKeyNot($ignoreRawMarkId))
-            ->where('event_at', '>=', $windowStart)
-            ->where('event_at', '<', $windowEnd)
-            ->orderBy('event_at')
-            ->pluck('event_at')
+        $markInstants = ($this->snapshot !== null
+            ? $this->snapshot->marks($employee, $windowStart, $windowEnd)
+                ->when($ignoreRawMarkId !== null, fn (Collection $marks) => $marks->where('id', '!=', $ignoreRawMarkId))
+                ->pluck('event_at')
+            : RawMark::withoutCompanyScope()
+                ->where('company_id', $employee->company_id)
+                ->where('employee_id', $employee->id)
+                ->whereIn('status', ['valid', 'corrected'])
+                ->when($ignoreRawMarkId !== null, fn ($query) => $query->whereKeyNot($ignoreRawMarkId))
+                ->where('event_at', '>=', $windowStart)
+                ->where('event_at', '<', $windowEnd)
+                ->orderBy('event_at')
+                ->pluck('event_at'))
             ->map(fn ($eventAt): CarbonImmutable => CarbonImmutable::parse($eventAt));
 
         if ($probe !== null
@@ -261,6 +284,10 @@ class ShiftOccurrenceResolver
         EmployeeScheduleAssignment $assignment,
         CarbonImmutable $date,
     ): ?WorkSchedule {
+        if ($this->snapshot !== null) {
+            return $this->snapshot->schedule($assignment, $date);
+        }
+
         return WorkSchedule::withoutCompanyScope()
             ->where('company_id', $employee->company_id)
             ->where('work_schedule_profile_id', $assignment->work_schedule_profile_id)

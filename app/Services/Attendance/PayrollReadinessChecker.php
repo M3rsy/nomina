@@ -24,10 +24,11 @@ class PayrollReadinessChecker
         $employees = Employee::withoutCompanyScope()
             ->where('company_id', $payPeriod->company_id)
             ->get();
+        $snapshot = PayrollPeriodSnapshotData::capture($payPeriod, $employees);
 
         for ($date = $start; $date->lte($end); $date = $date->addDay()) {
             foreach ($employees as $employee) {
-                $evaluation = $this->evaluationResolver->resolve($payPeriod, $employee, $date, $calendarContext);
+                $evaluation = $this->evaluationResolver->resolve($payPeriod, $employee, $date, $calendarContext, $snapshot);
 
                 foreach ($evaluation->blockers as $blocker) {
                     $blockers->push([

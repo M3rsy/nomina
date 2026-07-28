@@ -24,8 +24,9 @@ class PayrollShiftEvaluationResolver
         Employee $employee,
         CarbonInterface|string $workDate,
         ?HolidayCalendarContext $calendarContext = null,
+        ?PayrollPeriodSnapshotData $snapshot = null,
     ): PayrollShiftEvaluation {
-        $review = $this->review($payPeriod, $employee, $workDate, $calendarContext);
+        $review = $this->review($payPeriod, $employee, $workDate, $calendarContext, $snapshot);
 
         return $this->shiftEvaluator->evaluate(
             $review->occurrence,
@@ -40,6 +41,7 @@ class PayrollShiftEvaluationResolver
         Employee $employee,
         CarbonInterface|string $workDate,
         ?HolidayCalendarContext $calendarContext = null,
+        ?PayrollPeriodSnapshotData $snapshot = null,
     ): PayrollShiftReview {
         $date = CarbonImmutable::parse($workDate)->startOfDay();
 
@@ -50,28 +52,32 @@ class PayrollShiftEvaluationResolver
         }
 
         $calendarContext ??= $this->holidayCalendar->capture($payPeriod->company, $date, $date);
-        $occurrence = $this->occurrenceResolver->resolve($employee, $date);
+        $occurrence = $snapshot === null
+            ? $this->occurrenceResolver->resolve($employee, $date)
+            : $this->occurrenceResolver->resolveFromSnapshot($employee, $date, $snapshot);
         $analysis = $this->shiftAnalyzer->analyze(
             $occurrence,
             $calendarContext->isHoliday($date),
             $calendarContext->generation($date),
         );
-        $decisions = OvertimeDecision::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('work_date', $date->toDateString())
-            ->current()
-            ->with('decider')
-            ->get();
-        $exceptions = AttendanceException::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('work_date', $date->toDateString())
-            ->current()
-            ->with('decider')
-            ->get();
+        $decisions = $snapshot?->decisions($employee, $date)
+            ?? OvertimeDecision::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->where('pay_period_id', $payPeriod->id)
+                ->where('employee_id', $employee->id)
+                ->whereDate('work_date', $date->toDateString())
+                ->current()
+                ->with('decider')
+                ->get();
+        $exceptions = $snapshot?->exceptions($employee, $date)
+            ?? AttendanceException::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->where('pay_period_id', $payPeriod->id)
+                ->where('employee_id', $employee->id)
+                ->whereDate('work_date', $date->toDateString())
+                ->current()
+                ->with('decider')
+                ->get();
 
         return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions, $exceptions);
     }
