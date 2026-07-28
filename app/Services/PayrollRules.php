@@ -29,8 +29,8 @@ class PayrollRules
     public const BAND_EXTRA_75_END = '06:00';
 
     /**
-     * Default banding template used when there is no custom schedule config.
-     * Percent is expressed as overtime percentage over ordinary.
+     * Canonical global banding. Percent is expressed as overtime percentage
+     * over ordinary pay.
      */
     private const DEFAULT_BANDS = [
         ['start' => self::BAND_EXTRA_75_START, 'end' => self::BAND_EXTRA_75_END, 'extra_percent' => 75],
@@ -48,51 +48,13 @@ class PayrollRules
             ->exists();
     }
 
-    /**
-     * Normalize bands with a resilient parser.
-     *
-     * Supported input shape:
-     * - [ ['start' => '06:00', 'end' => '14:00', 'extra_percent' => 0], ... ]
-     * - [ ['start' => 360, 'end' => 840, 'percent' => '25'], ... ]
-     * - [ 'bands' => [ ... ] ]
-     */
     public function normalizedOvertimeBands(mixed $rawBands): array
     {
-        if ($rawBands === null || $rawBands === []) {
-            return $this->defaultOvertimeBands();
-        }
-
-        return $this->parseOvertimeBands($rawBands) ?? $this->defaultOvertimeBands();
+        return $this->defaultOvertimeBands();
     }
 
     public function hasCompleteRateBandCoverage(mixed $rawBands): bool
     {
-        if ($rawBands === null || $rawBands === []) {
-            return true;
-        }
-
-        $bands = $this->parseOvertimeBands($rawBands);
-
-        if ($bands === null) {
-            return false;
-        }
-
-        for ($minute = 0; $minute < 1440; $minute++) {
-            $matches = 0;
-
-            foreach ($bands as $band) {
-                $comparableMinute = $minute < $band['start'] ? $minute + 1440 : $minute;
-
-                if ($comparableMinute >= $band['start'] && $comparableMinute < $band['end']) {
-                    $matches++;
-                }
-            }
-
-            if ($matches !== 1) {
-                return false;
-            }
-        }
-
         return true;
     }
 

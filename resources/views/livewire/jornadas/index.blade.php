@@ -136,7 +136,6 @@
                                       <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Fin</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Horas base</th>
                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Notas internas</th>
-                                     <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Bandas</th>
                                  </tr>
                             </thead>
 
@@ -191,18 +190,6 @@
                                             />
                                         </td>
 
-                                        <td class="px-4 py-3 align-top">
-                                            <textarea
-                                                rows="4"
-                                                wire:model.live="schedules.{{ $index }}.banding_json"
-                                                placeholder='[{"start":"06:00","end":"14:00","extra_percent":0},...]'
-                                                class="h-full w-full min-h-16 rounded-xl border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                            ></textarea>
-                                            <p class="mt-1 text-[11px] text-slate-500">JSON editable por día para cambiar recargos. Sin valor: template por defecto.</p>
-                                            @error("schedules.$index.banding_json")
-                                                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
-                                            @enderror
-                                        </td>
                                     </tr>
                                 @endforeach
                             </tbody>
