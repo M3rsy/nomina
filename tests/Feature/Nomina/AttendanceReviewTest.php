@@ -28,7 +28,8 @@ test('shows exact server-calculated overtime candidates beside attendance and sc
     $this->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->assertViewHas('overtimeReviews', fn ($reviews) => $reviews->count() === 1)
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
+        ->assertViewHas('overtimeGroups', fn ($groups) => $groups->count() === 1)
         ->assertSee('Autorizaciones de horas extra')
         ->assertSee('El sistema calcula el tramo completo')
         ->assertSee('María Guardia')
@@ -43,6 +44,98 @@ test('shows exact server-calculated overtime candidates beside attendance and sc
         ->assertSee('Pendiente de decisión')
         ->assertSee('Aprobar completo')
         ->assertSee('Rechazar completo');
+});
+
+test('groups the current overtime page by employee in collapsed sections', function () {
+    $context = attendanceReviewPageFixture();
+    addAttendanceReviewEmployee($context, 'Ana', 'Ronda', 'SEG-102', ['2026-07-20']);
+    $this->actingAs($context['actor']);
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('overtimeGroups', fn ($groups) => $groups->count() === 2
+            && $groups->every(fn ($group) => $group['rows']->count() === 1))
+        ->assertSee('María Guardia')
+        ->assertSee('Ana Ronda')
+        ->assertSeeHtml('<details');
+});
+
+test('bounds overtime candidates to 25 rows and paginates one employee', function () {
+    $context = attendanceReviewPageFixture();
+    addAttendanceReviewDates($context, collect(range(1, 26))->map(
+        fn (int $day) => '2026-07-'.str_pad((string) $day, 2, '0', STR_PAD_LEFT),
+    )->all());
+    $this->actingAs($context['actor']);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']->fresh()])
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 26
+            && $rows->count() === 25
+            && $rows->currentPage() === 1)
+        ->assertViewHas('overtimeGroups', fn ($groups) => $groups->count() === 1
+            && $groups->sole()['rows']->count() === 25);
+
+    $component
+        ->call('setPage', 2, 'overtimePage')
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 26
+            && $rows->count() === 1
+            && $rows->currentPage() === 2)
+        ->assertViewHas('overtimeGroups', fn ($groups) => $groups->sole()['rows']->count() === 1);
+});
+
+test('filters overtime candidates and resets only their paginator', function () {
+    $context = attendanceReviewPageFixture();
+    addAttendanceReviewDates($context, ['2026-07-20', '2026-07-21']);
+    addAttendanceReviewEmployee($context, 'Ana', 'Ronda', 'SEG-102', ['2026-07-20'], '19:00:00');
+    $candidate = app(AttendanceReviewQuery::class)->forPeriod($context['period']->fresh())
+        ->first(fn ($review) => $review->employee->is($context['employee'])
+            && $review->analysis->workDate->toDateString() === '2026-07-20')
+        ->analysis->overtimeCandidates->sole();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period']->fresh(),
+        $context['employee'],
+        '2026-07-20',
+        $candidate->key,
+        OvertimeDecision::REJECTED,
+        'Caso auditado',
+        $context['actor'],
+    );
+    $this->actingAs($context['actor']);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']->fresh()])
+        ->assertSee('Filtrar autorizaciones')
+        ->set('overtimeSearch', 'ana')
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
+        ->assertViewHas('overtimeGroups', fn ($groups) => $groups->pluck('employee.full_name')->all() === ['Ana Ronda'])
+        ->assertSee('Ana Ronda')
+        ->set('overtimeSearch', '')
+        ->set('overtimeDate', '2026-07-21')
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
+        ->assertSee('Fecha laboral 21/07/2026')
+        ->set('overtimeDate', '')
+        ->set('overtimeRate', 'extra50')
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
+        ->assertSee('50%: 60 min')
+        ->set('overtimeRate', '')
+        ->set('overtimeStatus', OvertimeDecision::REJECTED)
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
+        ->assertSee('Caso auditado');
+
+    $component
+        ->call('setPage', 2)
+        ->call('setPage', 2, 'overtimePage')
+        ->set('overtimeSearch', 'María')
+        ->assertSet('paginators.page', 2)
+        ->assertSet('paginators.overtimePage', 1);
+});
+
+test('normalizes invalid overtime filters from the URL', function () {
+    $context = attendanceReviewPageFixture();
+    $this->actingAs($context['actor']);
+    Livewire::withQueryParams([
+        'overtimeStatus' => 'invalid',
+        'overtimeDate' => '20-07-2026',
+        'overtimeRate' => 'extra500',
+    ])->test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertSet('overtimeStatus', 'pending')
+        ->assertSet('overtimeDate', '')
+        ->assertSet('overtimeRate', '')
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1);
 });
 
 test('shows exact attendance deficits without changing attendance marks', function () {
@@ -250,7 +343,7 @@ test('does not allow attendance exceptions while the period is locked', function
     expect(AttendanceException::query()->count())->toBe(0);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
-test('shows the current audited decision and its reason', function () {
+test('defaults the overtime inbox to pending candidates and can reveal rejected decisions', function () {
     $context = attendanceReviewPageFixture();
     $candidate = app(AttendanceReviewQuery::class)
         ->forPeriod($context['period'])
@@ -269,7 +362,12 @@ test('shows the current audited decision and its reason', function () {
     );
     $this->actingAs($context['actor']);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertSet('overtimeStatus', 'pending')
+        ->assertDontSee('Tiempo de traslado hasta el reloj');
+
+    $component
+        ->set('overtimeStatus', OvertimeDecision::REJECTED)
         ->assertSee('Rechazado')
         ->assertSee('Tiempo de traslado hasta el reloj')
         ->assertSee($context['actor']->email);
@@ -299,6 +397,9 @@ test('approves the complete server-calculated candidate with a mandatory reason'
         ->call('saveOvertimeDecision')
         ->assertHasNoErrors()
         ->assertSet('showOvertimeDecisionModal', false)
+        ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 0)
+        ->assertSee('Tramo completo aprobado y registrado en el historial.')
+        ->set('overtimeStatus', OvertimeDecision::APPROVED)
         ->assertSee('Aprobado')
         ->assertSee('Cobertura extraordinaria confirmada');
 
@@ -420,4 +521,69 @@ function attendanceReviewPageFixture(
     app(CurrentCompany::class)->set($company);
 
     return compact('company', 'employee', 'period', 'actor');
+}
+
+function addAttendanceReviewEmployee(
+    array $context,
+    string $firstName,
+    string $lastName,
+    string $externalId,
+    array $dates,
+    string $exitTime = '14:30:00',
+): Employee {
+    $employee = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => $firstName,
+        'last_name' => $lastName,
+        'external_id' => $externalId,
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        WorkScheduleProfile::query()->where('company_id', $context['company']->id)->sole(),
+        $context['period']->start_date,
+        'Jornada diurna',
+    );
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    foreach ($dates as $date) {
+        foreach (['06:00:00', $exitTime] as $time) {
+            RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+                ->forUploadedFile($file)->forEmployee($employee)->create([
+                    'event_at' => "{$date} {$time}",
+                    'status' => 'valid',
+                ]);
+        }
+    }
+
+    return $employee;
+}
+
+function addAttendanceReviewDates(array $context, array $dates): void
+{
+    $profile = WorkScheduleProfile::query()->where('company_id', $context['company']->id)->sole();
+    foreach (range(0, 6) as $dayOfWeek) {
+        WorkSchedule::query()->firstOrCreate([
+            'company_id' => $context['company']->id,
+            'work_schedule_profile_id' => $profile->id,
+            'day_of_week' => $dayOfWeek,
+        ], [
+            'start_time' => '06:00',
+            'end_time' => '14:00',
+            'base_ordinary_hours' => 8,
+            'is_working_day' => true,
+        ]);
+    }
+
+    $context['period']->update([
+        'start_date' => min($dates),
+        'end_date' => max($dates),
+    ]);
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    foreach (array_diff($dates, ['2026-07-20']) as $date) {
+        foreach (['06:00:00', '14:30:00'] as $time) {
+            RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+                ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+                    'event_at' => "{$date} {$time}",
+                    'status' => 'valid',
+                ]);
+        }
+    }
 }

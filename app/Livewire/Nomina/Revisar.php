@@ -22,6 +22,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Payroll\PayPeriodReopener;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -49,6 +50,18 @@ class Revisar extends Component
 
     #[Url]
     public ?int $uploaded_file_id = null;
+
+    #[Url]
+    public string $overtimeStatus = 'pending';
+
+    #[Url]
+    public string $overtimeSearch = '';
+
+    #[Url]
+    public string $overtimeDate = '';
+
+    #[Url]
+    public string $overtimeRate = '';
 
     public bool $showEditModal = false;
 
@@ -149,6 +162,22 @@ class Revisar extends Component
         $this->authorize('view', $payPeriod);
         Gate::authorize('marks.manage');
 
+        if (! in_array($this->overtimeStatus, ['pending', 'approved', 'rejected', 'all'], true)) {
+            $this->overtimeStatus = 'pending';
+        }
+        if (! in_array($this->overtimeRate, ['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'], true)) {
+            $this->overtimeRate = '';
+        }
+        if ($this->overtimeDate !== '') {
+            $parts = explode('-', $this->overtimeDate);
+
+            if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->overtimeDate)
+                || count($parts) !== 3
+                || ! checkdate((int) $parts[1], (int) $parts[2], (int) $parts[0])) {
+                $this->overtimeDate = '';
+            }
+        }
+
         $this->payPeriod = $payPeriod;
         $this->locked = $this->isBlocked();
     }
@@ -166,6 +195,50 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
+        $filteredOvertimeRows = $attendanceReviews
+            ->flatMap(fn ($review) => $review->analysis->overtimeCandidates->map(fn ($candidate) => [
+                'review' => $review,
+                'candidate' => $candidate,
+                'decision' => $review->decisionFor($candidate),
+            ]))
+            ->filter(function (array $row): bool {
+                $review = $row['review'];
+                $candidate = $row['candidate'];
+                $search = mb_strtolower(trim($this->overtimeSearch));
+                $employee = mb_strtolower($review->employee->full_name.' '.$review->employee->external_id);
+                $rateMinutes = match ($this->overtimeRate) {
+                    'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
+                    'extra25' => $candidate->rateMinutes->extra25Minutes,
+                    'extra50' => $candidate->rateMinutes->extra50Minutes,
+                    'extra75' => $candidate->rateMinutes->extra75Minutes,
+                    'extra100' => $candidate->rateMinutes->extra100Minutes,
+                    default => 1,
+                };
+
+                return ($this->overtimeStatus === 'all'
+                        || ($row['decision']?->decision ?? 'pending') === $this->overtimeStatus)
+                    && ($search === '' || str_contains($employee, $search))
+                    && ($this->overtimeDate === ''
+                        || $review->analysis->workDate->toDateString() === $this->overtimeDate)
+                    && $rateMinutes > 0;
+            })
+            ->values();
+        $overtimePage = $this->getPage('overtimePage');
+        $overtimeRows = new LengthAwarePaginator(
+            $filteredOvertimeRows->forPage($overtimePage, 25)->values(),
+            $filteredOvertimeRows->count(),
+            25,
+            $overtimePage,
+            ['path' => request()->url(), 'pageName' => 'overtimePage'],
+        );
+        $overtimeGroups = collect($overtimeRows->items())
+            ->groupBy(fn (array $row) => $row['review']->employee->id)
+            ->map(fn (Collection $rows) => [
+                'employee' => $rows->first()['review']->employee,
+                'rows' => $rows,
+                'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
+            ])
+            ->values();
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -174,8 +247,8 @@ class Revisar extends Component
             'faltas' => $faltas,
             'isBlocked' => $isBlocked,
             'uploadedFiles' => $uploadedFiles,
-            'overtimeReviews' => $attendanceReviews
-                ->filter(fn ($review) => $review->analysis->overtimeCandidates->isNotEmpty()),
+            'overtimeGroups' => $overtimeGroups,
+            'overtimeRows' => $overtimeRows,
             'deficitReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()),
         ]);
@@ -194,6 +267,26 @@ class Revisar extends Component
     public function updatingUploadedFileId(): void
     {
         $this->resetPage();
+    }
+
+    public function updatingOvertimeSearch(): void
+    {
+        $this->resetPage('overtimePage');
+    }
+
+    public function updatingOvertimeStatus(): void
+    {
+        $this->resetPage('overtimePage');
+    }
+
+    public function updatingOvertimeDate(): void
+    {
+        $this->resetPage('overtimePage');
+    }
+
+    public function updatingOvertimeRate(): void
+    {
+        $this->resetPage('overtimePage');
     }
 
     public function openEditRawMark(int $id): void

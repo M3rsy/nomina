@@ -92,8 +92,8 @@ test('approves overtime within a bounded query budget for a representative perio
             ->call('saveOvertimeDecision')
             ->assertHasNoErrors()
             ->assertSet('showOvertimeDecisionModal', false)
-            ->assertSee('Aprobado')
-            ->assertSee('Representative approval');
+            ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 27)
+            ->assertSee('Tramo completo aprobado y registrado en el historial.');
         $queryCount = count(DB::getQueryLog());
     } finally {
         DB::disableQueryLog();
