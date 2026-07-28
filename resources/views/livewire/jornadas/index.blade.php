@@ -1,3 +1,5 @@
+@php($canManageSchedules = auth()->user()->can('create', \App\Models\WorkSchedule::class))
+
 <div class="min-h-screen bg-[radial-gradient(circle_at_top,_#e8fbfb_0%,_#f5f3ff_35%,_#fff_70%)] px-4 py-6 sm:px-6 lg:px-8">
     <div class="mx-auto w-full max-w-6xl space-y-5">
         <section class="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm backdrop-blur">
@@ -105,12 +107,12 @@
                                 @endforelse
                             </select>
                         </label>
-                        @can('work_schedules.manage')
+                        @if ($canManageSchedules)
                             <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" @disabled($requiresProfileMigration)>Nueva plantilla</button>
                             @if ($requiresProfileMigration)
                                 <p class="text-xs text-slate-500">No se puede crear o versionar plantillas hasta aplicar migraciones pendientes.</p>
                             @endif
-                        @endcan
+                        @endif
                     </div>
                 </header>
 
@@ -149,6 +151,7 @@
                                                 <input
                                                     type="checkbox"
                                                     wire:model.live="schedules.{{ $index }}.is_working_day"
+                                                    @disabled(! $canManageSchedules)
                                                     class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-2 focus:ring-emerald-500"
                                                     aria-label="Marcar {{ $schedule['day_name'] }} como día laborable"
                                                 />
@@ -158,7 +161,7 @@
 
                                         @foreach (['start_time' => 'Inicio', 'end_time' => 'Fin'] as $field => $label)
                                             <td class="px-4 py-3 align-top">
-                                                <input type="time" wire:model.live="schedules.{{ $index }}.{{ $field }}" @disabled(! $schedule['is_working_day']) aria-label="{{ $label }} de {{ $schedule['day_name'] }}" class="rounded-xl border-slate-300 text-sm disabled:bg-slate-100" />
+                                                <input type="time" wire:model.live="schedules.{{ $index }}.{{ $field }}" @disabled(! $canManageSchedules || ! $schedule['is_working_day']) aria-label="{{ $label }} de {{ $schedule['day_name'] }}" class="rounded-xl border-slate-300 text-sm disabled:bg-slate-100" />
                                                 @error("schedules.$index.$field") <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
                                             </td>
                                         @endforeach
@@ -170,6 +173,7 @@
                                                 min="0"
                                                 max="24"
                                                 wire:model.live="schedules.{{ $index }}.base_ordinary_hours"
+                                                @disabled(! $canManageSchedules)
                                                 class="w-28 rounded-xl border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                                                 placeholder="0.00"
                                             />
@@ -185,6 +189,7 @@
                                             <input
                                                 type="text"
                                                 wire:model.live="schedules.{{ $index }}.notes"
+                                                @disabled(! $canManageSchedules)
                                                 placeholder="Nota breve"
                                                 class="w-full rounded-xl border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                                             />
@@ -205,7 +210,7 @@
                 </div>
 
                 <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
-                    @can('work_schedules.manage')
+                    @if ($canManageSchedules)
                         @if ($selectedProfileId)
                             <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de la nueva versión
                                 <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué cambia la jornada" />
@@ -230,7 +235,7 @@
                                 Guardando...
                             </span>
                         </button>
-                    @endcan
+                    @endif
                 </div>
             </article>
 

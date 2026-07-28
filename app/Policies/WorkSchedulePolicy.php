@@ -27,32 +27,19 @@ class WorkSchedulePolicy
 
     public function create(User $user): bool
     {
-        return $user->can('work_schedules.manage');
+        return $user->hasRole('super_admin')
+            && $user->can('work_schedules.manage');
     }
 
     public function update(User $user, WorkSchedule $schedule): bool
     {
-        if (! $user->can('work_schedules.manage')) {
-            return false;
-        }
-
-        if ($user->hasRole('super_admin')) {
-            return true;
-        }
-
-        return $user->company_id === $schedule->company_id;
+        return $user->hasRole('super_admin')
+            && $user->can('work_schedules.manage');
     }
 
     public function delete(User $user, WorkSchedule $schedule): bool
     {
-        if (! $user->can('work_schedules.manage')) {
-            return false;
-        }
-
-        if ($user->hasRole('super_admin')) {
-            return true;
-        }
-
-        return $user->company_id === $schedule->company_id;
+        return $user->hasRole('super_admin')
+            && $user->can('work_schedules.manage');
     }
 }
