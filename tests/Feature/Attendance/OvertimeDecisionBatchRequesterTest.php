@@ -25,6 +25,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -138,19 +139,43 @@ test('terminalizes exhausted infrastructure failures and retries the same reques
     expect([$retry->status, $retry->finished_at, $retry->last_error])->toBe(['queued', null, null]);
     Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
 });
-test('processes bounded chunks and redispatches until terminal', function () {
+test('does not release accidental duplicate jobs while the batch lock is held', function () {
+    $job = (new ProcessOvertimeDecisionBatch(123))->withFakeQueueInteractions();
+    $middleware = $job->middleware()[0];
+    $lock = Cache::lock($middleware->getLockKey($job), $job->timeout + 60);
+    expect($lock->get())->toBeTrue();
+    $nextWasCalled = false;
+
+    try {
+        $middleware->handle($job, function () use (&$nextWasCalled): void {
+            $nextWasCalled = true;
+        });
+    } finally {
+        $lock->release();
+    }
+
+    $job->assertNotReleased();
+    expect($nextWasCalled)->toBeFalse()
+        ->and($middleware->releaseAfter)->toBeNull();
+});
+test('releases the same queued job between bounded chunks until terminal', function () {
     $context = batchRequestFixture();
     $targets = [batchTarget($context)];
     foreach (range(2, 21) as $_) {
         $targets[] = batchTarget(addBatchCandidate($context));
     }
     $batch = requestBatch($context, ['targets' => $targets]);
-    $job = new ProcessOvertimeDecisionBatch($batch->id);
+    $job = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
     $job->handle(app(OvertimeDecisionRecorder::class));
+    $job->assertReleased(10);
     expect($batch->items()->where('status', 'succeeded')->count())->toBe(20)
-        ->and($batch->items()->where('status', 'pending')->count())->toBe(1);
-    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 2);
-    $job->handle(app(OvertimeDecisionRecorder::class));
+        ->and($batch->items()->where('status', 'pending')->count())->toBe(1)
+        ->and($job->tries)->toBe(30);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
+
+    $retry = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $retry->handle(app(OvertimeDecisionRecorder::class));
+    $retry->assertNotReleased();
     expect($batch->fresh()->status)->toBe('completed')
         ->and($batch->items()->where('status', 'succeeded')->count())->toBe(21);
 });

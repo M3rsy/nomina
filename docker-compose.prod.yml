@@ -96,6 +96,35 @@ services:
         networks:
             - nomina-prod
 
+    queue:
+        build:
+            context: .
+            dockerfile: Dockerfile.prod
+        container_name: nomina-queue-prod
+        env_file:
+            - .env.production
+        environment:
+            RUN_APP_BOOTSTRAP: "false"
+        restart: unless-stopped
+        depends_on:
+            db:
+                condition: service_healthy
+        volumes:
+            - .:/var/www/html:ro
+            - ./storage:/var/www/html/storage
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache
+            - nomina-backups:/var/www/html/storage/app/nomina-backups
+        command:
+            - php
+            - artisan
+            - queue:work
+            - --sleep=3
+            - --tries=30
+            - --timeout=240
+            - --max-time=3600
+        networks:
+            - nomina-prod
+
     scheduler:
         build:
             context: .
