@@ -226,34 +226,7 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $filteredOvertimeRows = $attendanceReviews
-            ->flatMap(fn ($review) => $review->analysis->overtimeCandidates->map(fn ($candidate) => [
-                'review' => $review,
-                'candidate' => $candidate,
-                'decision' => $review->decisionFor($candidate),
-            ]))
-            ->filter(function (array $row): bool {
-                $review = $row['review'];
-                $candidate = $row['candidate'];
-                $search = mb_strtolower(trim($this->overtimeSearch));
-                $employee = mb_strtolower($review->employee->full_name.' '.$review->employee->external_id);
-                $rateMinutes = match ($this->overtimeRate) {
-                    'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
-                    'extra25' => $candidate->rateMinutes->extra25Minutes,
-                    'extra50' => $candidate->rateMinutes->extra50Minutes,
-                    'extra75' => $candidate->rateMinutes->extra75Minutes,
-                    'extra100' => $candidate->rateMinutes->extra100Minutes,
-                    default => 1,
-                };
-
-                return ($this->overtimeStatus === 'all'
-                        || ($row['decision']?->decision ?? 'pending') === $this->overtimeStatus)
-                    && ($search === '' || str_contains($employee, $search))
-                    && ($this->overtimeDate === ''
-                        || $review->analysis->workDate->toDateString() === $this->overtimeDate)
-                    && $rateMinutes > 0;
-            })
-            ->values();
+        $filteredOvertimeRows = $this->filteredOvertimeRows($attendanceReviews);
         $overtimePage = $this->getPage('overtimePage');
         $overtimeRows = new LengthAwarePaginator(
             $filteredOvertimeRows->forPage($overtimePage, 25)->values(),
@@ -1531,15 +1504,41 @@ class Revisar extends Component
 
     private function authoritativeOvertimeTargets(bool $currentPage = false): Collection
     {
+        $rows = $this->filteredOvertimeRows(
+            app(AttendanceReviewQuery::class)
+                ->forPeriod($this->payPeriod, $this->uploaded_file_id, $this->periodReviewSnapshot()),
+        );
+        if ($currentPage) {
+            $rows = $rows->forPage($this->getPage('overtimePage'), 25)->values();
+        }
+
+        return $rows->filter(fn (array $row): bool => $row['decision'] === null)
+            ->mapWithKeys(function (array $row): array {
+                $target = [
+                    'employee_id' => $row['review']->employee->id,
+                    'work_date' => $row['review']->analysis->workDate->toDateString(),
+                    'candidate_key' => $row['candidate']->key,
+                    'fingerprint' => $row['candidate']->fingerprint,
+                ];
+
+                return [implode('|', Arr::except($target, 'fingerprint')) => $target];
+            });
+    }
+
+    private function filteredOvertimeRows(Collection $attendanceReviews): Collection
+    {
         $search = mb_strtolower(trim($this->overtimeSearch));
-        $rows = app(AttendanceReviewQuery::class)
-            ->forPeriod($this->payPeriod, $this->uploaded_file_id, $this->periodReviewSnapshot())
+
+        return $attendanceReviews
             ->flatMap(fn ($review) => $review->analysis->overtimeCandidates->map(fn ($candidate) => [
-                'review' => $review, 'candidate' => $candidate, 'decision' => $review->decisionFor($candidate),
+                'review' => $review,
+                'candidate' => $candidate,
+                'decision' => $review->decisionFor($candidate),
             ]))
             ->filter(function (array $row) use ($search): bool {
                 $review = $row['review'];
                 $candidate = $row['candidate'];
+                $employee = mb_strtolower($review->employee->full_name.' '.$review->employee->external_id);
                 $rateMinutes = match ($this->overtimeRate) {
                     'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
                     'extra25' => $candidate->rateMinutes->extra25Minutes,
@@ -1549,28 +1548,14 @@ class Revisar extends Component
                     default => 1,
                 };
 
-                return $row['decision'] === null
-                    && in_array($this->overtimeStatus, ['pending', 'all'], true)
-                    && ($search === '' || str_contains(mb_strtolower(
-                        $review->employee->full_name.' '.$review->employee->external_id,
-                    ), $search))
-                    && ($this->overtimeDate === '' || $review->analysis->workDate->toDateString() === $this->overtimeDate)
+                return ($this->overtimeStatus === 'all'
+                        || ($row['decision']?->decision ?? 'pending') === $this->overtimeStatus)
+                    && ($search === '' || str_contains($employee, $search))
+                    && ($this->overtimeDate === ''
+                        || $review->analysis->workDate->toDateString() === $this->overtimeDate)
                     && $rateMinutes > 0;
-            })->values();
-        if ($currentPage) {
-            $rows = $rows->forPage($this->getPage('overtimePage'), 25)->values();
-        }
-
-        return $rows->mapWithKeys(function (array $row): array {
-            $target = [
-                'employee_id' => $row['review']->employee->id,
-                'work_date' => $row['review']->analysis->workDate->toDateString(),
-                'candidate_key' => $row['candidate']->key,
-                'fingerprint' => $row['candidate']->fingerprint,
-            ];
-
-            return [implode('|', Arr::except($target, 'fingerprint')) => $target];
-        });
+            })
+            ->values();
     }
 
     private function recoverOvertimeBatch(): void
