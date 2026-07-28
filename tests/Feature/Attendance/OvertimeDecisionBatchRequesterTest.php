@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\ProcessOvertimeDecisionBatch;
+use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
@@ -16,12 +17,14 @@ use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\ShiftOccurrenceResolver;
+use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -214,6 +217,79 @@ test('rejects a locked period without writing a batch', function (string $status
     expect(fn () => requestBatch($context))->toThrow(ValidationException::class)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with(PayPeriod::ATTENDANCE_LOCKED_STATUSES);
+test('queues only authoritative selected overtime candidates with stable idempotency', function (string $decision) {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->set('selectedOvertimeCandidates', [[], null, 123, 'malformed'])
+        ->call('openOvertimeBatch', $decision)->assertHasErrors(['selectedOvertimeCandidates'])
+        ->set('selectedOvertimeCandidates', [$token, '999|2026-07-20|'.str_repeat('0', 64)])
+        ->call('selectCurrentOvertimePage')
+        ->assertSet('selectedOvertimeCandidates', [$token])
+        ->call('openOvertimeBatch', $decision)
+        ->assertSet('overtimeBatchCount', 1)
+        ->assertSet('overtimeBatchSelection', [$token.'|'.$context['candidate']->fingerprint])
+        ->call('saveOvertimeBatch')
+        ->assertHasErrors(['overtimeBatchReason'])
+        ->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada');
+    $requestKey = $component->get('overtimeBatchRequestKey');
+    $context['exit_mark']->update(['event_at' => '2026-07-20 14:45:00']);
+    $component->call('saveOvertimeBatch')->assertHasErrors(['selectedOvertimeCandidates'])
+        ->assertSet('overtimeBatchRequestKey', $requestKey);
+    $context['exit_mark']->update(['event_at' => '2026-07-20 14:30:00']);
+    $component->call('saveOvertimeBatch')
+        ->assertHasNoErrors()
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->assertSet('overtimeBatchProgress.status', 'queued');
+    expect(OvertimeDecisionBatch::query()->sole())
+        ->request_key->toBe($requestKey)
+        ->decision->toBe($decision)
+        ->reason->toBe('Cobertura extraordinaria confirmada')
+        ->total_items->toBe(1);
+})->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
+test('resets overtime pagination and stale selection when its source or an individual decision changes', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->set('paginators.overtimePage', 2)->set('selectedOvertimeCandidates', [$token])
+        ->set('uploaded_file_id', $context['file']->id)
+        ->assertSet('paginators.overtimePage', 1)->assertSet('selectedOvertimeCandidates', [])
+        ->set('paginators.overtimePage', 2)->set('selectedOvertimeCandidates', [$token])
+        ->call('openOvertimeDecision', $context['employee']->id, '2026-07-20', $context['candidate']->key, 'approved')
+        ->set('overtimeDecisionReason', 'Decisión individual')->call('saveOvertimeDecision');
+    $component->assertSet('paginators.overtimePage', 1)->assertSet('selectedOvertimeCandidates', []);
+});
+test('polls only the actors period batch and reports bounded terminal errors', function () {
+    $context = batchRequestFixture();
+    $second = addBatchCandidate($context);
+    $batch = requestBatch($context, ['targets' => [batchTarget($context), batchTarget($second)]]);
+    $batch->update(['status' => 'processing']);
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertSet('activeOvertimeBatchId', $batch->id)
+        ->set('paginators.overtimePage', 2)->call('pollOvertimeBatch')
+        ->assertSet('overtimeBatchProgress.status', 'processing');
+    $items = $batch->items()->orderBy('id')->get();
+    $items[0]->update(['status' => 'succeeded']);
+    $items[1]->update(['status' => 'failed', 'last_error' => 'Las marcas cambiaron.']);
+    $batch->update(['status' => 'completed_with_errors', 'finished_at' => now()]);
+    $component->call('pollOvertimeBatch')
+        ->assertSet('overtimeBatchProgress.failed', 1)
+        ->assertSet('overtimeBatchProgress.terminal', true)
+        ->assertSet('paginators.overtimePage', 1)
+        ->assertSet('overtimeBatchErrors.0', 'Las marcas cambiaron.');
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])->assertSet('activeOvertimeBatchId', null);
+    $foreignCompany = Company::factory()->create();
+    $batch->update(['company_id' => $foreignCompany->id,
+        'pay_period_id' => PayPeriod::factory()->forCompany($foreignCompany)->create()->id,
+        'requested_by' => User::factory()->forCompany($foreignCompany)->create()->id]);
+    $component->call('pollOvertimeBatch')->assertSet('activeOvertimeBatchId', null);
+});
 function requestBatch(array $context, array $overrides = []): OvertimeDecisionBatch
 {
     return app(OvertimeDecisionBatchRequester::class)->request(

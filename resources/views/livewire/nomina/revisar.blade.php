@@ -181,6 +181,29 @@
             </p>
         </div>
 
+        @if ($activeOvertimeBatchId)
+            <div
+                @if (!($overtimeBatchProgress['terminal'] ?? true)) wire:poll.3s="pollOvertimeBatch" @endif
+                aria-live="polite"
+                class="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950"
+            >
+                <div class="flex items-center justify-between gap-3">
+                    <p class="font-bold">Lote #{{ $activeOvertimeBatchId }} · {{ $overtimeBatchProgress['status'] ?? 'cargando' }}</p>
+                    <p>{{ $overtimeBatchProgress['succeeded'] ?? 0 }} de {{ $overtimeBatchProgress['total'] ?? 0 }} procesados</p>
+                </div>
+                @if (($overtimeBatchProgress['failed'] ?? 0) > 0)
+                    <p class="mt-2 font-semibold text-rose-800">{{ $overtimeBatchProgress['failed'] }} candidatos no pudieron procesarse.</p>
+                    <ul class="mt-1 list-disc pl-5 text-rose-800">
+                        @foreach ($overtimeBatchErrors as $error)<li>{{ $error }}</li>@endforeach
+                    </ul>
+                @elseif (($overtimeBatchProgress['status'] ?? null) === 'failed')
+                    <p class="mt-2 font-semibold text-rose-800">El lote no pudo completarse. Puede intentarlo nuevamente.</p>
+                @elseif ($overtimeBatchProgress['terminal'] ?? false)
+                    <p class="mt-2 font-semibold text-emerald-800">El lote terminó correctamente.</p>
+                @endif
+            </div>
+        @endif
+
         <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <p class="text-sm font-bold text-slate-900">Filtrar autorizaciones</p>
             <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -213,6 +236,15 @@
                     </select>
                 </label>
             </div>
+            @if ($overtimeStatus === 'pending' || $overtimeStatus === 'all')
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <button type="button" wire:click="selectCurrentOvertimePage" class="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-700">Seleccionar esta página</button>
+                    @if ($selectedOvertimeCandidates)
+                        <button type="button" wire:click="clearOvertimeSelection" class="rounded-lg px-3 py-2 text-xs font-bold text-slate-600">Limpiar selección</button>
+                    @endif
+                </div>
+                @error('selectedOvertimeCandidates') <p class="mt-2 text-sm text-rose-700">{{ $message }}</p> @enderror
+            @endif
         </div>
 
         <div class="mt-5 space-y-4">
@@ -234,6 +266,7 @@
                                 $review = $row['review'];
                                 $candidate = $row['candidate'];
                                 $decision = $row['decision'];
+                                $selectionToken = implode('|', [$review->employee->id, $review->analysis->workDate->toDateString(), $candidate->key]);
                                 $candidateLabel = match ($candidate->kind) {
                                     'pre_shift' => 'Entrada anterior',
                                     'post_shift' => 'Salida posterior',
@@ -251,6 +284,12 @@
 
                             <div class="rounded-xl border border-slate-200 bg-white p-4">
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    @if (!$decision)
+                                        <label class="flex shrink-0 items-center gap-2 text-xs font-bold text-slate-700">
+                                            <input type="checkbox" wire:model.live="selectedOvertimeCandidates" value="{{ $selectionToken }}" class="rounded border-slate-300 text-indigo-600">
+                                            Seleccionar candidato
+                                        </label>
+                                    @endif
                                     <div>
                                         <p class="text-sm font-bold text-slate-950">{{ $candidateLabel }}</p>
                                         <p class="mt-1 text-sm font-semibold text-slate-700">
@@ -320,6 +359,16 @@
 
         @if ($overtimeRows->hasPages())
             <div class="mt-5">{{ $overtimeRows->links() }}</div>
+        @endif
+
+        @if ($selectedOvertimeCandidates)
+            <div class="sticky bottom-4 z-30 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 px-4 py-3 text-white shadow-xl">
+                <p class="text-sm font-bold">{{ count($selectedOvertimeCandidates) }} seleccionados</p>
+                <div class="flex gap-2">
+                    <button type="button" wire:click="openOvertimeBatch('approved')" @disabled($isBlocked) class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Aprobar</button>
+                    <button type="button" wire:click="openOvertimeBatch('rejected')" @disabled($isBlocked) class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Rechazar</button>
+                </div>
+            </div>
         @endif
     </section>
 
@@ -678,6 +727,43 @@
                         <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
                         <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
                             {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($showOvertimeBatchModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="overtime_batch_title" class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $overtimeBatchDecision === 'approved' ? 'text-emerald-700' : 'text-rose-700' }}">Decisión masiva auditada</p>
+                <h2 id="overtime_batch_title" class="mt-1 text-xl font-black text-slate-950">
+                    {{ $overtimeBatchDecision === 'approved' ? 'Aprobar candidatos seleccionados' : 'Rechazar candidatos seleccionados' }}
+                </h2>
+                <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">
+                    Se procesarán exactamente {{ $overtimeBatchCount }} candidatos pendientes.
+                </p>
+                <form wire:submit.prevent="saveOvertimeBatch" class="mt-4 space-y-4">
+                    <label for="overtime_batch_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo común obligatorio</span>
+                        <textarea
+                            id="overtime_batch_reason"
+                            wire:model="overtimeBatchReason"
+                            rows="3"
+                            maxlength="500"
+                            autofocus
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                            placeholder="Este motivo quedará registrado en cada decisión"
+                        ></textarea>
+                    </label>
+                    @error('overtimeBatchReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('selectedOvertimeCandidates') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeOvertimeBatchModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="saveOvertimeBatch" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                            <span wire:loading.remove wire:target="saveOvertimeBatch">Confirmar lote</span>
+                            <span wire:loading wire:target="saveOvertimeBatch">Enviando…</span>
                         </button>
                     </div>
                 </form>
