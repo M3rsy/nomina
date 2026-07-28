@@ -177,50 +177,63 @@
                 </p>
             </div>
             <p class="text-sm font-semibold text-slate-700">
-                {{ $overtimeReviews->sum(fn ($review) => $review->analysis->overtimeCandidates->count()) }} candidatos
+                {{ $overtimeRows->total() }} candidatos
             </p>
         </div>
 
-        <div class="mt-5 space-y-4">
-            @forelse ($overtimeReviews as $review)
-                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                    <header class="flex flex-col gap-1 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <p class="font-bold text-slate-950">{{ $review->employee->full_name }}</p>
-                            <p class="text-xs text-slate-500">Código {{ $review->employee->external_id }}</p>
-                        </div>
-                        <p class="text-sm font-semibold text-slate-700">Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}</p>
-                    </header>
+        <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-sm font-bold text-slate-900">Filtrar autorizaciones</p>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label class="text-xs font-semibold text-slate-600">
+                    Empleado o código
+                    <input wire:model.live.debounce.300ms="overtimeSearch" type="search" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Estado
+                    <select wire:model.live="overtimeStatus" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                        <option value="pending">Pendientes</option>
+                        <option value="approved">Aprobados</option>
+                        <option value="rejected">Rechazados</option>
+                        <option value="all">Todos</option>
+                    </select>
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Fecha laboral
+                    <input wire:model.live="overtimeDate" type="date" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Porcentaje
+                    <select wire:model.live="overtimeRate" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                        <option value="">Todos</option>
+                        <option value="ordinary">Ordinario</option>
+                        <option value="extra25">25%</option>
+                        <option value="extra50">50%</option>
+                        <option value="extra75">75%</option>
+                        <option value="extra100">100%</option>
+                    </select>
+                </label>
+            </div>
+        </div>
 
-                    <div class="grid gap-3 p-4 sm:grid-cols-3">
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Jornada asignada</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                @if ($review->occurrence->scheduledStart && $review->occurrence->scheduledEnd)
-                                    {{ $review->occurrence->scheduledStart->format('H:i') }} → {{ $review->occurrence->scheduledEnd->format('H:i') }}
-                                @else
-                                    Día no laborable
-                                @endif
-                            </p>
+        <div class="mt-5 space-y-4">
+            @forelse ($overtimeGroups as $group)
+                <details wire:key="overtime-employee-{{ $group['employee']->id }}" class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <summary class="flex cursor-pointer list-none items-center justify-between gap-4 bg-white px-4 py-3">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $group['employee']->full_name }}</p>
+                            <p class="text-xs text-slate-500">Código {{ $group['employee']->external_id }}</p>
                         </div>
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tiempo programado reconocido</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                {{ $review->analysis->scheduledMinutes }} min · {{ number_format($review->analysis->scheduledMinutes / 60, 2, ',', '.') }} h
-                            </p>
-                        </div>
-                    </div>
+                        <p class="text-right text-sm font-semibold text-slate-700">
+                            {{ $group['rows']->count() }} candidatos · {{ $group['minutes'] }} min
+                        </p>
+                    </summary>
 
                     <div class="space-y-3 border-t border-slate-200 p-4">
-                        @foreach ($review->analysis->overtimeCandidates as $candidate)
+                        @foreach ($group['rows'] as $row)
                             @php
-                                $decision = $review->decisionFor($candidate);
+                                $review = $row['review'];
+                                $candidate = $row['candidate'];
+                                $decision = $row['decision'];
                                 $candidateLabel = match ($candidate->kind) {
                                     'pre_shift' => 'Entrada anterior',
                                     'post_shift' => 'Salida posterior',
@@ -240,8 +253,17 @@
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
                                         <p class="text-sm font-bold text-slate-950">{{ $candidateLabel }}</p>
+                                        <p class="mt-1 text-sm font-semibold text-slate-700">
+                                            Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}
+                                        </p>
                                         <p class="mt-1 text-sm text-slate-600">
                                             {{ $candidate->start->format('d/m H:i') }} → {{ $candidate->end->format('d/m H:i') }}
+                                        </p>
+                                        <p class="mt-1 text-xs text-slate-500">
+                                            Jornada asignada
+                                            {{ $review->occurrence->scheduledStart?->format('H:i') ?? '—' }} → {{ $review->occurrence->scheduledEnd?->format('H:i') ?? '—' }}
+                                            · Marcas de asistencia
+                                            {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
                                         </p>
                                         <p class="mt-1 text-sm font-semibold text-slate-800">
                                             {{ $candidate->minutes }} min · {{ number_format($candidate->minutes / 60, 2, ',', '.') }} h
@@ -287,7 +309,7 @@
                             </div>
                         @endforeach
                     </div>
-                </article>
+                </details>
             @empty
                 <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
                     <p class="font-semibold text-slate-800">No hay candidatos de hora extra con el filtro actual.</p>
@@ -295,6 +317,10 @@
                 </div>
             @endforelse
         </div>
+
+        @if ($overtimeRows->hasPages())
+            <div class="mt-5">{{ $overtimeRows->links() }}</div>
+        @endif
     </section>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
