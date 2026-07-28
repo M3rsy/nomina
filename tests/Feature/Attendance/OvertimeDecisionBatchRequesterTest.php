@@ -280,6 +280,36 @@ test('selects every filtered overtime match across pages with compact public sta
 
     expect(OvertimeDecisionBatch::query()->sole()->total_items)->toBe(26);
 });
+test('selects only pending candidates visible on the current mixed-status page', function () {
+    $context = batchRequestFixture();
+    $decided = collect([$context]);
+    foreach (range(2, 25) as $_) {
+        $decided->push(addBatchCandidate($context));
+    }
+    $decided->each(function (array $target, int $index) use ($context): void {
+        $target['employee']->update(['last_name' => 'Decidido', 'first_name' => sprintf('%02d', $index)]);
+        app(OvertimeDecisionRecorder::class)->decide(
+            $context['period'], $target['employee'], '2026-07-20', $target['candidate']->key,
+            $index % 2 === 0 ? OvertimeDecision::APPROVED : OvertimeDecision::REJECTED, 'Decisión previa', $context['actor'],
+        );
+    });
+    $pending = collect([addBatchCandidate($context), addBatchCandidate($context)]);
+    $pending->each(fn (array $target, int $index) => $target['employee']
+        ->update(['last_name' => 'Pendiente', 'first_name' => sprintf('%02d', $index)]));
+    $pendingTokens = $pending->map(fn (array $target): string => implode('|', [
+        $target['employee']->id, '2026-07-20', $target['candidate']->key]))->all();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->set('overtimeStatus', 'all')
+        ->call('selectCurrentOvertimePage')
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->set('paginators.overtimePage', 2)
+        ->call('selectCurrentOvertimePage');
+
+    expect($component->get('selectedOvertimeCandidates'))->toBe($pendingTokens);
+});
 test('all-match batches are bounded by active filters and ignore forged selected tokens', function () {
     $context = batchRequestFixture();
     $target = addBatchCandidate($context);
