@@ -36,6 +36,7 @@ class OvertimeDecision extends Model
         'reason',
         'decided_by',
         'supersedes_id',
+        'batch_item_id',
     ];
 
     protected function casts(): array
@@ -84,6 +85,11 @@ class OvertimeDecision extends Model
     public function supersedingDecision(): HasOne
     {
         return $this->hasOne(self::class, 'supersedes_id');
+    }
+
+    public function batchItem(): BelongsTo
+    {
+        return $this->belongsTo(OvertimeDecisionBatchItem::class, 'batch_item_id');
     }
 
     public function scopeCurrent(Builder $query): Builder

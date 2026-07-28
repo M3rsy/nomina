@@ -3,6 +3,8 @@
 use App\Livewire\Feriados\Index as HolidaysIndex;
 use App\Livewire\Jornadas\Index as WorkSchedulesIndex;
 use App\Models\Company;
+use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
 use App\Models\Holiday;
 use App\Models\User;
 use App\Models\WorkSchedule;
@@ -51,7 +53,9 @@ test('company admin can access jornadas page of own company', function () {
     app(CurrentCompany::class)->set($company);
     $this->actingAs($admin)
         ->get('/jornadas')
-        ->assertOk();
+        ->assertOk()
+        ->assertDontSee('Nueva plantilla')
+        ->assertDontSee('Crear nueva versión');
 });
 
 test('super admin without active company sees empty jornadas page', function () {
@@ -63,7 +67,7 @@ test('super admin without active company sees empty jornadas page', function () 
         ->assertOk();
 });
 
-test('company admin can save work schedules for own company', function () {
+test('company admin cannot save work schedules for own company', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
 
@@ -72,14 +76,14 @@ test('company admin can save work schedules for own company', function () {
     Livewire::actingAs($admin)
         ->test(WorkSchedulesIndex::class)
         ->call('save')
-        ->assertSet('showSuccess', true);
+        ->assertForbidden();
 
-    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
+    expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(0);
 });
 
-test('saving a schedule profile creates an audited immutable version', function () {
+test('super admin saving a schedule profile creates an audited immutable version', function () {
     $company = Company::factory()->create();
-    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     $this->seed(WorkScheduleSeeder::class);
     $originalProfile = WorkScheduleProfile::withoutCompanyScope()
@@ -118,9 +122,9 @@ test('saving a schedule profile creates an audited immutable version', function 
         ->assertHasErrors(['schedules.1.end_time']);
 });
 
-test('company admin can duplicate the selected schedule into a reusable profile', function () {
+test('super admin can duplicate the selected schedule into a reusable profile', function () {
     $company = Company::factory()->create();
-    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     $this->seed(WorkScheduleSeeder::class);
     app(CurrentCompany::class)->set($company);
@@ -168,6 +172,46 @@ test('per-schedule overtime bands are no longer editable', function () {
     expect($schedule)
         ->not->toBeNull()
         ->and($schedule->banding_json)->toBeNull();
+});
+
+test('super admin retirement stays bound to the selected schedule and records its audit', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Jornada diurna']);
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Jornada alterna']);
+    $employee = Employee::factory()->forCompany($company)->create();
+    EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id,
+        'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $source->id,
+        'effective_from' => '2026-07-01',
+        'effective_to' => null,
+    ]);
+
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->call('openRetireProfile', $source->id)
+        ->assertSet('showRetireProfile', true)
+        ->set('selectedProfileId', $replacement->id)
+        ->assertSet('showRetireProfile', false)
+        ->assertSet('retiringProfileId', null)
+        ->set('selectedProfileId', $source->id)
+        ->call('openRetireProfile', $source->id)
+        ->set('replacementProfileId', $replacement->id)
+        ->set('retirementReason', 'Se reemplaza la jornada operativa.')
+        ->call('retireProfile')
+        ->assertHasNoErrors()
+        ->assertSet('showRetireProfile', false);
+
+    expect($source->fresh()->is_active)->toBeFalse()
+        ->and($source->fresh()->replacement_profile_id)->toBe($replacement->id)
+        ->and($source->fresh()->retired_by)->toBe($admin->id)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()
+            ->where('employee_id', $employee->id)
+            ->where('work_schedule_profile_id', $replacement->id)
+            ->exists())->toBeTrue();
 });
 
 test('company admin can access feriados page of own company', function () {

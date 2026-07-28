@@ -90,6 +90,38 @@ test('an employee cannot receive a schedule profile from another company', funct
     ))->toThrow(ValidationException::class);
 });
 
+test('a stale form cannot assign a retired schedule profile', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $retiredProfile = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'is_active' => false,
+        'retired_at' => now(),
+    ]);
+
+    expect(fn () => app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $retiredProfile,
+        '2026-07-01',
+        'Formulario abierto antes del retiro.',
+    ))->toThrow(ValidationException::class);
+});
+
+test('employee creation cannot use a stale retired schedule profile', function () {
+    $company = Company::factory()->create();
+    $retiredProfile = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'is_active' => false,
+        'retired_at' => now(),
+    ]);
+    $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+
+    expect(fn () => app(EmployeeScheduleAssigner::class)->createAndAssign(
+        $attributes,
+        $retiredProfile,
+        '2026-07-01',
+        'Formulario de alta abierto antes del retiro.',
+    ))->toThrow(ValidationException::class);
+});
+
 test('an assignment requires a reason and a unique effective date', function () {
     $company = Company::factory()->create();
     $employee = Employee::factory()->forCompany($company)->create();

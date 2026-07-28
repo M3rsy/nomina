@@ -16,7 +16,9 @@ use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\CurrentCompany;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -86,6 +88,52 @@ test('reports ambiguous observed marks instead of guessing a pair', function () 
         'work_date' => '2026-01-05',
         'code' => 'ambiguous',
     ]);
+});
+
+test('checks a representative payroll period within a bounded query budget', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach (range(0, 6) as $dayOfWeek) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $dayOfWeek,
+            'start_time' => '06:00',
+            'end_time' => '14:00',
+            'base_ordinary_hours' => 8,
+        ]);
+    }
+
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-11',
+        'status' => 'uploaded',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+
+    foreach (Employee::factory()->forCompany($company)->count(4)->create() as $employee) {
+        app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada diurna');
+
+        for ($date = CarbonImmutable::parse($period->start_date); $date->lte($period->end_date); $date = $date->addDay()) {
+            foreach (['06:00:00', '14:00:00'] as $time) {
+                RawMark::factory()->forCompany($company)->forPayPeriod($period)
+                    ->forUploadedFile($file)->forEmployee($employee)->create([
+                        'event_at' => "{$date->toDateString()} {$time}",
+                        'status' => 'valid',
+                    ]);
+            }
+        }
+    }
+
+    app(CurrentCompany::class)->set($company);
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    $blockers = app(PayrollReadinessChecker::class)->blockers($period);
+    $queryCount = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect($blockers)->toBeEmpty()
+        ->and($queryCount)->toBeLessThanOrEqual(50);
 });
 
 /** @return array{company:Company,period:PayPeriod,employee:Employee} */
