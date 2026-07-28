@@ -22,7 +22,7 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
 
     private const CHUNK_SIZE = 20;
 
-    public int $tries = 5;
+    public int $tries = 30;
 
     public int $backoff = 10;
 
@@ -69,7 +69,7 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
             }
         }
 
-        $this->finishOrRedispatch();
+        $this->finishOrRelease();
     }
 
     public function failed(Throwable $exception): void
@@ -120,7 +120,7 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
         ]);
     }
 
-    private function finishOrRedispatch(): void
+    private function finishOrRelease(): void
     {
         DB::transaction(function (): void {
             $batch = OvertimeDecisionBatch::withoutCompanyScope()->lockForUpdate()->find($this->batchId);
@@ -128,7 +128,7 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
                 return;
             }
             if ($batch->items()->whereIn('status', [OvertimeDecisionBatchItem::PENDING, OvertimeDecisionBatchItem::PROCESSING])->exists()) {
-                DB::afterCommit(fn () => self::dispatch($batch->id));
+                DB::afterCommit(fn () => $this->release($this->backoff));
 
                 return;
             }
