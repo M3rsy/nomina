@@ -13,16 +13,15 @@ use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\HolidayCalendarContext;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
+use App\Services\Attendance\PayrollPeriodReviewSnapshot;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Payroll\PayPeriodReopener;
-use App\Services\PayrollRules;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
-use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -143,6 +142,8 @@ class Revisar extends Component
 
     public bool $locked = false;
 
+    private ?array $periodReviewSnapshot = null;
+
     public function mount(PayPeriod $payPeriod): void
     {
         $this->authorize('view', $payPeriod);
@@ -158,12 +159,13 @@ class Revisar extends Component
         $employees = Employee::where('company_id', $this->payPeriod->company_id)
             ->orderBy('first_name')
             ->get();
-        $faltas = $this->detectFaltas();
+        $snapshot = $this->periodReviewSnapshot();
+        $faltas = $this->detectFaltas($snapshot);
         $summary = $this->summaryCounts($faltas);
         $isBlocked = $this->isBlocked();
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
-            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -1142,49 +1144,9 @@ class Revisar extends Component
         ];
     }
 
-    private function detectFaltas(): Collection
+    private function detectFaltas(?array $snapshot = null): Collection
     {
-        $rules = new PayrollRules;
-        $company = $this->payPeriod->company;
-        $period = CarbonPeriod::create($this->payPeriod->start_date, $this->payPeriod->end_date);
-        $employees = Employee::withoutCompanyScope()
-            ->where('company_id', $this->payPeriod->company_id)
-            ->get();
-        $evaluationResolver = app(PayrollShiftEvaluationResolver::class);
-        $faltas = collect();
-
-        foreach ($employees as $employee) {
-            foreach ($period as $date) {
-                $day = CarbonImmutable::instance($date);
-
-                if ($rules->isHoliday($company, $day)) {
-                    continue;
-                }
-
-                $review = $evaluationResolver->review($this->payPeriod, $employee, $day);
-                $occurrence = $review->occurrence;
-
-                if (! $occurrence->schedule?->is_working_day
-                    || $occurrence->status !== ShiftOccurrence::NO_MARKS) {
-                    continue;
-                }
-
-                $deficit = $review->analysis->deficits->firstWhere('kind', 'full_day_absence');
-                $exception = $deficit === null ? null : $review->exceptionFor($deficit);
-
-                if ($exception?->decision !== AttendanceException::GRANTED) {
-                    $exception = null;
-                }
-
-                $faltas->push([
-                    'employee' => $employee,
-                    'date' => $day,
-                    'attendance_exception' => $exception,
-                ]);
-            }
-        }
-
-        return $faltas;
+        return ($snapshot ?? $this->periodReviewSnapshot())['absences'];
     }
 
     private function findRawMark(?int $id): ?RawMark
@@ -1276,8 +1238,11 @@ class Revisar extends Component
         ?PayPeriod $payPeriod = null,
         ?HolidayCalendarContext $calendarContext = null,
     ): bool {
+        $target = $payPeriod ?? $this->payPeriod;
+        $this->periodReviewSnapshot = app(PayrollPeriodReviewSnapshot::class)
+            ->forPeriod($target, $calendarContext);
         $this->readinessBlockers = app(PayrollReadinessChecker::class)
-            ->blockers($payPeriod ?? $this->payPeriod, $calendarContext)
+            ->blockers($target, $calendarContext, $this->periodReviewSnapshot)
             ->values()
             ->all();
 
@@ -1287,6 +1252,12 @@ class Revisar extends Component
         }
 
         return $this->readinessBlockers !== [];
+    }
+
+    private function periodReviewSnapshot(): array
+    {
+        return $this->periodReviewSnapshot ??= app(PayrollPeriodReviewSnapshot::class)
+            ->forPeriod($this->payPeriod);
     }
 
     private function lockMutablePayPeriod(): ?PayPeriod
