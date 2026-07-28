@@ -239,7 +239,12 @@
             @if ($overtimeStatus === 'pending' || $overtimeStatus === 'all')
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button type="button" wire:click="selectCurrentOvertimePage" class="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-700">Seleccionar esta página</button>
-                    @if ($selectedOvertimeCandidates)
+                    @if (!$allFilteredOvertimeSelected && $selectedOvertimeCandidates && $pendingOvertimeMatchCount > count($selectedOvertimeCandidates))
+                        <button type="button" wire:click="selectAllFilteredOvertime" class="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white">
+                            Seleccionar los {{ $pendingOvertimeMatchCount }} resultados
+                        </button>
+                    @endif
+                    @if ($allFilteredOvertimeSelected || $selectedOvertimeCandidates)
                         <button type="button" wire:click="clearOvertimeSelection" class="rounded-lg px-3 py-2 text-xs font-bold text-slate-600">Limpiar selección</button>
                     @endif
                 </div>
@@ -286,7 +291,11 @@
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     @if (!$decision)
                                         <label class="flex shrink-0 items-center gap-2 text-xs font-bold text-slate-700">
-                                            <input type="checkbox" wire:model.live="selectedOvertimeCandidates" value="{{ $selectionToken }}" class="rounded border-slate-300 text-indigo-600">
+                                            <input
+                                                type="checkbox"
+                                                @if ($allFilteredOvertimeSelected) checked disabled @else wire:model.live="selectedOvertimeCandidates" value="{{ $selectionToken }}" @endif
+                                                class="rounded border-slate-300 text-indigo-600"
+                                            >
                                             Seleccionar candidato
                                         </label>
                                     @endif
@@ -361,9 +370,11 @@
             <div class="mt-5">{{ $overtimeRows->links() }}</div>
         @endif
 
-        @if ($selectedOvertimeCandidates)
+        @if ($allFilteredOvertimeSelected || $selectedOvertimeCandidates)
             <div class="sticky bottom-4 z-30 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 px-4 py-3 text-white shadow-xl">
-                <p class="text-sm font-bold">{{ count($selectedOvertimeCandidates) }} seleccionados</p>
+                <p class="text-sm font-bold">
+                    {{ $allFilteredOvertimeSelected ? $pendingOvertimeMatchCount : count($selectedOvertimeCandidates) }} seleccionados
+                </p>
                 <div class="flex gap-2">
                     <button type="button" wire:click="openOvertimeBatch('approved')" @disabled($isBlocked) class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Aprobar</button>
                     <button type="button" wire:click="openOvertimeBatch('rejected')" @disabled($isBlocked) class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Rechazar</button>
@@ -744,6 +755,7 @@
                 <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">
                     Se procesarán exactamente {{ $overtimeBatchCount }} candidatos pendientes.
                 </p>
+                <p class="mt-2 text-xs text-slate-600">{{ $overtimeBatchFilterSummary }}</p>
                 <form wire:submit.prevent="saveOvertimeBatch" class="mt-4 space-y-4">
                     <label for="overtime_batch_reason" class="block text-sm">
                         <span class="font-semibold text-slate-900">Motivo común obligatorio</span>

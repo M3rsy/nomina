@@ -44,6 +44,8 @@ class Revisar extends Component
 {
     use WithPagination;
 
+    private const MAX_OVERTIME_BATCH_TARGETS = 500;
+
     public PayPeriod $payPeriod;
 
     #[Url]
@@ -135,6 +137,8 @@ class Revisar extends Component
 
     public array $selectedOvertimeCandidates = [];
 
+    public bool $allFilteredOvertimeSelected = false;
+
     public bool $showOvertimeBatchModal = false;
 
     public string $overtimeBatchDecision = '';
@@ -143,9 +147,11 @@ class Revisar extends Component
 
     public string $overtimeBatchRequestKey = '';
 
-    public array $overtimeBatchSelection = [];
+    public string $overtimeBatchSelection = '';
 
     public int $overtimeBatchCount = 0;
+
+    public string $overtimeBatchFilterSummary = '';
 
     public ?int $activeOvertimeBatchId = null;
 
@@ -264,6 +270,9 @@ class Revisar extends Component
                 'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
             ])
             ->values();
+        $pendingOvertimeMatchCount = $filteredOvertimeRows
+            ->filter(fn (array $row): bool => $row['decision'] === null)
+            ->count();
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -274,6 +283,7 @@ class Revisar extends Component
             'uploadedFiles' => $uploadedFiles,
             'overtimeGroups' => $overtimeGroups,
             'overtimeRows' => $overtimeRows,
+            'pendingOvertimeMatchCount' => $pendingOvertimeMatchCount,
             'deficitReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()),
         ]);
@@ -322,7 +332,14 @@ class Revisar extends Component
 
     public function selectCurrentOvertimePage(): void
     {
+        $this->allFilteredOvertimeSelected = false;
         $this->selectedOvertimeCandidates = $this->authoritativeOvertimeTargets(true)->keys()->all();
+    }
+
+    public function selectAllFilteredOvertime(): void
+    {
+        $this->allFilteredOvertimeSelected = true;
+        $this->selectedOvertimeCandidates = [];
     }
 
     public function clearOvertimeSelection(): void
@@ -336,7 +353,15 @@ class Revisar extends Component
             return;
         }
 
-        $targets = $this->authoritativeSelectedOvertimeTargets();
+        $targets = $this->resolvedOvertimeBatchTargets();
+        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
+            $this->addError(
+                'selectedOvertimeCandidates',
+                'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.',
+            );
+
+            return;
+        }
         if ($targets->isEmpty()) {
             $this->addError('selectedOvertimeCandidates', 'Seleccione al menos un candidato pendiente.');
 
@@ -347,6 +372,7 @@ class Revisar extends Component
         $this->overtimeBatchDecision = $decision;
         $this->overtimeBatchSelection = $this->overtimeBatchConfirmation($targets);
         $this->overtimeBatchCount = $targets->count();
+        $this->overtimeBatchFilterSummary = $this->overtimeFilterSummary();
         $this->overtimeBatchReason = '';
         $this->overtimeBatchRequestKey = (string) Str::uuid();
         $this->showOvertimeBatchModal = true;
@@ -358,8 +384,9 @@ class Revisar extends Component
         $this->overtimeBatchDecision = '';
         $this->overtimeBatchReason = '';
         $this->overtimeBatchRequestKey = '';
-        $this->overtimeBatchSelection = [];
+        $this->overtimeBatchSelection = '';
         $this->overtimeBatchCount = 0;
+        $this->overtimeBatchFilterSummary = '';
         $this->resetErrorBag();
     }
 
@@ -374,7 +401,15 @@ class Revisar extends Component
             'overtimeBatchReason' => ['required', 'string', 'max:500'],
             'overtimeBatchRequestKey' => ['required', 'uuid'],
         ], ['overtimeBatchReason.required' => 'Debe indicar un motivo común.']);
-        $targets = $this->authoritativeSelectedOvertimeTargets();
+        $targets = $this->resolvedOvertimeBatchTargets();
+        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
+            $this->addError(
+                'selectedOvertimeCandidates',
+                'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.',
+            );
+
+            return;
+        }
         if ($this->overtimeBatchConfirmation($targets) !== $this->overtimeBatchSelection) {
             $this->addError('selectedOvertimeCandidates', 'La selección cambió. Revísela antes de continuar.');
 
@@ -1487,6 +1522,13 @@ class Revisar extends Component
             ->filter(fn (array $target, string $token): bool => isset($selected[$token]));
     }
 
+    private function resolvedOvertimeBatchTargets(): Collection
+    {
+        return $this->allFilteredOvertimeSelected
+            ? $this->authoritativeOvertimeTargets()
+            : $this->authoritativeSelectedOvertimeTargets();
+    }
+
     private function authoritativeOvertimeTargets(bool $currentPage = false): Collection
     {
         $search = mb_strtolower(trim($this->overtimeSearch));
@@ -1569,16 +1611,54 @@ class Revisar extends Component
         }
     }
 
-    private function overtimeBatchConfirmation(Collection $targets): array
+    private function overtimeBatchConfirmation(Collection $targets): string
     {
-        return $targets->map(
+        $candidateSnapshot = $targets->map(
             fn (array $target, string $token): string => $token.'|'.$target['fingerprint']
         )->sort()->values()->all();
+
+        return hash('sha256', json_encode([
+            'filters' => [
+                'search' => trim($this->overtimeSearch),
+                'status' => $this->overtimeStatus,
+                'date' => $this->overtimeDate,
+                'rate' => $this->overtimeRate,
+                'uploaded_file_id' => $this->uploaded_file_id,
+                'all' => $this->allFilteredOvertimeSelected,
+            ],
+            'candidates' => $candidateSnapshot,
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    private function overtimeFilterSummary(): string
+    {
+        $parts = ['Estado: Pendientes'];
+        if (($search = trim($this->overtimeSearch)) !== '') {
+            $parts[] = 'Empleado: '.$search;
+        }
+        if ($this->overtimeDate !== '') {
+            $parts[] = 'Fecha: '.$this->overtimeDate;
+        }
+        if ($this->overtimeRate !== '') {
+            $parts[] = 'Porcentaje: '.match ($this->overtimeRate) {
+                'ordinary' => 'Ordinario', 'extra25' => '25%', 'extra50' => '50%',
+                'extra75' => '75%', 'extra100' => '100%', default => $this->overtimeRate,
+            };
+        }
+        if ($this->uploaded_file_id !== null) {
+            $file = $this->payPeriod->uploadedFiles()->whereKey($this->uploaded_file_id)->value('original_name');
+            if ($file !== null) {
+                $parts[] = 'Archivo: '.$file;
+            }
+        }
+
+        return implode(' · ', $parts);
     }
 
     private function resetOvertimeSelection(): void
     {
         $this->selectedOvertimeCandidates = [];
+        $this->allFilteredOvertimeSelected = false;
         $this->closeOvertimeBatchModal();
     }
 
