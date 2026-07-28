@@ -7,10 +7,12 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\WorkScheduleProfileRetirer;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -26,6 +28,8 @@ class Index extends Component
 
     public array $profiles = [];
 
+    public array $profileHistory = [];
+
     public ?int $selectedProfileId = null;
 
     public string $changeReason = '';
@@ -33,6 +37,18 @@ class Index extends Component
     public bool $showCreateProfile = false;
 
     public string $newProfileName = '';
+
+    public bool $showRetireProfile = false;
+
+    public ?int $retiringProfileId = null;
+
+    public ?int $replacementProfileId = null;
+
+    public string $retirementReason = '';
+
+    public int $retirementAffectedEmployeeCount = 0;
+
+    public bool $showRetirementSuccess = false;
 
     public bool $hasCompany = true;
 
@@ -93,12 +109,17 @@ class Index extends Component
     {
         $this->showSuccess = false;
         $this->changeReason = '';
+        $this->resetRetirementForm();
         $this->loadSchedules();
     }
 
     private function hasProfileHistoryTables(): bool
     {
-        return Schema::hasTable('work_schedule_profiles') && Schema::hasTable('work_schedules') && Schema::hasColumn('work_schedules', 'work_schedule_profile_id');
+        return Schema::hasTable('work_schedule_profiles')
+            && Schema::hasTable('work_schedules')
+            && Schema::hasColumn('work_schedules', 'work_schedule_profile_id')
+            && Schema::hasColumn('work_schedule_profiles', 'retired_at')
+            && Schema::hasColumn('work_schedule_profiles', 'replacement_profile_id');
     }
 
     public function openCreateProfile(): void
@@ -115,6 +136,99 @@ class Index extends Component
         $this->newProfileName = '';
         $this->showCreateProfile = false;
         $this->resetValidation('newProfileName');
+    }
+
+    public function openRetireProfile(int $profileId): void
+    {
+        $companyId = current_company_id();
+
+        if ($companyId === null) {
+            return;
+        }
+
+        $profile = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->whereKey($profileId)
+            ->where('is_active', true)
+            ->whereNull('retired_at')
+            ->firstOrFail();
+
+        $this->authorize('retire', $profile);
+
+        $this->retiringProfileId = $profile->id;
+        $this->replacementProfileId = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->where('is_active', true)
+            ->whereNull('retired_at')
+            ->where('id', '!=', $profile->id)
+            ->orderBy('name')
+            ->orderByDesc('version')
+            ->value('id');
+        $this->retirementReason = '';
+        $this->retirementAffectedEmployeeCount = $profile->employeeAssignments()
+            ->where(function ($query): void {
+                $query->whereNull('effective_to')
+                    ->orWhereDate('effective_to', '>=', today()->toDateString());
+            })
+            ->distinct('employee_id')
+            ->count('employee_id');
+        $this->showRetireProfile = true;
+        $this->resetValidation(['replacementProfileId', 'retirementReason']);
+    }
+
+    public function cancelRetireProfile(): void
+    {
+        $this->resetRetirementForm();
+    }
+
+    public function retireProfile(): void
+    {
+        $companyId = current_company_id();
+
+        if ($companyId === null || $this->retiringProfileId === null) {
+            return;
+        }
+
+        $source = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->findOrFail($this->retiringProfileId);
+
+        $this->authorize('retire', $source);
+
+        $validated = $this->validate([
+            'replacementProfileId' => [
+                'required',
+                'integer',
+                Rule::exists('work_schedule_profiles', 'id')->where(
+                    fn ($query) => $query
+                        ->where('company_id', $companyId)
+                        ->where('is_active', true)
+                        ->whereNull('retired_at')
+                        ->where('id', '!=', $source->id),
+                ),
+            ],
+            'retirementReason' => ['required', 'string', 'max:500'],
+        ], [
+            'replacementProfileId.required' => 'Seleccioná la jornada reemplazante.',
+            'replacementProfileId.exists' => 'La jornada reemplazante debe estar disponible en la misma empresa.',
+            'retirementReason.required' => 'Ingresá el motivo para retirar la jornada.',
+        ]);
+
+        $replacement = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->findOrFail($validated['replacementProfileId']);
+
+        app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+            $source,
+            $replacement,
+            $validated['retirementReason'],
+            auth()->user(),
+        );
+
+        $this->selectedProfileId = $replacement->id;
+        $this->resetRetirementForm();
+        $this->showRetirementSuccess = true;
+        $this->loadSchedules();
     }
 
     public function createProfile(): void
@@ -170,6 +284,7 @@ class Index extends Component
         if ($companyId === null) {
             $this->schedules = [];
             $this->originalSchedules = [];
+            $this->profileHistory = [];
             $this->historicalPayrollResultCount = 0;
             $this->historicalProcessedPeriodCount = 0;
             $this->latestHistoricalPeriod = null;
@@ -201,6 +316,27 @@ class Index extends Component
             ->orderBy('name')
             ->orderByDesc('version')
             ->get();
+
+        $this->profileHistory = WorkScheduleProfile::withoutCompanyScope()
+            ->with(['creator:id,name', 'retiredBy:id,name', 'replacementProfile:id,name,version'])
+            ->where('company_id', $companyId)
+            ->where('is_active', false)
+            ->orderByDesc('retired_at')
+            ->orderByDesc('updated_at')
+            ->get()
+            ->map(fn (WorkScheduleProfile $profile): array => [
+                'id' => $profile->id,
+                'name' => $profile->name,
+                'version' => $profile->version,
+                'status' => $profile->retired_at === null ? 'superseded' : 'retired',
+                'actor' => $profile->retiredBy?->name ?? $profile->creator?->name,
+                'reason' => $profile->retirement_reason ?? $profile->change_reason,
+                'date' => ($profile->retired_at ?? $profile->updated_at)?->format('Y-m-d H:i'),
+                'replacement' => $profile->replacementProfile === null
+                    ? null
+                    : "{$profile->replacementProfile->name} · v{$profile->replacementProfile->version}",
+            ])
+            ->all();
 
         $this->profiles = $activeProfiles
             ->map(fn (WorkScheduleProfile $profile): array => [
@@ -636,6 +772,16 @@ class Index extends Component
         }
 
         return substr(trim($value), 0, 5);
+    }
+
+    private function resetRetirementForm(): void
+    {
+        $this->showRetireProfile = false;
+        $this->retiringProfileId = null;
+        $this->replacementProfileId = null;
+        $this->retirementReason = '';
+        $this->retirementAffectedEmployeeCount = 0;
+        $this->resetValidation(['replacementProfileId', 'retirementReason']);
     }
 
     public function render()
