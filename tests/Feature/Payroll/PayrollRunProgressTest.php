@@ -64,6 +64,12 @@ test('payroll progress and actions independently require payroll processing perm
     app(CurrentCompany::class)->set($company);
     $this->actingAs($reviewer);
 
+    Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->assertOk()
+        ->assertDontSeeLivewire(PayrollRunProgress::class)
+        ->call('startPayrollRun')
+        ->assertStatus(403);
+
     Livewire::test(PayrollRunProgress::class, [
         'payPeriod' => $period, 'runId' => $run->id,
     ])->assertStatus(403);
@@ -135,6 +141,11 @@ test('a failed run stays on review and an explicit retry creates a new run', fun
         ->set('status', 'valid')
         ->set('overtimeStatus', 'rejected');
     $first->markFailed('sensitive database credentials');
+
+    Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->assertSet('activePayrollRunId', $first->id)
+        ->assertSee("Referencia #{$first->id}")
+        ->assertSee('Intentar nuevamente');
 
     Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $first->id])
         ->assertSee('No se pudo procesar la nómina.')

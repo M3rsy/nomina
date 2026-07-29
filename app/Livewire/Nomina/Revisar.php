@@ -1657,7 +1657,11 @@ class Revisar extends Component
         $this->activePayrollRunId = $this->payrollRuns()
             ->whereIn('status', PayrollRun::ACTIVE_STATUSES)
             ->latest('id')
-            ->value('id');
+            ->value('id')
+            ?? $this->payrollRuns()
+                ->where('status', PayrollRun::FAILED)
+                ->latest('id')
+                ->value('id');
     }
 
     private function payrollRuns()

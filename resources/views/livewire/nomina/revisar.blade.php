@@ -132,13 +132,15 @@
         @endif
     </header>
 
-    @if ($activePayrollRunId)
-        <livewire:nomina.payroll-run-progress
-            :pay-period="$payPeriod"
-            :run-id="$activePayrollRunId"
-            :key="'payroll-run-'.$activePayrollRunId"
-        />
-    @endif
+    @can('payroll.process')
+        @if ($activePayrollRunId)
+            <livewire:nomina.payroll-run-progress
+                :pay-period="$payPeriod"
+                :run-id="$activePayrollRunId"
+                :key="'payroll-run-'.$activePayrollRunId"
+            />
+        @endif
+    @endcan
 
     <section class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
