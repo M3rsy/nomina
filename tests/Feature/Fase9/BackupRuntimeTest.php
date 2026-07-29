@@ -46,6 +46,7 @@ test('the production queue waits for completed app bootstrap before consuming jo
     unset($workerEnvironment['RUN_APP_BOOTSTRAP']);
 
     expect($worker['restart'])->toBe('unless-stopped')
+        ->and($worker['stop_grace_period'] ?? null)->toBe('5m0s')
         ->and($workerEnvironment)->toBe($app['environment'])
         ->and($app['healthcheck']['test'])->toBe([
             'CMD-SHELL',
@@ -66,6 +67,13 @@ test('the production queue waits for completed app bootstrap before consuming jo
             '--timeout=240',
             '--max-time=3600',
         ]);
+});
+
+test('the production image enables process-control signals for queue timeouts', function () {
+    $dockerfile = file_get_contents(base_path('Dockerfile.prod'));
+    preg_match('/docker-php-ext-install\\s+(.+?)(?:\\n\\n|$)/s', $dockerfile, $extensions);
+
+    expect($extensions[1] ?? '')->toMatch('/(^|\\s)pcntl(\\s|$)/');
 });
 
 test('the database queue reservation outlives the worker and overlap lock and remains configurable', function () {

@@ -89,7 +89,7 @@ final class OvertimeDecisionBatchRequester
                 $batch->update(['status' => OvertimeDecisionBatch::QUEUED, 'started_at' => null, 'finished_at' => null, 'last_error' => null]);
             }
             if ($batch->status === OvertimeDecisionBatch::QUEUED) {
-                DB::afterCommit(fn () => ProcessOvertimeDecisionBatch::dispatch($batch->id));
+                DB::afterCommit(fn () => ProcessOvertimeDecisionBatch::dispatch($batch->id, retryOnOverlap: true));
             }
 
             return $batch->load('items');

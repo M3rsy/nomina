@@ -106,6 +106,7 @@ services:
         environment:
             RUN_APP_BOOTSTRAP: "false"
         restart: unless-stopped
+        stop_grace_period: 5m
         depends_on:
             app:
                 condition: service_healthy

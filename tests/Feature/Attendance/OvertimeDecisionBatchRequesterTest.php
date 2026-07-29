@@ -153,17 +153,17 @@ test('terminalizes a queued batch when attempts are exhausted before claiming wo
         ->and($batch->fresh()->last_error)->toBe('attempts exhausted before handle')
         ->and($batch->items()->sole()->status)->toBe('pending');
 });
-test('does not fail a processing batch for a duplicate exhausted before handle', function () {
+test('terminalizes a processing batch when its canonical job exhausts attempts', function () {
     $context = batchRequestFixture();
     $batch = requestBatch($context);
     $batch->update(['status' => OvertimeDecisionBatch::PROCESSING]);
     $job = new ProcessOvertimeDecisionBatch($batch->id);
 
-    $job->failed(new MaxAttemptsExceededException('duplicate exhausted before handle'));
+    $job->failed(new MaxAttemptsExceededException('canonical job exhausted'));
 
-    expect($batch->fresh()->status)->toBe(OvertimeDecisionBatch::PROCESSING)
-        ->and($batch->fresh()->finished_at)->toBeNull()
-        ->and($batch->fresh()->last_error)->toBeNull()
+    expect($batch->fresh()->status)->toBe('failed')
+        ->and($batch->fresh()->finished_at)->not->toBeNull()
+        ->and($batch->fresh()->last_error)->toBe('canonical job exhausted')
         ->and($batch->items()->sole()->status)->toBe('pending');
 });
 test('terminalizes a real worker timeout through durable batch state', function () {
@@ -199,6 +199,34 @@ test('does not release accidental duplicate jobs while the batch lock is held', 
     $job->assertNotReleased();
     expect($nextWasCalled)->toBeFalse()
         ->and($middleware->releaseAfter)->toBeNull();
+});
+test('releases a recovered job until the expired worker overlap lock clears', function () {
+    $context = batchRequestFixture();
+    $key = (string) Str::uuid();
+    $batch = requestBatch($context, ['key' => $key]);
+    (new ProcessOvertimeDecisionBatch($batch->id))
+        ->failed(new TimeoutExceededException('worker timed out'));
+
+    requestBatch($context, ['key' => $key]);
+
+    $job = Queue::pushed(ProcessOvertimeDecisionBatch::class)->last()
+        ->withFakeQueueInteractions();
+    $middleware = $job->middleware()[0];
+    $lock = Cache::lock($middleware->getLockKey($job), 300);
+    expect($lock->get())->toBeTrue();
+    $nextWasCalled = false;
+
+    try {
+        $middleware->handle($job, function () use (&$nextWasCalled): void {
+            $nextWasCalled = true;
+        });
+    } finally {
+        $lock->release();
+    }
+
+    $job->assertReleased(300);
+    expect($nextWasCalled)->toBeFalse()
+        ->and($middleware->releaseAfter)->toBe(300);
 });
 test('releases the same queued job between bounded chunks until terminal', function () {
     $context = batchRequestFixture();

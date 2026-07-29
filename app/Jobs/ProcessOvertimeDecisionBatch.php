@@ -11,7 +11,6 @@ use App\Services\Attendance\OvertimeDecisionRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -23,6 +22,8 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
 
     private const CHUNK_SIZE = 20;
 
+    private const OVERLAP_EXPIRES_AFTER = 300;
+
     public int $tries = 30;
 
     public int $backoff = 10;
@@ -31,11 +32,19 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public int $batchId) {}
+    public function __construct(
+        public int $batchId,
+        public bool $retryOnOverlap = false,
+    ) {}
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping("overtime-decision-batch:{$this->batchId}"))->dontRelease()->expireAfter($this->timeout + 60)];
+        $overlap = (new WithoutOverlapping("overtime-decision-batch:{$this->batchId}"))
+            ->expireAfter(self::OVERLAP_EXPIRES_AFTER);
+
+        return [$this->retryOnOverlap
+            ? $overlap->releaseAfter(self::OVERLAP_EXPIRES_AFTER)
+            : $overlap->dontRelease()];
     }
 
     public function handle(OvertimeDecisionRecorder $recorder): void
@@ -83,10 +92,6 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
                 OvertimeDecisionBatch::QUEUED,
                 OvertimeDecisionBatch::PROCESSING,
             ], true)) {
-                return;
-            }
-            if ($batch->status === OvertimeDecisionBatch::PROCESSING
-                && $exception::class === MaxAttemptsExceededException::class) {
                 return;
             }
             $batch->items()->where('status', OvertimeDecisionBatchItem::PROCESSING)
