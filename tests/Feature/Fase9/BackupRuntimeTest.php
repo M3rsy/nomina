@@ -38,11 +38,12 @@ test('the scheduler uses the shared entrypoint and installs the www-data crontab
         ]);
 });
 
-test('the production queue waits for completed app bootstrap before consuming jobs', function () {
+test('the production queue waits for bootstrap and runs as a non-root worker', function () {
     $compose = renderPhaseFiveProductionCompose();
     $app = $compose['services']['app'];
     $worker = $compose['services']['queue'];
     $workerEnvironment = $worker['environment'];
+    $productionEnvironment = file_get_contents(dirname(__DIR__, 3).'/.env.production.example');
     unset($workerEnvironment['RUN_APP_BOOTSTRAP']);
 
     expect($worker['restart'])->toBe('unless-stopped')
@@ -59,6 +60,8 @@ test('the production queue waits for completed app bootstrap before consuming jo
         ->and($worker['networks'])->toBe($app['networks'])
         ->and($worker['environment']['RUN_APP_BOOTSTRAP'] ?? null)->toBe('false')
         ->and($worker['command'])->toBe([
+            'su-exec',
+            'www-data:www-data',
             'php',
             'artisan',
             'queue:work',
@@ -66,7 +69,8 @@ test('the production queue waits for completed app bootstrap before consuming jo
             '--tries=30',
             '--timeout=240',
             '--max-time=3600',
-        ]);
+        ])
+        ->and($productionEnvironment)->toContain('DB_QUEUE_RETRY_AFTER=360');
 });
 
 test('the production image enables process-control signals for queue timeouts', function () {

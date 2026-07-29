@@ -118,6 +118,8 @@ services:
             - ./bootstrap/cache:/var/www/html/bootstrap/cache
             - nomina-backups:/var/www/html/storage/app/nomina-backups
         command:
+            - su-exec
+            - www-data:www-data
             - php
             - artisan
             - queue:work
