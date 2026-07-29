@@ -48,7 +48,16 @@
                     Volver a períodos
                 </a>
 
-                @if ($payPeriod->status === 'processed')
+                @if ($payPeriod->status === 'ready')
+                    <button
+                        type="button"
+                        wire:click="startPayrollRun"
+                        @disabled($activePayrollRunId)
+                        class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        Procesar nómina
+                    </button>
+                @elseif ($payPeriod->status === 'processed')
                     <button
                         type="button"
                         wire:click="openReopenModal"
@@ -122,6 +131,16 @@
             </div>
         @endif
     </header>
+
+    @can('payroll.process')
+        @if ($activePayrollRunId)
+            <livewire:nomina.payroll-run-progress
+                :pay-period="$payPeriod"
+                :run-id="$activePayrollRunId"
+                :key="'payroll-run-'.$activePayrollRunId"
+            />
+        @endif
+    @endcan
 
     <section class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -684,7 +703,7 @@
 
                     <div class="flex justify-end gap-2 sm:col-span-2">
                         <button type="button" wire:click="closeManualMarkModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Registrar marca real</button>
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Registrar marca real</button>
                     </div>
                 </form>
             </div>
@@ -721,7 +740,7 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
                             {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
                         </button>
                     </div>
@@ -758,7 +777,7 @@
                     @error('selectedOvertimeCandidates') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeOvertimeBatchModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" wire:loading.attr="disabled" wire:target="saveOvertimeBatch" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                        <button type="submit" @disabled($isBlocked) wire:loading.attr="disabled" wire:target="saveOvertimeBatch" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
                             <span wire:loading.remove wire:target="saveOvertimeBatch">Confirmar lote</span>
                             <span wire:loading wire:target="saveOvertimeBatch">Enviando…</span>
                         </button>
@@ -798,7 +817,7 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeOvertimeDecisionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $overtimeDecision === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700' }}">
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $overtimeDecision === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700' }}">
                             {{ $overtimeDecision === 'approved' ? 'Aprobar completo' : 'Rechazar completo' }}
                         </button>
                     </div>
@@ -841,7 +860,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeEditModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Guardar</button>
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</button>
                     </div>
                 </form>
             </div>
@@ -868,7 +887,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeCorrectModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Guardar corrección</button>
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar corrección</button>
                     </div>
                 </form>
             </div>
@@ -895,7 +914,7 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar</button>
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Eliminar</button>
                     </div>
                 </form>
             </div>
@@ -937,7 +956,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Guardar</button>
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</button>
                     </div>
                 </form>
             </div>

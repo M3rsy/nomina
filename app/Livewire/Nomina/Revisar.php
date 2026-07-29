@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\OvertimeDecision;
 use App\Models\OvertimeDecisionBatch;
 use App\Models\PayPeriod;
+use App\Models\PayrollRun;
 use App\Models\RawMark;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
@@ -22,6 +23,7 @@ use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Payroll\PayPeriodReopener;
+use App\Services\Payroll\PayrollRunRequester;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -160,6 +162,12 @@ class Revisar extends Component
     #[Locked]
     public ?int $refreshedOvertimeBatchId = null;
 
+    #[Locked]
+    public ?int $activePayrollRunId = null;
+
+    #[Locked]
+    public string $payrollRunRequestKey = '';
+
     public bool $showAttendanceExceptionModal = false;
 
     public ?int $attendanceExceptionEmployeeId = null;
@@ -212,6 +220,7 @@ class Revisar extends Component
         $this->payPeriod = $payPeriod;
         $this->locked = $this->isBlocked();
         $this->recoverOvertimeBatch();
+        $this->recoverPayrollRun();
     }
 
     public function render()
@@ -431,6 +440,50 @@ class Revisar extends Component
 
         $this->activeOvertimeBatchId = null;
         $this->refreshedOvertimeBatchId = null;
+    }
+
+    #[On('payroll-run-terminal')]
+    public function finishPayrollRun(int $runId): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+
+        if ($this->activePayrollRunId !== $runId) {
+            return;
+        }
+
+        $run = $this->payrollRuns()->find($runId);
+        $period = PayPeriod::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->find($this->payPeriod->id);
+        if ($run?->status !== PayrollRun::COMPLETED
+            || $period === null
+            || ! in_array($period->status, ['processed', 'approved', 'exported'], true)) {
+            return;
+        }
+
+        $this->payPeriod = $period;
+        $this->redirectRoute('nomina.procesar', ['payPeriod' => $period]);
+    }
+
+    #[On('payroll-run-retry')]
+    public function retryPayrollRun(int $runId): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+
+        if ($this->activePayrollRunId !== $runId
+            || $this->payrollRuns()->where('status', PayrollRun::FAILED)->find($runId) === null) {
+            return;
+        }
+
+        $this->payrollRunRequestKey = (string) Str::uuid();
+        $run = app(PayrollRunRequester::class)->request(
+            $this->payPeriod->fresh(),
+            Auth::user(),
+            $this->payrollRunRequestKey,
+        );
+        $this->activePayrollRunId = $run->id;
     }
 
     public function openEditRawMark(int $id): void
@@ -868,6 +921,19 @@ class Revisar extends Component
         session()->flash('success', 'Borrador guardado.');
     }
 
+    public function startPayrollRun(): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+        $this->payrollRunRequestKey = (string) Str::uuid();
+        $run = app(PayrollRunRequester::class)->request(
+            $this->payPeriod,
+            Auth::user(),
+            $this->payrollRunRequestKey,
+        );
+        $this->activePayrollRunId = $run->id;
+    }
+
     public function openOvertimeDecision(
         int $employeeId,
         string $workDate,
@@ -1290,7 +1356,10 @@ class Revisar extends Component
             ->value('status');
 
         return $status === null
-            || in_array($status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true);
+            || in_array($status, PayPeriod::ATTENDANCE_LOCKED_STATUSES, true)
+            || $this->payrollRuns()
+                ->whereIn('status', PayrollRun::ACTIVE_STATUSES)
+                ->exists();
     }
 
     public function readinessBlockerLabel(string $code): string
@@ -1581,6 +1650,25 @@ class Revisar extends Component
         if ($batch !== null) {
             $this->activeOvertimeBatchId = $batch->id;
         }
+    }
+
+    private function recoverPayrollRun(): void
+    {
+        $this->activePayrollRunId = $this->payrollRuns()
+            ->whereIn('status', PayrollRun::ACTIVE_STATUSES)
+            ->latest('id')
+            ->value('id')
+            ?? $this->payrollRuns()
+                ->where('status', PayrollRun::FAILED)
+                ->latest('id')
+                ->value('id');
+    }
+
+    private function payrollRuns()
+    {
+        return PayrollRun::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->where('pay_period_id', $this->payPeriod->id);
     }
 
     private function actorOvertimeBatches()
