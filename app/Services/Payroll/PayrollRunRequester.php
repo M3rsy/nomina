@@ -2,6 +2,7 @@
 
 namespace App\Services\Payroll;
 
+use App\Jobs\ProcessPayrollRun;
 use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
@@ -21,7 +22,7 @@ final class PayrollRunRequester
         }
 
         try {
-            return DB::transaction(function () use ($period, $actor, $requestKey): PayrollRun {
+            $run = DB::transaction(function () use ($period, $actor, $requestKey): PayrollRun {
                 $company = Company::query()->whereKey($period->company_id)->lockForUpdate()->firstOrFail();
                 $period = PayPeriod::withoutCompanyScope()
                     ->withTrashed()
@@ -57,10 +58,16 @@ final class PayrollRunRequester
                 ]);
             });
         } catch (UniqueConstraintViolationException $exception) {
-            return $this->priorRun($requestKey, $period)
+            $run = $this->priorRun($requestKey, $period)
                 ?? $this->activeRun($period)
                 ?? throw $exception;
         }
+
+        if ($run->status === PayrollRun::QUEUED) {
+            DB::afterCommit(fn () => ProcessPayrollRun::dispatch($run->id));
+        }
+
+        return $run;
     }
 
     private function authorize(User $actor, PayPeriod $period): void

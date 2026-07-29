@@ -8,10 +8,14 @@ use App\Services\Payroll\PayrollRunRequester;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
-beforeEach(fn () => $this->seed(PermissionRoleSeeder::class));
+beforeEach(function () {
+    $this->seed(PermissionRoleSeeder::class);
+    Queue::fake();
+});
 
 function requestPayrollRun(PayPeriod $period, User $actor, ?string $key = null): PayrollRun
 {
