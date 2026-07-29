@@ -76,7 +76,6 @@ class PermissionRoleSeeder extends Seeder
             'payroll.receipts.download',
             'audit.view',
             'work_schedules.view',
-            'work_schedules.manage',
             'holidays.view',
             'holidays.manage',
         ],

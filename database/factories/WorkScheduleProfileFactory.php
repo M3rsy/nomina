@@ -23,6 +23,10 @@ class WorkScheduleProfileFactory extends Factory
             'is_active' => true,
             'created_by' => null,
             'change_reason' => null,
+            'retired_at' => null,
+            'retired_by' => null,
+            'retirement_reason' => null,
+            'replacement_profile_id' => null,
         ];
     }
 

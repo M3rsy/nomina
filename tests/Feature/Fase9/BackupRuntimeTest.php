@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ProcessOvertimeDecisionBatch;
 use Symfony\Component\Process\Process;
 
 test('the app and scheduler share the production backup volume', function () {
@@ -35,6 +36,74 @@ test('the scheduler uses the shared entrypoint and installs the www-data crontab
             'target' => '/etc/cron.d/nomina',
             'read_only' => true,
         ]);
+});
+
+test('the production queue waits for completed app bootstrap before consuming jobs', function () {
+    $compose = renderPhaseFiveProductionCompose();
+    $app = $compose['services']['app'];
+    $worker = $compose['services']['queue'];
+    $workerEnvironment = $worker['environment'];
+    unset($workerEnvironment['RUN_APP_BOOTSTRAP']);
+
+    expect($worker['restart'])->toBe('unless-stopped')
+        ->and($worker['stop_grace_period'] ?? null)->toBe('5m0s')
+        ->and($workerEnvironment)->toBe($app['environment'])
+        ->and($app['healthcheck']['test'])->toBe([
+            'CMD-SHELL',
+            'test "$$(cat /proc/1/comm)" = php-fpm',
+        ])
+        ->and(array_keys($worker['depends_on']))->toBe(['app', 'db'])
+        ->and($worker['depends_on']['app']['condition'])->toBe('service_healthy')
+        ->and($worker['depends_on']['db']['condition'])->toBe('service_healthy')
+        ->and($worker['volumes'])->toBe($app['volumes'])
+        ->and($worker['networks'])->toBe($app['networks'])
+        ->and($worker['environment']['RUN_APP_BOOTSTRAP'] ?? null)->toBe('false')
+        ->and($worker['command'])->toBe([
+            'php',
+            'artisan',
+            'queue:work',
+            '--sleep=3',
+            '--tries=30',
+            '--timeout=240',
+            '--max-time=3600',
+        ]);
+});
+
+test('the production image enables process-control signals for queue timeouts', function () {
+    $dockerfile = file_get_contents(base_path('Dockerfile.prod'));
+    preg_match('/docker-php-ext-install\\s+(.+?)(?:\\n\\n|$)/s', $dockerfile, $extensions);
+
+    expect($extensions[1] ?? '')->toMatch('/(^|\\s)pcntl(\\s|$)/');
+});
+
+test('the database queue reservation outlives the worker and overlap lock and remains configurable', function () {
+    $originalEnvironment = $_ENV['DB_QUEUE_RETRY_AFTER'] ?? null;
+    $originalServer = $_SERVER['DB_QUEUE_RETRY_AFTER'] ?? null;
+
+    try {
+        unset($_ENV['DB_QUEUE_RETRY_AFTER'], $_SERVER['DB_QUEUE_RETRY_AFTER']);
+        $default = (require base_path('config/queue.php'))['connections']['database']['retry_after'];
+        $_ENV['DB_QUEUE_RETRY_AFTER'] = '420';
+        $_SERVER['DB_QUEUE_RETRY_AFTER'] = '420';
+        $overridden = (require base_path('config/queue.php'))['connections']['database']['retry_after'];
+    } finally {
+        if ($originalEnvironment === null) {
+            unset($_ENV['DB_QUEUE_RETRY_AFTER']);
+        } else {
+            $_ENV['DB_QUEUE_RETRY_AFTER'] = $originalEnvironment;
+        }
+        if ($originalServer === null) {
+            unset($_SERVER['DB_QUEUE_RETRY_AFTER']);
+        } else {
+            $_SERVER['DB_QUEUE_RETRY_AFTER'] = $originalServer;
+        }
+    }
+
+    $job = new ProcessOvertimeDecisionBatch(123);
+    expect($default)->toBe(360)
+        ->toBeGreaterThan($job->middleware()[0]->expiresAfter)
+        ->and($job->middleware()[0]->expiresAfter)->toBeGreaterThan($job->timeout)
+        ->and($overridden)->toBe(420);
 });
 
 test('the production entrypoint defaults safely and can skip app bootstrap for the scheduler', function () {
@@ -184,7 +253,7 @@ function renderPhaseFiveProductionCompose(): array
 
     try {
         copy(dirname(__DIR__, 3).'/docker-compose.prod.yml', $directory.'/docker-compose.prod.yml');
-        touch($directory.'/.env.production');
+        file_put_contents($directory.'/.env.production', "APP_ENV=production\nQUEUE_CONNECTION=database\n");
 
         $process = new Process([
             'docker',

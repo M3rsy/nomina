@@ -13,6 +13,7 @@ use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class EmployeeScheduleAssigner
@@ -28,20 +29,24 @@ class EmployeeScheduleAssigner
         ?User $actor = null,
     ): EmployeeScheduleAssignment {
         $companyId = (int) ($attributes['company_id'] ?? 0);
-        $reason = $this->validateRequest($companyId, $profile, $reason);
+        $reason = $this->validateReason($reason);
         $from = CarbonImmutable::parse($effectiveFrom)->startOfDay();
 
-        return $this->contextLocker->within(
-            $companyId,
-            fn (): PayrollContextTargets => new PayrollContextTargets(
-                payPeriodIds: $this->affectedPeriodIds($companyId, null, $from),
-            ),
-            function (LockedPayrollContext $context) use ($attributes, $profile, $from, $reason, $actor): EmployeeScheduleAssignment {
-                $employee = Employee::withoutCompanyScope()->create($attributes);
+        return DB::transaction(function () use ($attributes, $profile, $companyId, $from, $reason, $actor): EmployeeScheduleAssignment {
+            $lockedProfile = $this->lockAvailableProfile($companyId, $profile);
 
-                return $this->storeAssignment($context, $employee, $profile, $from, $reason, $actor);
-            },
-        );
+            return $this->contextLocker->within(
+                $companyId,
+                fn (): PayrollContextTargets => new PayrollContextTargets(
+                    payPeriodIds: $this->affectedPeriodIds($companyId, null, $from),
+                ),
+                function (LockedPayrollContext $context) use ($attributes, $lockedProfile, $from, $reason, $actor): EmployeeScheduleAssignment {
+                    $employee = Employee::withoutCompanyScope()->create($attributes);
+
+                    return $this->storeAssignment($context, $employee, $lockedProfile, $from, $reason, $actor);
+                },
+            );
+        });
     }
 
     public function assign(
@@ -52,29 +57,33 @@ class EmployeeScheduleAssigner
         ?User $actor = null,
         ?Closure $mutateEmployee = null,
     ): EmployeeScheduleAssignment {
-        $reason = $this->validateRequest($employee->company_id, $profile, $reason);
+        $reason = $this->validateReason($reason);
         $from = CarbonImmutable::parse($effectiveFrom)->startOfDay();
 
-        return $this->contextLocker->within(
-            $employee->company_id,
-            fn (): PayrollContextTargets => new PayrollContextTargets(
-                payPeriodIds: $this->affectedPeriodIds($employee->company_id, $employee->id, $from),
-                employeeIds: [$employee->id],
-            ),
-            function (LockedPayrollContext $context) use ($employee, $profile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
-                $lockedEmployee = $context->employee($employee->id);
+        return DB::transaction(function () use ($employee, $profile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
+            $lockedProfile = $this->lockAvailableProfile($employee->company_id, $profile);
 
-                return $this->storeAssignment(
-                    $context,
-                    $lockedEmployee,
-                    $profile,
-                    $from,
-                    $reason,
-                    $actor,
-                    $mutateEmployee,
-                );
-            },
-        );
+            return $this->contextLocker->within(
+                $employee->company_id,
+                fn (): PayrollContextTargets => new PayrollContextTargets(
+                    payPeriodIds: $this->affectedPeriodIds($employee->company_id, $employee->id, $from),
+                    employeeIds: [$employee->id],
+                ),
+                function (LockedPayrollContext $context) use ($employee, $lockedProfile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
+                    $lockedEmployee = $context->employee($employee->id);
+
+                    return $this->storeAssignment(
+                        $context,
+                        $lockedEmployee,
+                        $lockedProfile,
+                        $from,
+                        $reason,
+                        $actor,
+                        $mutateEmployee,
+                    );
+                },
+            );
+        });
     }
 
     private function storeAssignment(
@@ -157,19 +166,35 @@ class EmployeeScheduleAssigner
             ->all();
     }
 
-    private function validateRequest(int $companyId, WorkScheduleProfile $profile, string $reason): string
+    private function lockAvailableProfile(int $companyId, WorkScheduleProfile $profile): WorkScheduleProfile
+    {
+        $lockedProfile = WorkScheduleProfile::withoutCompanyScope()
+            ->whereKey($profile->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        if ($companyId !== $lockedProfile->company_id) {
+            throw ValidationException::withMessages([
+                'schedule_profile_id' => 'La jornada debe pertenecer a la empresa del empleado.',
+            ]);
+        }
+
+        if (! $lockedProfile->is_active || $lockedProfile->retired_at !== null) {
+            throw ValidationException::withMessages([
+                'schedule_profile_id' => 'La jornada seleccionada ya no está disponible.',
+            ]);
+        }
+
+        return $lockedProfile;
+    }
+
+    private function validateReason(string $reason): string
     {
         $reason = trim($reason);
 
         if ($reason === '') {
             throw ValidationException::withMessages([
                 'schedule_reason' => 'El motivo de la asignación es obligatorio.',
-            ]);
-        }
-
-        if ($companyId !== $profile->company_id) {
-            throw ValidationException::withMessages([
-                'schedule_profile_id' => 'La jornada debe pertenecer a la empresa del empleado.',
             ]);
         }
 

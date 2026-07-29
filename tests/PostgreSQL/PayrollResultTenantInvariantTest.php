@@ -7,6 +7,16 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
+const PAYROLL_RESULT_TENANT_INVARIANTS_MIGRATION = 'database/migrations/2026_07_24_000001_enforce_payroll_result_tenant_invariants.php';
+
+function rollbackPayrollResultTenantInvariantsMigration(): void
+{
+    Artisan::call('migrate:rollback', [
+        '--path' => PAYROLL_RESULT_TENANT_INVARIANTS_MIGRATION,
+        '--force' => true,
+    ]);
+}
+
 function payrollResultConstraintDefinitions(): array
 {
     return DB::table('pg_constraint')
@@ -101,7 +111,7 @@ test('rejects changing a payroll result to a tenant reference from another compa
 ]);
 
 test('aborts before changing the catalog when a historical tenant reference is inconsistent', function (string $foreignKey) {
-    Artisan::call('migrate:rollback', ['--step' => 1, '--force' => true]);
+    rollbackPayrollResultTenantInvariantsMigration();
 
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
@@ -138,7 +148,7 @@ test('rolls back and reapplies the tenant constraints safely', function () {
     $employee = Employee::factory()->forCompany($company)->create();
     insertPayrollResult($company, $period, $employee);
 
-    Artisan::call('migrate:rollback', ['--step' => 1, '--force' => true]);
+    rollbackPayrollResultTenantInvariantsMigration();
     $rolledBack = payrollResultConstraintDefinitions();
 
     expect($rolledBack)->toHaveKeys([

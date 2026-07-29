@@ -177,50 +177,86 @@
                 </p>
             </div>
             <p class="text-sm font-semibold text-slate-700">
-                {{ $overtimeReviews->sum(fn ($review) => $review->analysis->overtimeCandidates->count()) }} candidatos
+                {{ $overtimeRows->total() }} candidatos
             </p>
         </div>
 
-        <div class="mt-5 space-y-4">
-            @forelse ($overtimeReviews as $review)
-                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                    <header class="flex flex-col gap-1 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <p class="font-bold text-slate-950">{{ $review->employee->full_name }}</p>
-                            <p class="text-xs text-slate-500">Código {{ $review->employee->external_id }}</p>
-                        </div>
-                        <p class="text-sm font-semibold text-slate-700">Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}</p>
-                    </header>
+        @if ($activeOvertimeBatchId)
+            <livewire:nomina.overtime-batch-progress
+                :pay-period="$payPeriod"
+                :batch-id="$activeOvertimeBatchId"
+                :key="'overtime-batch-'.$activeOvertimeBatchId"
+            />
+        @endif
 
-                    <div class="grid gap-3 p-4 sm:grid-cols-3">
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Jornada asignada</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                @if ($review->occurrence->scheduledStart && $review->occurrence->scheduledEnd)
-                                    {{ $review->occurrence->scheduledStart->format('H:i') }} → {{ $review->occurrence->scheduledEnd->format('H:i') }}
-                                @else
-                                    Día no laborable
-                                @endif
-                            </p>
+        <div class="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-sm font-bold text-slate-900">Filtrar autorizaciones</p>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label class="text-xs font-semibold text-slate-600">
+                    Empleado o código
+                    <input wire:model.live.debounce.300ms="overtimeSearch" type="search" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Estado
+                    <select wire:model.live="overtimeStatus" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                        <option value="pending">Pendientes</option>
+                        <option value="approved">Aprobados</option>
+                        <option value="rejected">Rechazados</option>
+                        <option value="all">Todos</option>
+                    </select>
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Fecha laboral
+                    <input wire:model.live="overtimeDate" type="date" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                </label>
+                <label class="text-xs font-semibold text-slate-600">
+                    Porcentaje
+                    <select wire:model.live="overtimeRate" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
+                        <option value="">Todos</option>
+                        <option value="ordinary">Ordinario</option>
+                        <option value="extra25">25%</option>
+                        <option value="extra50">50%</option>
+                        <option value="extra75">75%</option>
+                        <option value="extra100">100%</option>
+                    </select>
+                </label>
+            </div>
+            @if ($overtimeStatus === 'pending' || $overtimeStatus === 'all')
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <button type="button" wire:click="selectCurrentOvertimePage" class="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-700">Seleccionar esta página</button>
+                    @if (!$allFilteredOvertimeSelected && $selectedOvertimeCandidates && $pendingOvertimeMatchCount > count($selectedOvertimeCandidates))
+                        <button type="button" wire:click="selectAllFilteredOvertime" class="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white">
+                            Seleccionar los {{ $pendingOvertimeMatchCount }} resultados
+                        </button>
+                    @endif
+                    @if ($allFilteredOvertimeSelected || $selectedOvertimeCandidates)
+                        <button type="button" wire:click="clearOvertimeSelection" class="rounded-lg px-3 py-2 text-xs font-bold text-slate-600">Limpiar selección</button>
+                    @endif
+                </div>
+                @error('selectedOvertimeCandidates') <p class="mt-2 text-sm text-rose-700">{{ $message }}</p> @enderror
+            @endif
+        </div>
+
+        <div class="mt-5 space-y-4">
+            @forelse ($overtimeGroups as $group)
+                <details wire:key="overtime-employee-{{ $group['employee']->id }}" class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <summary class="flex cursor-pointer list-none items-center justify-between gap-4 bg-white px-4 py-3">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $group['employee']->full_name }}</p>
+                            <p class="text-xs text-slate-500">Código {{ $group['employee']->external_id }}</p>
                         </div>
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Marcas de asistencia</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-xl border border-slate-200 bg-white p-3">
-                            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tiempo programado reconocido</p>
-                            <p class="mt-1 font-bold text-slate-900">
-                                {{ $review->analysis->scheduledMinutes }} min · {{ number_format($review->analysis->scheduledMinutes / 60, 2, ',', '.') }} h
-                            </p>
-                        </div>
-                    </div>
+                        <p class="text-right text-sm font-semibold text-slate-700">
+                            {{ $group['rows']->count() }} candidatos · {{ $group['minutes'] }} min
+                        </p>
+                    </summary>
 
                     <div class="space-y-3 border-t border-slate-200 p-4">
-                        @foreach ($review->analysis->overtimeCandidates as $candidate)
+                        @foreach ($group['rows'] as $row)
                             @php
-                                $decision = $review->decisionFor($candidate);
+                                $review = $row['review'];
+                                $candidate = $row['candidate'];
+                                $decision = $row['decision'];
+                                $selectionToken = implode('|', [$review->employee->id, $review->analysis->workDate->toDateString(), $candidate->key]);
                                 $candidateLabel = match ($candidate->kind) {
                                     'pre_shift' => 'Entrada anterior',
                                     'post_shift' => 'Salida posterior',
@@ -238,10 +274,29 @@
 
                             <div class="rounded-xl border border-slate-200 bg-white p-4">
                                 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    @if (!$decision)
+                                        <label class="flex shrink-0 items-center gap-2 text-xs font-bold text-slate-700">
+                                            <input
+                                                type="checkbox"
+                                                @if ($allFilteredOvertimeSelected) checked disabled @else wire:model.live="selectedOvertimeCandidates" value="{{ $selectionToken }}" @endif
+                                                class="rounded border-slate-300 text-indigo-600"
+                                            >
+                                            Seleccionar candidato
+                                        </label>
+                                    @endif
                                     <div>
                                         <p class="text-sm font-bold text-slate-950">{{ $candidateLabel }}</p>
+                                        <p class="mt-1 text-sm font-semibold text-slate-700">
+                                            Fecha laboral {{ $review->analysis->workDate->format('d/m/Y') }}
+                                        </p>
                                         <p class="mt-1 text-sm text-slate-600">
                                             {{ $candidate->start->format('d/m H:i') }} → {{ $candidate->end->format('d/m H:i') }}
+                                        </p>
+                                        <p class="mt-1 text-xs text-slate-500">
+                                            Jornada asignada
+                                            {{ $review->occurrence->scheduledStart?->format('H:i') ?? '—' }} → {{ $review->occurrence->scheduledEnd?->format('H:i') ?? '—' }}
+                                            · Marcas de asistencia
+                                            {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
                                         </p>
                                         <p class="mt-1 text-sm font-semibold text-slate-800">
                                             {{ $candidate->minutes }} min · {{ number_format($candidate->minutes / 60, 2, ',', '.') }} h
@@ -287,7 +342,7 @@
                             </div>
                         @endforeach
                     </div>
-                </article>
+                </details>
             @empty
                 <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
                     <p class="font-semibold text-slate-800">No hay candidatos de hora extra con el filtro actual.</p>
@@ -295,6 +350,22 @@
                 </div>
             @endforelse
         </div>
+
+        @if ($overtimeRows->hasPages())
+            <div class="mt-5">{{ $overtimeRows->links() }}</div>
+        @endif
+
+        @if ($allFilteredOvertimeSelected || $selectedOvertimeCandidates)
+            <div class="sticky bottom-4 z-30 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 px-4 py-3 text-white shadow-xl">
+                <p class="text-sm font-bold">
+                    {{ $allFilteredOvertimeSelected ? $pendingOvertimeMatchCount : count($selectedOvertimeCandidates) }} seleccionados
+                </p>
+                <div class="flex gap-2">
+                    <button type="button" wire:click="openOvertimeBatch('approved')" @disabled($isBlocked) class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Aprobar</button>
+                    <button type="button" wire:click="openOvertimeBatch('rejected')" @disabled($isBlocked) class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Rechazar</button>
+                </div>
+            </div>
+        @endif
     </section>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
@@ -652,6 +723,44 @@
                         <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
                         <button type="submit" class="rounded-xl px-4 py-2 text-sm font-semibold text-white {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
                             {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($showOvertimeBatchModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="overtime_batch_title" class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $overtimeBatchDecision === 'approved' ? 'text-emerald-700' : 'text-rose-700' }}">Decisión masiva auditada</p>
+                <h2 id="overtime_batch_title" class="mt-1 text-xl font-black text-slate-950">
+                    {{ $overtimeBatchDecision === 'approved' ? 'Aprobar candidatos seleccionados' : 'Rechazar candidatos seleccionados' }}
+                </h2>
+                <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">
+                    Se procesarán exactamente {{ $overtimeBatchCount }} candidatos pendientes.
+                </p>
+                <p class="mt-2 text-xs text-slate-600">{{ $overtimeBatchFilterSummary }}</p>
+                <form wire:submit.prevent="saveOvertimeBatch" class="mt-4 space-y-4">
+                    <label for="overtime_batch_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo común obligatorio</span>
+                        <textarea
+                            id="overtime_batch_reason"
+                            wire:model="overtimeBatchReason"
+                            rows="3"
+                            maxlength="500"
+                            autofocus
+                            class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                            placeholder="Este motivo quedará registrado en cada decisión"
+                        ></textarea>
+                    </label>
+                    @error('overtimeBatchReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('selectedOvertimeCandidates') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeOvertimeBatchModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="saveOvertimeBatch" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                            <span wire:loading.remove wire:target="saveOvertimeBatch">Confirmar lote</span>
+                            <span wire:loading wire:target="saveOvertimeBatch">Enviando…</span>
                         </button>
                     </div>
                 </form>
