@@ -35,6 +35,11 @@ class WorkScheduleProfile extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::created(fn (self $profile) => WorkScheduleProfilePublication::createLegacyFor($profile));
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
@@ -48,6 +53,11 @@ class WorkScheduleProfile extends Model
     public function employeeAssignments(): HasMany
     {
         return $this->hasMany(EmployeeScheduleAssignment::class);
+    }
+
+    public function publications(): HasMany
+    {
+        return $this->hasMany(WorkScheduleProfilePublication::class, 'profile_id');
     }
 
     public function creator(): BelongsTo

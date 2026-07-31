@@ -35,5 +35,7 @@ readonly class PayrollShiftEvaluation
         public bool $unjustified = false,
         public Collection $blockers = new Collection,
         public array $metadata = [],
+        public ?int $publicationId = null,
+        public ?string $payrollPolicyKey = null,
     ) {}
 }

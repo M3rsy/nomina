@@ -10,6 +10,7 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfilePublication;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -19,6 +20,7 @@ final readonly class PayrollPeriodSnapshotData
     public function __construct(
         private Collection $assignments,
         private Collection $schedules,
+        private Collection $publications,
         private Collection $marks,
         private Collection $factGenerations,
         private Collection $decisions,
@@ -41,6 +43,12 @@ final readonly class PayrollPeriodSnapshotData
         $schedules = WorkSchedule::withoutCompanyScope()
             ->where('company_id', $period->company_id)
             ->whereIn('work_schedule_profile_id', $assignments->pluck('work_schedule_profile_id')->unique())
+            ->get();
+        $publications = WorkScheduleProfilePublication::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('profile_id', $assignments->pluck('work_schedule_profile_id')->unique())
+            ->whereDate('effective_from', '<=', $end)
+            ->where(fn ($query) => $query->whereNull('effective_to')->orWhereDate('effective_to', '>', $start))
             ->get();
         $marks = RawMark::withoutCompanyScope()
             ->where('company_id', $period->company_id)
@@ -75,15 +83,24 @@ final readonly class PayrollPeriodSnapshotData
             ->with('decider')
             ->get();
 
-        return new self($assignments, $schedules, $marks, $factGenerations, $decisions, $exceptions);
+        return new self($assignments, $schedules, $publications, $marks, $factGenerations, $decisions, $exceptions);
     }
 
     public function assignment(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
     {
+        $assignments = $this->assignments($employee, $date);
+
+        return $assignments->count() === 1 ? $assignments->sole() : null;
+    }
+
+    /** @return Collection<int, EmployeeScheduleAssignment> */
+    public function assignments(Employee $employee, CarbonImmutable $date): Collection
+    {
         return $this->assignments
             ->where('employee_id', $employee->id)
-            ->first(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->lte($date)
-                && ($assignment->effective_to === null || $assignment->effective_to->gte($date)));
+            ->filter(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->lte($date)
+                && ($assignment->effective_to === null || $assignment->effective_to->gte($date)))
+            ->values();
     }
 
     public function schedule(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): ?WorkSchedule
@@ -91,6 +108,17 @@ final readonly class PayrollPeriodSnapshotData
         return $this->schedules->first(fn (WorkSchedule $schedule): bool => $schedule->work_schedule_profile_id === $assignment->work_schedule_profile_id
             && $schedule->day_of_week === $date->dayOfWeek
         );
+    }
+
+    /** @return Collection<int, WorkScheduleProfilePublication> */
+    public function publications(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): Collection
+    {
+        return $this->publications
+            ->where('company_id', $assignment->company_id)
+            ->where('profile_id', $assignment->work_schedule_profile_id)
+            ->filter(fn (WorkScheduleProfilePublication $publication): bool => $publication->effective_from->lte($date)
+                && ($publication->effective_to === null || $publication->effective_to->gt($date)))
+            ->values();
     }
 
     /** @return Collection<int, RawMark> */

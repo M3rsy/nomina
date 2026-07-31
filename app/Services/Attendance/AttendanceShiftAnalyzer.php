@@ -3,6 +3,7 @@
 namespace App\Services\Attendance;
 
 use App\Models\RawMark;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Payroll\BandSplit;
 use App\Services\Payroll\BandSplitter;
 use App\Services\PayrollRules;
@@ -20,6 +21,23 @@ class AttendanceShiftAnalyzer
         bool $isHoliday = false,
         int $calendarGeneration = 0,
     ): AttendanceShiftAnalysis {
+        if ($occurrence->payrollPolicyKey === WorkScheduleProfilePublication::DURATION_FIRST_V2) {
+            return new AttendanceShiftAnalysis(
+                AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY,
+                $occurrence->workDate,
+                null,
+                null,
+                0,
+                0,
+                new BandSplit,
+                collect(),
+                collect(),
+                $isHoliday,
+                $occurrence->publicationId,
+                $occurrence->payrollPolicyKey,
+            );
+        }
+
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
             $scheduledMinutes = 0;
             $scheduledRates = new BandSplit;
@@ -40,6 +58,8 @@ class AttendanceShiftAnalyzer
                         collect(),
                         collect(),
                         $isHoliday,
+                        $occurrence->publicationId,
+                        $occurrence->payrollPolicyKey,
                     );
                 }
 
@@ -76,6 +96,8 @@ class AttendanceShiftAnalyzer
                 $deficits,
                 collect(),
                 $isHoliday,
+                $occurrence->publicationId,
+                $occurrence->payrollPolicyKey,
             );
         }
 
@@ -94,6 +116,8 @@ class AttendanceShiftAnalyzer
                 collect(),
                 collect(),
                 $isHoliday,
+                $occurrence->publicationId,
+                $occurrence->payrollPolicyKey,
             );
         }
 
@@ -113,6 +137,8 @@ class AttendanceShiftAnalyzer
                 collect(),
                 collect(),
                 $isHoliday,
+                $occurrence->publicationId,
+                $occurrence->payrollPolicyKey,
             );
         }
 
@@ -223,6 +249,8 @@ class AttendanceShiftAnalyzer
             deficits: $deficits,
             overtimeCandidates: $overtimeCandidates,
             isHoliday: $isHoliday,
+            publicationId: $occurrence->publicationId,
+            payrollPolicyKey: $occurrence->payrollPolicyKey,
         );
     }
 
@@ -236,6 +264,8 @@ class AttendanceShiftAnalyzer
         $parts = [
             $occurrence->assignment?->id,
             $occurrence->schedule?->id,
+            $occurrence->publicationId,
+            $occurrence->payrollPolicyKey,
             $occurrence->schedule?->start_time,
             $occurrence->schedule?->end_time,
             json_encode($occurrence->schedule?->banding_json),

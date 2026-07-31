@@ -169,6 +169,8 @@ test('processor credits an exact granted attendance deficit without changing obs
         ->and($result->recognized_minutes)->toBe(480)
         ->and($result->ordinary_minutes)->toBe(480)
         ->and($result->metadata)->toBe([
+            'work_schedule_profile_publication_id' => $occurrence->publicationId,
+            'payroll_policy_key' => 'schedule-overlap-v1',
             'attendance_exception_ids' => [$exception->id],
             'excused_deficit_minutes' => 15,
         ]);

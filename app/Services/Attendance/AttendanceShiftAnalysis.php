@@ -12,6 +12,8 @@ readonly class AttendanceShiftAnalysis
 
     public const INVALID_RATE_BANDS = 'invalid_rate_bands';
 
+    public const UNSUPPORTED_PAYROLL_POLICY = 'unsupported_payroll_policy';
+
     /**
      * @param  Collection<int, AttendanceSegment>  $deficits
      * @param  Collection<int, AttendanceSegment>  $overtimeCandidates
@@ -27,5 +29,7 @@ readonly class AttendanceShiftAnalysis
         public Collection $deficits,
         public Collection $overtimeCandidates,
         public bool $isHoliday = false,
+        public ?int $publicationId = null,
+        public ?string $payrollPolicyKey = null,
     ) {}
 }

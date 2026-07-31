@@ -33,8 +33,8 @@ Chain strategy: feature-branch-chain
 
 ## Phase 1: Immutable Policy Identity
 
-- [ ] 1.1 RED one case/cycle in `tests/Feature/Attendance/ShiftOccurrenceResolverTest.php`,`tests/PostgreSQL/PayrollPolicyIdentityTest.php`: legacy parity/total coverage, inclusive final-date preservation, shared-profile coalescing/non-overlap, exact-one `Fecha laboral`, and `23514/23503/23505/23P01` failures.
-- [ ] 1.2 GREEN `database/migrations/2026_07_30_000001_create_work_schedule_profile_publications.php`,`app/Models/WorkScheduleProfilePublication.php`,`app/Services/Attendance/{ShiftOccurrence,ShiftOccurrenceResolver,AttendanceShiftAnalyzer,AttendanceShiftAnalysis,PayrollShiftEvaluator,PayrollShiftEvaluationResolver,AttendanceReviewQuery,PayrollPeriodSnapshotData}.php`,`app/Services/Payroll/PayrollProcessor.php`: publication-level constrained key; legacy=`schedule-overlap-v1`; only explicit new general publication permits `duration-first-v2` (PR1 creates none); readonly `ShiftOccurrence(publicationId,payrollPolicyKey)` feeds dispatch,fingerprints,snapshot-provenance.
+- [x] 1.1 RED one case/cycle in `tests/Feature/Attendance/ShiftOccurrenceResolverTest.php`,`tests/PostgreSQL/PayrollPolicyIdentityTest.php`: legacy parity/total coverage, inclusive final-date preservation, shared-profile coalescing/non-overlap, exact-one `Fecha laboral`, and `23514/23503/23505/23P01` failures.
+- [x] 1.2 GREEN `database/migrations/2026_07_30_000001_create_work_schedule_profile_publications.php`,`app/Models/WorkScheduleProfilePublication.php`,`app/Services/Attendance/{ShiftOccurrence,ShiftOccurrenceResolver,AttendanceShiftAnalyzer,AttendanceShiftAnalysis,PayrollShiftEvaluator,PayrollShiftEvaluationResolver,AttendanceReviewQuery,PayrollPeriodSnapshotData}.php`,`app/Services/Payroll/PayrollProcessor.php`: publication-level constrained key; legacy=`schedule-overlap-v1`; only explicit new general publication permits `duration-first-v2` (PR1 creates none); readonly `ShiftOccurrence(publicationId,payrollPolicyKey)` feeds dispatch,fingerprints,snapshot-provenance.
 
 ## Phase 2: Recognition and Decisions
 

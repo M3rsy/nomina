@@ -19,6 +19,8 @@ class PayrollShiftEvaluator
         Collection $currentDecisions,
         Collection $currentExceptions = new Collection,
     ): PayrollShiftEvaluation {
+        $provenance = $this->provenance($occurrence);
+
         if (! in_array($analysis->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
             return new PayrollShiftEvaluation(
                 status: PayrollShiftEvaluation::BLOCKED,
@@ -26,6 +28,9 @@ class PayrollShiftEvaluator
                 entryAt: $analysis->entryAt,
                 exitAt: $analysis->exitAt,
                 blockers: collect([['code' => $analysis->status]]),
+                metadata: $provenance,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
             );
         }
 
@@ -34,6 +39,9 @@ class PayrollShiftEvaluator
                 return new PayrollShiftEvaluation(
                     status: PayrollShiftEvaluation::SKIP,
                     workDate: $analysis->workDate,
+                    metadata: $provenance,
+                    publicationId: $occurrence->publicationId,
+                    payrollPolicyKey: $occurrence->payrollPolicyKey,
                 );
             }
 
@@ -62,10 +70,12 @@ class PayrollShiftEvaluator
                 isJustified: $isJustified,
                 unjustified: ! $isJustified,
                 excusedDeficitMinutes: $isJustified ? $deficit->minutes : 0,
-                metadata: $isJustified ? [
+                metadata: [...$provenance, ...($isJustified ? [
                     'attendance_exception_ids' => [$exception->id],
                     'excused_deficit_minutes' => $deficit->minutes,
-                ] : [],
+                ] : [])],
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
             );
         }
 
@@ -123,11 +133,26 @@ class PayrollShiftEvaluator
             excusedDeficitMinutes: $excusedMinutes,
             payableRates: $payableRates,
             blockers: $blockers,
-            metadata: $excusedMinutes > 0 ? [
+            metadata: [...$provenance, ...($excusedMinutes > 0 ? [
                 'attendance_exception_ids' => $exceptionIds,
                 'excused_deficit_minutes' => $excusedMinutes,
-            ] : [],
+            ] : [])],
+            publicationId: $occurrence->publicationId,
+            payrollPolicyKey: $occurrence->payrollPolicyKey,
         );
+    }
+
+    /** @return array<string, int|string> */
+    private function provenance(ShiftOccurrence $occurrence): array
+    {
+        if ($occurrence->publicationId === null || $occurrence->payrollPolicyKey === null) {
+            return [];
+        }
+
+        return [
+            'work_schedule_profile_publication_id' => $occurrence->publicationId,
+            'payroll_policy_key' => $occurrence->payrollPolicyKey,
+        ];
     }
 
     private function matches(?OvertimeDecision $decision, AttendanceSegment $candidate): bool
