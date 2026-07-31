@@ -5,6 +5,7 @@ use App\Models\EmployeeScheduleAssignment;
 use App\Models\OvertimeDecision;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\PayrollShiftEvaluator;
@@ -224,12 +225,47 @@ test('skips a non-working date with no observed marks', function () {
         ->and($evaluation->recognizedMinutes)->toBe(0);
 });
 
+test('keeps V2 overtime pending until approval then recognizes the exact candidate bands', function () {
+    [$occurrence, $analysis] = payrollShift(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 09:00:00',
+        exitAt: '2026-07-20 19:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    );
+    $candidate = $analysis->overtimeCandidates->sole();
+    $evaluator = app(PayrollShiftEvaluator::class);
+
+    $pendingEvaluation = $evaluator->evaluate($occurrence, $analysis, collect());
+    $approvedEvaluation = $evaluator->evaluate(
+        $occurrence,
+        $analysis,
+        collect([payrollDecision($candidate, OvertimeDecision::APPROVED)]),
+    );
+
+    expect($pendingEvaluation->status)->toBe('blocked')
+        ->and($pendingEvaluation->recognizedMinutes)->toBe(480)
+        ->and($pendingEvaluation->detectedOvertimeMinutes)->toBe(120)
+        ->and($pendingEvaluation->approvedOvertimeMinutes)->toBe(0)
+        ->and($pendingEvaluation->blockers)->toHaveCount(1)
+        ->and($pendingEvaluation->blockers->sole()['code'])->toBe('pending_overtime_candidate')
+        ->and($approvedEvaluation->status)->toBe('processable')
+        ->and($approvedEvaluation->recognizedMinutes)->toBe(600)
+        ->and($approvedEvaluation->detectedOvertimeMinutes)->toBe(120)
+        ->and($approvedEvaluation->approvedOvertimeMinutes)->toBe(120)
+        ->and($approvedEvaluation->blockers)->toBeEmpty()
+        ->and($approvedEvaluation->payableRates->ordinaryMinutes)->toBe(480)
+        ->and($approvedEvaluation->payableRates->extra25Minutes)->toBe(60)
+        ->and($approvedEvaluation->payableRates->extra50Minutes)->toBe(60)
+        ->and($approvedEvaluation->payrollPolicyKey)->toBe('duration-first-v2');
+});
+
 function payrollShift(
     string $workDate,
     string $entryAt,
     string $exitAt,
     ?string $scheduledStart = '06:00',
     ?string $scheduledEnd = '14:00',
+    string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
 ): array {
     $date = CarbonImmutable::parse($workDate)->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -257,6 +293,7 @@ function payrollShift(
         $end,
         collect([$entry, $exit]),
         ShiftOccurrence::RESOLVED,
+        payrollPolicyKey: $payrollPolicyKey,
     );
 
     return [$occurrence, app(AttendanceShiftAnalyzer::class)->analyze($occurrence)];
@@ -329,6 +366,7 @@ function payrollShiftWithoutMarks(
         $end,
         collect(),
         ShiftOccurrence::NO_MARKS,
+        payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
     );
 
     return [$occurrence, app(AttendanceShiftAnalyzer::class)->analyze($occurrence)];

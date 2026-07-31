@@ -11,6 +11,14 @@ use Carbon\CarbonImmutable;
 
 class AttendanceShiftAnalyzer
 {
+    private const DURATION_FIRST_ORDINARY_QUOTA_MINUTES = 480;
+
+    private const DURATION_FIRST_OVERTIME_BANDS = [
+        ['start' => 0, 'end' => 360, 'bucket' => 'extra75'],
+        ['start' => 360, 'end' => 1080, 'bucket' => 'extra25'],
+        ['start' => 1080, 'end' => 1440, 'bucket' => 'extra50'],
+    ];
+
     public function __construct(
         private BandSplitter $bandSplitter,
         private PayrollRules $rules,
@@ -22,20 +30,13 @@ class AttendanceShiftAnalyzer
         int $calendarGeneration = 0,
     ): AttendanceShiftAnalysis {
         if ($occurrence->payrollPolicyKey === WorkScheduleProfilePublication::DURATION_FIRST_V2) {
-            return new AttendanceShiftAnalysis(
-                AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY,
-                $occurrence->workDate,
-                null,
-                null,
-                0,
-                0,
-                new BandSplit,
-                collect(),
-                collect(),
-                $isHoliday,
-                $occurrence->publicationId,
-                $occurrence->payrollPolicyKey,
-            );
+            return $this->analyzeDurationFirst($occurrence, $isHoliday, $calendarGeneration);
+        }
+
+        if (($occurrence->payrollPolicyKey !== null || $occurrence->publicationId !== null)
+            && $occurrence->payrollPolicyKey !== WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1
+            && in_array($occurrence->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
+            return $this->unsupportedPolicy($occurrence, $isHoliday);
         }
 
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
@@ -254,6 +255,144 @@ class AttendanceShiftAnalyzer
         );
     }
 
+    private function unsupportedPolicy(
+        ShiftOccurrence $occurrence,
+        bool $isHoliday,
+    ): AttendanceShiftAnalysis {
+        return new AttendanceShiftAnalysis(
+            AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY,
+            $occurrence->workDate,
+            null,
+            null,
+            0,
+            0,
+            new BandSplit,
+            collect(),
+            collect(),
+            $isHoliday,
+            $occurrence->publicationId,
+            $occurrence->payrollPolicyKey,
+        );
+    }
+
+    private function analyzeDurationFirst(
+        ShiftOccurrence $occurrence,
+        bool $isHoliday,
+        int $calendarGeneration,
+    ): AttendanceShiftAnalysis {
+        if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
+            return new AttendanceShiftAnalysis(
+                status: $occurrence->status,
+                workDate: $occurrence->workDate,
+                entryAt: null,
+                exitAt: null,
+                workedMinutes: 0,
+                scheduledMinutes: 0,
+                scheduledRates: new BandSplit,
+                deficits: collect(),
+                overtimeCandidates: collect(),
+                isHoliday: $isHoliday,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
+            );
+        }
+
+        $entry = CarbonImmutable::parse($occurrence->entryMark()?->event_at);
+        $exit = CarbonImmutable::parse($occurrence->exitMark()?->event_at);
+
+        if ($exit->lte($entry)) {
+            return new AttendanceShiftAnalysis(
+                status: AttendanceShiftAnalysis::INVALID_INTERVAL,
+                workDate: $occurrence->workDate,
+                entryAt: $entry,
+                exitAt: $exit,
+                workedMinutes: 0,
+                scheduledMinutes: 0,
+                scheduledRates: new BandSplit,
+                deficits: collect(),
+                overtimeCandidates: collect(),
+                isHoliday: $isHoliday,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
+            );
+        }
+
+        $workedMinutes = $this->minutes($entry, $exit);
+
+        if ($isHoliday || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY) {
+            return $this->durationFirstOverride($occurrence, $entry, $exit, $workedMinutes, $isHoliday);
+        }
+
+        $ordinaryMinutes = min($workedMinutes, self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
+        $payableEnd = $entry->addMinutes($workedMinutes);
+        $overtimeCandidates = collect();
+
+        if ($workedMinutes > self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES) {
+            $candidateStart = $entry->addMinutes(self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
+            $overtimeCandidates->push($this->durationFirstOvertimeCandidate(
+                $occurrence,
+                $candidateStart,
+                $payableEnd,
+                $isHoliday,
+                $calendarGeneration,
+            ));
+        }
+
+        return new AttendanceShiftAnalysis(
+            status: $occurrence->status,
+            workDate: $occurrence->workDate,
+            entryAt: $entry,
+            exitAt: $exit,
+            workedMinutes: $workedMinutes,
+            scheduledMinutes: $ordinaryMinutes,
+            scheduledRates: new BandSplit(ordinaryMinutes: $ordinaryMinutes),
+            deficits: collect(),
+            overtimeCandidates: $overtimeCandidates,
+            isHoliday: $isHoliday,
+            publicationId: $occurrence->publicationId,
+            payrollPolicyKey: $occurrence->payrollPolicyKey,
+        );
+    }
+
+    private function durationFirstOverride(
+        ShiftOccurrence $occurrence,
+        CarbonImmutable $entry,
+        CarbonImmutable $exit,
+        int $workedMinutes,
+        bool $isHoliday,
+    ): AttendanceShiftAnalysis {
+        return new AttendanceShiftAnalysis(
+            status: $occurrence->status,
+            workDate: $occurrence->workDate,
+            entryAt: $entry,
+            exitAt: $exit,
+            workedMinutes: $workedMinutes,
+            scheduledMinutes: $workedMinutes,
+            scheduledRates: new BandSplit(extra100Minutes: $workedMinutes),
+            deficits: collect(),
+            overtimeCandidates: collect(),
+            isHoliday: $isHoliday,
+            publicationId: $occurrence->publicationId,
+            payrollPolicyKey: $occurrence->payrollPolicyKey,
+        );
+    }
+
+    private function durationFirstOvertimeCandidate(
+        ShiftOccurrence $occurrence,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+        bool $isHoliday,
+        int $calendarGeneration,
+    ): AttendanceSegment {
+        return new AttendanceSegment(
+            'post_quota_overtime',
+            $start,
+            $end,
+            $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
+            $this->bandSplitter->split($start, $end, self::DURATION_FIRST_OVERTIME_BANDS),
+        );
+    }
+
     private function minutes(CarbonImmutable $start, CarbonImmutable $end): int
     {
         return $end->gt($start) ? (int) floor($start->diffInSeconds($end) / 60) : 0;
@@ -264,8 +403,15 @@ class AttendanceShiftAnalyzer
         $parts = [
             $occurrence->assignment?->id,
             $occurrence->schedule?->id,
-            $occurrence->publicationId,
-            $occurrence->payrollPolicyKey,
+        ];
+
+        if ($occurrence->publicationId !== null || $occurrence->payrollPolicyKey !== null) {
+            $parts[] = $occurrence->publicationId;
+            $parts[] = $occurrence->payrollPolicyKey;
+        }
+
+        array_push(
+            $parts,
             $occurrence->schedule?->start_time,
             $occurrence->schedule?->end_time,
             json_encode($occurrence->schedule?->banding_json),
@@ -278,7 +424,7 @@ class AttendanceShiftAnalyzer
             $occurrence->exitMark()?->id,
             $occurrence->exitMark()?->event_at?->toIso8601String(),
             $this->markRevisionGeneration($occurrence->exitMark()),
-        ];
+        );
 
         if ($calendarGeneration > 0) {
             $parts[] = $calendarGeneration;
