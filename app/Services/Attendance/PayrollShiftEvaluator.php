@@ -5,6 +5,7 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceException;
 use App\Models\OvertimeDecision;
 use App\Services\Payroll\BandSplit;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
 class PayrollShiftEvaluator
@@ -50,6 +51,7 @@ class PayrollShiftEvaluator
                 ? $analysis->scheduledMinutes
                 : (int) round((float) $occurrence->schedule->base_ordinary_hours * 60);
             $deficit = $analysis->deficits->firstWhere('kind', 'full_day_absence');
+            $deficit ??= $analysis->deficits->firstWhere('kind', 'daily_shortfall');
             $exception = $deficit === null
                 ? null
                 : $currentExceptions->keyBy('deficit_key')->get($deficit->key);
@@ -59,9 +61,14 @@ class PayrollShiftEvaluator
             $payableRates = $isJustified
                 ? $deficit->rateMinutes
                 : new BandSplit;
+            $pendingDailyShortfall = $deficit?->kind === 'daily_shortfall'
+                && (! $this->matchesException($exception, $deficit)
+                    || $exception->decision === AttendanceException::REVOKED);
 
             return new PayrollShiftEvaluation(
-                status: PayrollShiftEvaluation::PROCESSABLE,
+                status: $pendingDailyShortfall
+                    ? PayrollShiftEvaluation::BLOCKED
+                    : PayrollShiftEvaluation::PROCESSABLE,
                 workDate: $analysis->workDate,
                 scheduledMinutes: $scheduledMinutes,
                 recognizedMinutes: $payableRates->totalMinutes(),
@@ -70,6 +77,9 @@ class PayrollShiftEvaluator
                 isJustified: $isJustified,
                 unjustified: ! $isJustified,
                 excusedDeficitMinutes: $isJustified ? $deficit->minutes : 0,
+                blockers: $pendingDailyShortfall
+                    ? collect([['code' => 'pending_daily_shortfall', 'deficit_key' => $deficit->key]])
+                    : collect(),
                 metadata: [...$provenance, ...($isJustified ? [
                     'attendance_exception_ids' => [$exception->id],
                     'excused_deficit_minutes' => $deficit->minutes,
@@ -89,6 +99,22 @@ class PayrollShiftEvaluator
 
         foreach ($analysis->deficits as $deficit) {
             $exception = $exceptions->get($deficit->key);
+
+            if ($deficit->kind === 'daily_shortfall') {
+                if (! $this->matchesException($exception, $deficit)
+                    || $exception->decision === AttendanceException::REVOKED) {
+                    $blockers->push([
+                        'code' => 'pending_daily_shortfall',
+                        'deficit_key' => $deficit->key,
+                    ]);
+
+                    continue;
+                }
+
+                if ($exception->decision === AttendanceException::REJECTED) {
+                    continue;
+                }
+            }
 
             if (! $this->matchesException($exception, $deficit)
                 || $exception->decision !== AttendanceException::GRANTED) {
@@ -177,9 +203,9 @@ class PayrollShiftEvaluator
         return $exception !== null
             && $exception->fingerprint === $deficit->fingerprint
             && $exception->minutes === $deficit->minutes
-            && $exception->starts_at?->equalTo($deficit->start)
-            && $exception->ends_at?->equalTo($deficit->end)
-            && in_array($exception->decision, [AttendanceException::GRANTED, AttendanceException::REVOKED], true)
+            && $this->sameBoundary($exception->starts_at, $deficit->start)
+            && $this->sameBoundary($exception->ends_at, $deficit->end)
+            && in_array($exception->decision, [AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED], true)
             && $exception->rate_minutes === [
                 'ordinary' => $deficit->rateMinutes->ordinaryMinutes,
                 'extra25' => $deficit->rateMinutes->extra25Minutes,
@@ -187,5 +213,11 @@ class PayrollShiftEvaluator
                 'extra75' => $deficit->rateMinutes->extra75Minutes,
                 'extra100' => $deficit->rateMinutes->extra100Minutes,
             ];
+    }
+
+    private function sameBoundary(?CarbonInterface $stored, ?CarbonInterface $current): bool
+    {
+        return ($stored === null && $current === null)
+            || ($stored !== null && $current !== null && $stored->equalTo($current));
     }
 }

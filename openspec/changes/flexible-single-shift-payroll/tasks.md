@@ -41,8 +41,8 @@ Chain strategy: feature-branch-chain
 - [x] 2.1 Cycle `tests/Feature/Attendance/{AttendanceShiftAnalyzerTest,ShiftOccurrenceResolverTest,PayrollShiftEvaluatorTest}.php`→`app/Services/Attendance/{AttendanceShiftAnalyzer,AttendanceShiftAnalysis,ShiftOccurrenceResolver,PayrollShiftEvaluator}.php`: 17:30–18:30,480m59s,06–14/08–16/09–17/12–20,06–16,09–19,12–21,00–09,Sunday/holiday,Saturday-overnight exact minutes; V1 stays schedule-overlap.
 - [x] 2.2 RED `RevisarTest::variation_transfer_tail`: 07–15 audit;16:25-tail excluded.
 - [x] 2.3 GREEN `database/migrations/2026_07_30_000004_create_attendance_variation_acknowledgements.php`,`app/{Models/AttendanceVariationAcknowledgement,Services/Attendance/VariationAcknowledgementRecorder,Livewire/Nomina/Revisar}.php`: 06:20–14:20 none; 07–15 pay-neutral audit; 16:25→120+25 excluded; 16:31→151; append-only V2.
-- [ ] 2.4 RED `RevisarTest::daily_shortfall`: 07–14 pending/grant/reject/revoke.
-- [ ] 2.5 GREEN `database/migrations/2026_07_30_000002_add_daily_shortfall_to_attendance_exceptions.php`,`app/{Models/AttendanceException,Services/Attendance/{AttendanceExceptionRecorder,PayrollReadinessChecker},Livewire/Nomina/Revisar}.php`: 07–14→420+noninterval60/no variation; pending blocks; grant480; reject420; revoke only grant→pending; V1 parity/V2 `23514`.
+- [x] 2.4 RED `RevisarTest::daily_shortfall`: 07–14 pending/grant/reject/revoke.
+- [x] 2.5 GREEN `database/migrations/2026_07_30_000002_add_daily_shortfall_to_attendance_exceptions.php`,`app/{Models/AttendanceException,Services/Attendance/{AttendanceExceptionRecorder,PayrollReadinessChecker},Livewire/Nomina/Revisar}.php`: 07–14→420+noninterval60/no variation; pending blocks; grant480; reject420; revoke only grant→pending; V1 parity/V2 `23514`.
 
 ## Phase 3: Processing and Activation
 

@@ -1063,8 +1063,8 @@ class Revisar extends Component
 
         $this->closeAttendanceExceptionModal();
 
-        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REVOKED], true)) {
-            $this->addError('attendanceExceptionDecision', 'La decisión debe conceder o revocar la excepción completa.');
+        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED], true)) {
+            $this->addError('attendanceExceptionDecision', 'La decisión debe conceder, rechazar o revocar la excepción completa.');
 
             return;
         }
@@ -1108,13 +1108,22 @@ class Revisar extends Component
             return;
         }
 
+        if ($deficit->kind === 'daily_shortfall'
+            && $decision !== AttendanceException::REVOKED
+            && $currentException !== null
+            && $currentException->decision !== AttendanceException::REVOKED) {
+            $this->addError('attendanceExceptionDecision', 'El déficit diario ya tiene una decisión vigente.');
+
+            return;
+        }
+
         $this->attendanceExceptionEmployeeId = $employee->id;
         $this->attendanceExceptionWorkDate = $review->analysis->workDate->toDateString();
         $this->attendanceDeficitKey = $deficit->key;
         $this->attendanceExceptionDecision = $decision;
-        $this->attendanceDeficitSummary = $deficit->start->format('H:i')
-            .' → '.$deficit->end->format('H:i')
-            .' · '.$deficit->minutes.' min';
+        $this->attendanceDeficitSummary = $deficit->start === null
+            ? 'Déficit diario · '.$deficit->minutes.' min'
+            : $deficit->start->format('H:i').' → '.$deficit->end->format('H:i').' · '.$deficit->minutes.' min';
         $this->showAttendanceExceptionModal = true;
     }
 
@@ -1140,7 +1149,7 @@ class Revisar extends Component
             'attendanceExceptionEmployeeId' => ['required', 'integer'],
             'attendanceExceptionWorkDate' => ['required', 'date_format:Y-m-d'],
             'attendanceDeficitKey' => ['required', 'string', 'size:64'],
-            'attendanceExceptionDecision' => ['required', Rule::in([AttendanceException::GRANTED, AttendanceException::REVOKED])],
+            'attendanceExceptionDecision' => ['required', Rule::in([AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED])],
             'attendanceExceptionReason' => ['required', 'string', 'max:500'],
         ], [
             'attendanceExceptionReason.required' => 'Debe indicar el motivo de la excepción.',
@@ -1163,7 +1172,12 @@ class Revisar extends Component
             Auth::user(),
         );
 
-        $decision = $validated['attendanceExceptionDecision'] === AttendanceException::GRANTED ? 'concedida' : 'revocada';
+        $decision = match ($validated['attendanceExceptionDecision']) {
+            AttendanceException::GRANTED => 'concedida',
+            AttendanceException::REJECTED => 'rechazada',
+            default => 'revocada',
+        };
+        $this->periodReviewSnapshot = null;
         $this->closeAttendanceExceptionModal();
 
         session()->flash('success', "Excepción completa {$decision} y registrada en el historial.");

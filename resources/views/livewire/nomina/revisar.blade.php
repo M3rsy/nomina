@@ -484,6 +484,7 @@
                                     'late_arrival' => 'Llegada tardía',
                                     'early_departure' => 'Salida anticipada',
                                     'full_day_absence' => 'Jornada completa sin marcas',
+                                    'daily_shortfall' => 'Déficit diario de asistencia',
                                     default => 'Déficit de asistencia',
                                 };
                                 $rateLabels = collect([
@@ -500,10 +501,10 @@
                                     <div>
                                         <p class="text-sm font-bold text-slate-950">{{ $deficitLabel }}</p>
                                         <p class="mt-1 text-sm text-slate-600">
-                                            {{ $deficit->start->format('H:i') }} → {{ $deficit->end->format('H:i') }}
+                                            {{ $deficit->start === null ? 'Sin intervalo' : $deficit->start->format('H:i').' → '.$deficit->end->format('H:i') }}
                                         </p>
                                         <p class="mt-1 text-sm font-semibold text-slate-800">
-                                            {{ $deficit->minutes }} min · {{ number_format($deficit->minutes / 60, 2, ',', '.') }} h
+                                            {{ $deficit->minutes }} min{{ $deficit->start === null ? ' · sin intervalo' : ' · '.number_format($deficit->minutes / 60, 2, ',', '.').' h' }}
                                         </p>
                                         <p class="mt-1 text-xs text-slate-500">
                                             {{ $rateLabels->map(fn ($minutes, $rate) => $rate.': '.$minutes.' min')->implode(' · ') }}
@@ -513,25 +514,35 @@
                                     <div class="flex max-w-sm flex-col items-start gap-2 sm:items-end">
                                         @if ($exception)
                                             <div class="rounded-xl border px-3 py-2 text-sm {{ $exception->decision === 'granted' ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-300 bg-slate-100 text-slate-800' }}">
-                                                <p class="font-bold">{{ $exception->decision === 'granted' ? 'Excepción concedida' : 'Excepción revocada' }}</p>
+                                                <p class="font-bold">{{ match ($exception->decision) { 'granted' => 'Excepción concedida', 'rejected' => 'Excepción rechazada', 'revoked' => $deficit->kind === 'daily_shortfall' ? 'Revocada · pendiente' : 'Excepción revocada', default => 'Pendiente' } }}</p>
                                                 <p class="mt-1">{{ $exception->reason }}</p>
                                                 <p class="mt-1 text-xs opacity-80">
                                                     {{ $exception->decider->email ?: 'Usuario eliminado' }} · {{ $exception->created_at?->format('d/m/Y H:i') }}
                                                 </p>
                                             </div>
                                         @else
-                                            <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">Sin excepción · se descuenta</span>
+                                            <span class="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">{{ $deficit->kind === 'daily_shortfall' ? 'Pendiente · bloquea nómina' : 'Sin excepción · se descuenta' }}</span>
                                         @endif
 
                                         <div class="flex flex-wrap gap-2">
                                             <button
                                                 type="button"
                                                 wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'granted')"
-                                                @disabled($isBlocked || $exception?->decision === 'granted')
+                                                @disabled($isBlocked || ($deficit->kind === 'daily_shortfall' ? $exception !== null && $exception->decision !== 'revoked' : $exception?->decision === 'granted'))
                                                 class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                                             >
-                                                Conceder excepción
-                                            </button>
+                                                 Conceder excepción
+                                             </button>
+                                             @if ($deficit->kind === 'daily_shortfall')
+                                                 <button
+                                                     type="button"
+                                                     wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'rejected')"
+                                                     @disabled($isBlocked || ($exception !== null && $exception->decision !== 'revoked'))
+                                                     class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                                 >
+                                                     Rechazar excepción
+                                                 </button>
+                                             @endif
                                             <button
                                                 type="button"
                                                 wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'revoked')"
@@ -762,9 +773,9 @@
     @if ($showAttendanceExceptionModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
             <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $attendanceExceptionDecision === 'granted' ? 'text-emerald-700' : 'text-slate-700' }}">Decisión auditada</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] {{ $attendanceExceptionDecision === 'granted' ? 'text-emerald-700' : ($attendanceExceptionDecision === 'rejected' ? 'text-rose-700' : 'text-slate-700') }}">Decisión auditada</p>
                 <h2 class="mt-1 text-xl font-black text-slate-950">
-                    {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción completa' : 'Revocar excepción completa' }}
+                    {{ match ($attendanceExceptionDecision) { 'granted' => 'Conceder excepción completa', 'rejected' => 'Rechazar excepción completa', default => 'Revocar excepción completa' } }}
                 </h2>
                 <p class="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-800">{{ $attendanceDeficitSummary }}</p>
                 <p class="mt-3 text-sm text-slate-600">
@@ -789,8 +800,8 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-700 hover:bg-slate-800' }}">
-                            {{ $attendanceExceptionDecision === 'granted' ? 'Conceder excepción' : 'Revocar excepción' }}
+                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : ($attendanceExceptionDecision === 'rejected' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-700 hover:bg-slate-800') }}">
+                            {{ match ($attendanceExceptionDecision) { 'granted' => 'Conceder excepción', 'rejected' => 'Rechazar excepción', default => 'Revocar excepción' } }}
                         </button>
                     </div>
                 </form>

@@ -281,6 +281,15 @@ class AttendanceShiftAnalyzer
         int $calendarGeneration,
     ): AttendanceShiftAnalysis {
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
+            $deficits = collect();
+            $shortfall = $occurrence->status === ShiftOccurrence::NO_MARKS
+                ? $this->durationFirstShortfall($occurrence, 0, $isHoliday, $calendarGeneration)
+                : null;
+
+            if ($shortfall !== null) {
+                $deficits->push($shortfall);
+            }
+
             return new AttendanceShiftAnalysis(
                 status: $occurrence->status,
                 workDate: $occurrence->workDate,
@@ -289,7 +298,7 @@ class AttendanceShiftAnalyzer
                 workedMinutes: 0,
                 scheduledMinutes: 0,
                 scheduledRates: new BandSplit,
-                deficits: collect(),
+                deficits: $deficits,
                 overtimeCandidates: collect(),
                 isHoliday: $isHoliday,
                 publicationId: $occurrence->publicationId,
@@ -331,8 +340,13 @@ class AttendanceShiftAnalyzer
             && $residualMinutes >= 1
             && $residualMinutes <= 30 ? $residualMinutes : 0;
         $recognizedEnd = $payableEnd->subMinutes($excludedTransferMinutes);
+        $deficits = collect();
         $overtimeCandidates = collect();
         $variations = collect();
+
+        if ($shortfall = $this->durationFirstShortfall($occurrence, $workedMinutes, $isHoliday, $calendarGeneration)) {
+            $deficits->push($shortfall);
+        }
 
         if ($workedMinutes >= self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES
             && $occurrence->scheduledStart !== null
@@ -363,7 +377,7 @@ class AttendanceShiftAnalyzer
             workedMinutes: $workedMinutes,
             scheduledMinutes: $ordinaryMinutes,
             scheduledRates: new BandSplit(ordinaryMinutes: $ordinaryMinutes),
-            deficits: collect(),
+            deficits: $deficits,
             overtimeCandidates: $overtimeCandidates,
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
@@ -409,6 +423,30 @@ class AttendanceShiftAnalyzer
             $end,
             $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
             $this->bandSplitter->split($start, $end, self::DURATION_FIRST_OVERTIME_BANDS),
+        );
+    }
+
+    private function durationFirstShortfall(
+        ShiftOccurrence $occurrence,
+        int $workedMinutes,
+        bool $isHoliday,
+        int $calendarGeneration,
+    ): ?AttendanceSegment {
+        $minutes = self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES - $workedMinutes;
+
+        if ($minutes < 1 || $isHoliday
+            || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY
+            || ! $occurrence->schedule?->is_working_day) {
+            return null;
+        }
+
+        return new AttendanceSegment(
+            kind: 'daily_shortfall',
+            start: null,
+            end: null,
+            fingerprint: $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
+            rateMinutes: new BandSplit(ordinaryMinutes: $minutes),
+            minutes: $minutes,
         );
     }
 

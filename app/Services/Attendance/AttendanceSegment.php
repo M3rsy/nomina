@@ -14,11 +14,27 @@ readonly class AttendanceSegment
 
     public function __construct(
         public string $kind,
-        public CarbonImmutable $start,
-        public CarbonImmutable $end,
+        public ?CarbonImmutable $start,
+        public ?CarbonImmutable $end,
         public string $fingerprint,
         public BandSplit $rateMinutes,
+        ?int $minutes = null,
     ) {
+        if ($start === null && $end === null) {
+            if ($minutes === null || $minutes < 1 || $rateMinutes->totalMinutes() !== $minutes) {
+                throw new InvalidArgumentException('A non-interval attendance fact must contain whole minutes.');
+            }
+
+            $this->minutes = $minutes;
+            $this->key = hash('sha256', implode('|', [$kind, 'non-interval', $minutes, $fingerprint]));
+
+            return;
+        }
+
+        if ($start === null || $end === null) {
+            throw new InvalidArgumentException('An attendance interval requires both boundaries.');
+        }
+
         $seconds = $start->diffInSeconds($end);
 
         if ($end->lte($start) || $seconds < 60) {

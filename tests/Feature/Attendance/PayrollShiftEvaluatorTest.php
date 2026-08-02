@@ -163,6 +163,23 @@ test('keeps a scheduled day with no marks as an unpaid absence', function () {
         ->and($evaluation->recognizedMinutes)->toBe(0);
 });
 
+test('blocks a duration-first no-mark day with one pending daily shortfall', function () {
+    [$occurrence, $analysis] = payrollShiftWithoutMarks(
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    );
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect());
+    $deficit = $analysis->deficits->sole();
+
+    expect($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(480)
+        ->and($deficit->start)->toBeNull()
+        ->and($deficit->end)->toBeNull()
+        ->and($evaluation->status)->toBe('blocked')
+        ->and($evaluation->recognizedMinutes)->toBe(0)
+        ->and($evaluation->blockers->sole()['code'])->toBe('pending_daily_shortfall');
+});
+
 test('credits a scheduled no-mark shift through an append-only attendance exception', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks();
     $deficit = $analysis->deficits->sole();
@@ -342,6 +359,7 @@ function payrollShiftWithoutMarks(
     bool $isWorkingDay = true,
     string $scheduledStart = '06:00',
     string $scheduledEnd = '14:00',
+    string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
 ): array {
     $date = CarbonImmutable::parse('2026-07-20')->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -366,7 +384,7 @@ function payrollShiftWithoutMarks(
         $end,
         collect(),
         ShiftOccurrence::NO_MARKS,
-        payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+        payrollPolicyKey: $payrollPolicyKey,
     );
 
     return [$occurrence, app(AttendanceShiftAnalyzer::class)->analyze($occurrence)];

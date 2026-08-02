@@ -456,6 +456,24 @@ test('duration-first incomplete quota emits no entry variation', function () {
         ->and($analysis->variations)->toBeEmpty();
 });
 
+test('duration-first keeps an overnight daily shortfall on its starting work date', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 18:00:00', '2026-07-19 01:00:00', '18:00', '02:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $deficit = $analysis->deficits->sole();
+
+    expect($analysis->workDate->toDateString())->toBe('2026-07-18')
+        ->and($analysis->workedMinutes)->toBe(420)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(420)
+        ->and($analysis->scheduledRates->extra100Minutes)->toBe(0)
+        ->and($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(60)
+        ->and($deficit->start)->toBeNull()
+        ->and($deficit->end)->toBeNull()
+        ->and($deficit->rateMinutes->ordinaryMinutes)->toBe(60);
+});
+
 test('duration-first completed overtime hour has zero transfer residual', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 15:00:00',
