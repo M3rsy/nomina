@@ -46,22 +46,13 @@ final class ProcessPayrollRun implements ShouldQueue
         }
 
         try {
-            DB::transaction(function () use ($identity, $processor): void {
-                $period = PayPeriod::withoutCompanyScope()
-                    ->where('company_id', $identity->company_id)
-                    ->findOrFail($identity->pay_period_id);
-                $processor->processPayPeriod($period);
-                $run = PayrollRun::withoutCompanyScope()
-                    ->where('company_id', $identity->company_id)
-                    ->where('pay_period_id', $identity->pay_period_id)
-                    ->lockForUpdate()
-                    ->findOrFail($this->runId);
-                $run->markCompleted();
-            });
+            $period = PayPeriod::withoutCompanyScope()
+                ->where('company_id', $identity->company_id)
+                ->findOrFail($identity->pay_period_id);
+            $processor->processPayPeriod($period);
+            $this->complete($identity);
         } catch (Throwable $exception) {
-            PayrollRun::withoutCompanyScope()->whereKey($this->runId)
-                ->whereIn('status', PayrollRun::ACTIVE_STATUSES)
-                ->update(['last_error' => $this->errorMessage($exception)]);
+            $this->rememberFailure($identity, $exception);
             throw $exception;
         }
     }
@@ -107,11 +98,36 @@ final class ProcessPayrollRun implements ShouldQueue
                 return false;
             }
 
+            if ($run->status === PayrollRun::PROCESSING && $period->status === 'processed') {
+                $run->markCompleted();
+
+                return false;
+            }
+
             if ($run->status === PayrollRun::QUEUED) {
                 $run->markProcessing();
             }
 
             return true;
+        });
+    }
+
+    private function complete(stdClass $identity): void
+    {
+        DB::transaction(function () use ($identity): void {
+            [, $run] = $this->lockedContext($identity);
+            $run->markCompleted();
+        });
+    }
+
+    private function rememberFailure(stdClass $identity, Throwable $exception): void
+    {
+        DB::transaction(function () use ($identity, $exception): void {
+            [, $run] = $this->lockedContext($identity);
+
+            if ($run->isActive()) {
+                $run->update(['last_error' => $this->errorMessage($exception)]);
+            }
         });
     }
 

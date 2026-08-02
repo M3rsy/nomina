@@ -6,6 +6,7 @@ use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 test('assigning a new schedule closes the previous assignment without overlap', function () {
@@ -24,6 +25,49 @@ test('assigning a new schedule closes the previous assignment without overlap', 
         ->and($second->effective_to)->toBeNull()
         ->and($second->assigned_by)->toBe($actor->id)
         ->and($second->reason)->toBe('Cambio a turno nocturno');
+});
+
+test('schedule assignment locks the company before the profile', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $lockOrder = [];
+
+    Company::retrieved(function (Company $retrieved) use ($company, &$lockOrder): void {
+        if ($retrieved->is($company)) {
+            $lockOrder[] = 'company';
+        }
+    });
+    WorkScheduleProfile::retrieved(function (WorkScheduleProfile $retrieved) use ($profile, &$lockOrder): void {
+        if ($retrieved->is($profile)) {
+            $lockOrder[] = 'profile';
+        }
+    });
+
+    $assigner->assign($employee, $profile, '2026-07-01', 'Canonical lock order');
+
+    expect(array_slice($lockOrder, 0, 2))->toBe(['company', 'profile']);
+});
+
+test('schedule assignment uses one transaction without a savepoint', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $transactionLevel = null;
+    $harnessLevel = DB::transactionLevel();
+
+    app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $profile,
+        '2026-07-01',
+        'Single transaction',
+        mutateEmployee: function () use (&$transactionLevel): void {
+            $transactionLevel = DB::transactionLevel();
+        },
+    );
+
+    expect($transactionLevel)->toBe($harnessLevel + 1);
 });
 
 test('creates an employee and initial assigned schedule inside one payroll context', function () {

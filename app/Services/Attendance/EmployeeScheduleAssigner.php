@@ -13,7 +13,6 @@ use App\Services\Payroll\PayrollContextTargets;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Closure;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class EmployeeScheduleAssigner
@@ -32,21 +31,19 @@ class EmployeeScheduleAssigner
         $reason = $this->validateReason($reason);
         $from = CarbonImmutable::parse($effectiveFrom)->startOfDay();
 
-        return DB::transaction(function () use ($attributes, $profile, $companyId, $from, $reason, $actor): EmployeeScheduleAssignment {
-            $lockedProfile = $this->lockAvailableProfile($companyId, $profile);
+        return $this->contextLocker->within(
+            $companyId,
+            fn (): PayrollContextTargets => new PayrollContextTargets(
+                payPeriodIds: $this->affectedPeriodIds($companyId, null, $from),
+                profileIds: [$profile->id],
+            ),
+            function (LockedPayrollContext $context) use ($attributes, $profile, $companyId, $from, $reason, $actor): EmployeeScheduleAssignment {
+                $lockedProfile = $this->availableProfile($companyId, $context->profile($profile->id));
+                $employee = Employee::withoutCompanyScope()->create($attributes);
 
-            return $this->contextLocker->within(
-                $companyId,
-                fn (): PayrollContextTargets => new PayrollContextTargets(
-                    payPeriodIds: $this->affectedPeriodIds($companyId, null, $from),
-                ),
-                function (LockedPayrollContext $context) use ($attributes, $lockedProfile, $from, $reason, $actor): EmployeeScheduleAssignment {
-                    $employee = Employee::withoutCompanyScope()->create($attributes);
-
-                    return $this->storeAssignment($context, $employee, $lockedProfile, $from, $reason, $actor);
-                },
-            );
-        });
+                return $this->storeAssignment($context, $employee, $lockedProfile, $from, $reason, $actor);
+            },
+        );
     }
 
     public function assign(
@@ -60,30 +57,29 @@ class EmployeeScheduleAssigner
         $reason = $this->validateReason($reason);
         $from = CarbonImmutable::parse($effectiveFrom)->startOfDay();
 
-        return DB::transaction(function () use ($employee, $profile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
-            $lockedProfile = $this->lockAvailableProfile($employee->company_id, $profile);
+        return $this->contextLocker->within(
+            $employee->company_id,
+            fn (): PayrollContextTargets => new PayrollContextTargets(
+                payPeriodIds: $this->affectedPeriodIds($employee->company_id, $employee->id, $from),
+                employeeIds: [$employee->id],
+                profileIds: [$profile->id],
+                assignmentIds: $this->assignmentIds($employee->id),
+            ),
+            function (LockedPayrollContext $context) use ($employee, $profile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
+                $lockedProfile = $this->availableProfile($employee->company_id, $context->profile($profile->id));
+                $lockedEmployee = $context->employee($employee->id);
 
-            return $this->contextLocker->within(
-                $employee->company_id,
-                fn (): PayrollContextTargets => new PayrollContextTargets(
-                    payPeriodIds: $this->affectedPeriodIds($employee->company_id, $employee->id, $from),
-                    employeeIds: [$employee->id],
-                ),
-                function (LockedPayrollContext $context) use ($employee, $lockedProfile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
-                    $lockedEmployee = $context->employee($employee->id);
-
-                    return $this->storeAssignment(
-                        $context,
-                        $lockedEmployee,
-                        $lockedProfile,
-                        $from,
-                        $reason,
-                        $actor,
-                        $mutateEmployee,
-                    );
-                },
-            );
-        });
+                return $this->storeAssignment(
+                    $context,
+                    $lockedEmployee,
+                    $lockedProfile,
+                    $from,
+                    $reason,
+                    $actor,
+                    $mutateEmployee,
+                );
+            },
+        );
     }
 
     private function storeAssignment(
@@ -101,12 +97,10 @@ class EmployeeScheduleAssigner
             ]);
         }
 
-        $assignments = EmployeeScheduleAssignment::withoutCompanyScope()
+        $assignments = $context->assignments
             ->where('employee_id', $employee->id)
-            ->orderBy('effective_from')
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
+            ->sortBy([['effective_from', 'asc'], ['id', 'asc']])
+            ->values();
 
         if ($assignments->contains(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->isSameDay($from))) {
             throw ValidationException::withMessages([
@@ -166,26 +160,30 @@ class EmployeeScheduleAssigner
             ->all();
     }
 
-    private function lockAvailableProfile(int $companyId, WorkScheduleProfile $profile): WorkScheduleProfile
+    private function availableProfile(int $companyId, WorkScheduleProfile $profile): WorkScheduleProfile
     {
-        $lockedProfile = WorkScheduleProfile::withoutCompanyScope()
-            ->whereKey($profile->id)
-            ->lockForUpdate()
-            ->firstOrFail();
-
-        if ($companyId !== $lockedProfile->company_id) {
+        if ($companyId !== $profile->company_id) {
             throw ValidationException::withMessages([
                 'schedule_profile_id' => 'La jornada debe pertenecer a la empresa del empleado.',
             ]);
         }
 
-        if (! $lockedProfile->is_active || $lockedProfile->retired_at !== null) {
+        if (! $profile->is_active || $profile->retired_at !== null) {
             throw ValidationException::withMessages([
                 'schedule_profile_id' => 'La jornada seleccionada ya no está disponible.',
             ]);
         }
 
-        return $lockedProfile;
+        return $profile;
+    }
+
+    /** @return list<int> */
+    private function assignmentIds(int $employeeId): array
+    {
+        return EmployeeScheduleAssignment::withoutCompanyScope()
+            ->where('employee_id', $employeeId)
+            ->pluck('id')
+            ->all();
     }
 
     private function validateReason(string $reason): string

@@ -2,6 +2,7 @@
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
 use App\Models\Holiday;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
@@ -10,6 +11,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
@@ -22,6 +24,7 @@ use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollProcessingBlocked;
 use App\Services\Payroll\PayrollProcessor;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 beforeEach(function () {
@@ -67,6 +70,58 @@ test('processor rolls back when an overtime candidate is pending', function () {
             ]);
     }
 
+    app(CurrentCompany::class)->set($company);
+
+    expect(fn () => app(PayrollProcessor::class)->processPayPeriod($payPeriod))
+        ->toThrow(PayrollProcessingBlocked::class)
+        ->and($payPeriod->fresh()->status)->toBe('ready')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+});
+
+test('processor blocks a missing effective profile without writing payroll results', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $employee = processorEmployee($company);
+    $profileId = $employee->scheduleAssignments()->value('work_schedule_profile_id');
+    $missingProfileId = $profileId + 10_000;
+
+    DB::statement('PRAGMA defer_foreign_keys=ON');
+    DB::table('employee_schedule_assignments')->where('work_schedule_profile_id', $profileId)
+        ->update(['work_schedule_profile_id' => $missingProfileId]);
+    DB::table('work_schedules')->where('work_schedule_profile_id', $profileId)
+        ->update(['work_schedule_profile_id' => $missingProfileId]);
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profileId)
+        ->update(['profile_id' => $missingProfileId]);
+    app(CurrentCompany::class)->set($company);
+
+    expect(fn () => app(PayrollProcessor::class)->processPayPeriod($payPeriod))
+        ->toThrow(PayrollProcessingBlocked::class)
+        ->and($payPeriod->fresh()->status)->toBe('ready')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->count())->toBe(0);
+});
+
+test('processor blocks assignments that become ambiguous during context resolution', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $employee = processorEmployee($company);
+    $assignment = $employee->scheduleAssignments()->sole();
+    $inserted = false;
+
+    WorkScheduleProfilePublication::retrieved(function () use ($assignment, &$inserted): void {
+        if ($inserted) {
+            return;
+        }
+
+        $inserted = true;
+        EmployeeScheduleAssignment::factory()->create([
+            'company_id' => $assignment->company_id,
+            'employee_id' => $assignment->employee_id,
+            'work_schedule_profile_id' => $assignment->work_schedule_profile_id,
+            'effective_from' => $assignment->effective_from->addDay(),
+            'effective_to' => $assignment->effective_to,
+            'reason' => 'Concurrent overlapping assignment',
+        ]);
+    });
     app(CurrentCompany::class)->set($company);
 
     expect(fn () => app(PayrollProcessor::class)->processPayPeriod($payPeriod))
