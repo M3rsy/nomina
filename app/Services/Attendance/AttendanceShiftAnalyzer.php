@@ -325,14 +325,31 @@ class AttendanceShiftAnalyzer
 
         $ordinaryMinutes = min($workedMinutes, self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
         $payableEnd = $entry->addMinutes($workedMinutes);
+        $postQuotaMinutes = max(0, $workedMinutes - self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
+        $residualMinutes = $postQuotaMinutes % 60;
+        $excludedTransferMinutes = $postQuotaMinutes >= 60
+            && $residualMinutes >= 1
+            && $residualMinutes <= 30 ? $residualMinutes : 0;
+        $recognizedEnd = $payableEnd->subMinutes($excludedTransferMinutes);
         $overtimeCandidates = collect();
+        $variations = collect();
+
+        if ($workedMinutes >= self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES
+            && $occurrence->scheduledStart !== null
+            && $entry->gt($occurrence->scheduledStart->addMinutes(20))) {
+            $variations->push(new AttendanceVariation(
+                'schedule_entry',
+                $entry,
+                $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
+            ));
+        }
 
         if ($workedMinutes > self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES) {
             $candidateStart = $entry->addMinutes(self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
             $overtimeCandidates->push($this->durationFirstOvertimeCandidate(
                 $occurrence,
                 $candidateStart,
-                $payableEnd,
+                $recognizedEnd,
                 $isHoliday,
                 $calendarGeneration,
             ));
@@ -351,6 +368,8 @@ class AttendanceShiftAnalyzer
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,
+            variations: $variations,
+            excludedTransferMinutes: $excludedTransferMinutes,
         );
     }
 

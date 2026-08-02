@@ -4,6 +4,7 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceException;
 use App\Models\AttendanceFactGeneration;
+use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Employee;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\OvertimeDecision;
@@ -25,6 +26,7 @@ final readonly class PayrollPeriodSnapshotData
         private Collection $factGenerations,
         private Collection $decisions,
         private Collection $exceptions,
+        private Collection $variationAcknowledgements,
     ) {}
 
     /** @param Collection<int, Employee> $employees */
@@ -82,8 +84,15 @@ final readonly class PayrollPeriodSnapshotData
             ->current()
             ->with('decider')
             ->get();
+        $variationAcknowledgements = AttendanceVariationAcknowledgement::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->where('pay_period_id', $period->id)
+            ->whereIn('employee_id', $employeeIds)
+            ->whereBetween('work_date', [$period->start_date->toDateString(), $period->end_date->toDateString()])
+            ->with('acknowledger')
+            ->get();
 
-        return new self($assignments, $schedules, $publications, $marks, $factGenerations, $decisions, $exceptions);
+        return new self($assignments, $schedules, $publications, $marks, $factGenerations, $decisions, $exceptions, $variationAcknowledgements);
     }
 
     public function assignment(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
@@ -154,6 +163,13 @@ final readonly class PayrollPeriodSnapshotData
     {
         return $this->exceptions->where('employee_id', $employee->id)
             ->filter(fn (AttendanceException $exception): bool => $exception->work_date->isSameDay($date))
+            ->values();
+    }
+
+    public function variationAcknowledgements(Employee $employee, CarbonImmutable $date): Collection
+    {
+        return $this->variationAcknowledgements->where('employee_id', $employee->id)
+            ->filter(fn (AttendanceVariationAcknowledgement $acknowledgement): bool => $acknowledgement->work_date->isSameDay($date))
             ->values();
     }
 }

@@ -22,6 +22,7 @@ use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
+use App\Services\Attendance\VariationAcknowledgementRecorder;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollRunRequester;
 use Carbon\Carbon;
@@ -192,6 +193,8 @@ class Revisar extends Component
 
     public string $manualMarkReason = '';
 
+    public string $variationReason = '';
+
     public bool $locked = false;
 
     private ?array $periodReviewSnapshot = null;
@@ -267,6 +270,8 @@ class Revisar extends Component
             'overtimeGroups' => $overtimeGroups,
             'overtimeRows' => $overtimeRows,
             'pendingOvertimeMatchCount' => $pendingOvertimeMatchCount,
+            'variationReviews' => $attendanceReviews
+                ->filter(fn ($review) => $review->analysis->variations->isNotEmpty()),
             'deficitReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()),
         ]);
@@ -1293,6 +1298,43 @@ class Revisar extends Component
         }
 
         $this->moveToReady();
+    }
+
+    public function acknowledgeVariation(
+        int $employeeId,
+        string $workDate,
+        string $variationKey,
+        string $fingerprint,
+    ): void {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $validated = $this->validate([
+            'variationReason' => ['required', 'string', 'max:500'],
+        ], [
+            'variationReason.required' => 'Debe indicar el motivo del reconocimiento.',
+        ]);
+        $employee = $this->findPeriodEmployee($employeeId);
+        if ($employee === null) {
+            $this->addError('variation', 'El empleado no pertenece a este período.');
+
+            return;
+        }
+
+        app(VariationAcknowledgementRecorder::class)->acknowledge(
+            $this->payPeriod,
+            $employee,
+            $workDate,
+            $variationKey,
+            $fingerprint,
+            $validated['variationReason'],
+            Auth::user(),
+        );
+        $this->variationReason = '';
+        $this->periodReviewSnapshot = null;
+
+        session()->flash('success', 'Variación reconocida y registrada en el historial.');
     }
 
     public function confirmContinueToReady(): void

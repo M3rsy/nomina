@@ -187,6 +187,52 @@
     </section>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Auditoría informativa</p>
+        <h2 class="mt-1 text-xl font-black text-slate-950">Variaciones de entrada</h2>
+        <p class="mt-1 text-sm text-slate-600">Estas variaciones no bloquean el período ni modifican el tiempo pagable.</p>
+
+        <div class="mt-5 space-y-3">
+            @forelse ($variationReviews as $review)
+                @foreach ($review->analysis->variations as $variation)
+                    @php
+                        $acknowledgement = $review->acknowledgementFor($variation);
+                    @endphp
+                    <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <p class="font-bold text-slate-950">Variación de entrada</p>
+                        <p class="mt-1 text-sm text-slate-700">
+                            {{ $review->employee->full_name }} · {{ $review->analysis->workDate->format('d/m/Y') }} · entrada {{ $variation->entryAt->format('H:i') }}
+                        </p>
+                        <p class="mt-1 text-sm font-semibold text-sky-800">480 min ordinarios; no cambia el pago</p>
+
+                        @if ($acknowledgement)
+                            <div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                                <p class="font-bold">Reconocida</p>
+                                <p>{{ $acknowledgement->reason }}</p>
+                                <p class="mt-1 text-xs">{{ $acknowledgement->acknowledger->email }} · {{ $acknowledgement->created_at?->format('d/m/Y H:i') }}</p>
+                            </div>
+                        @else
+                            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                                <input wire:model="variationReason" type="text" maxlength="500" placeholder="Motivo del reconocimiento" class="min-h-11 flex-1 rounded-lg border-slate-300 text-sm">
+                                <button
+                                    type="button"
+                                    wire:click="acknowledgeVariation({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $variation->key }}', '{{ $variation->fingerprint }}')"
+                                    @disabled($isBlocked)
+                                    class="rounded-lg bg-sky-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
+                                >
+                                    Reconocer variación
+                                </button>
+                            </div>
+                            @error('variationReason') <p class="mt-2 text-sm text-rose-700">{{ $message }}</p> @enderror
+                        @endif
+                    </article>
+                @endforeach
+            @empty
+                <p class="text-sm text-slate-600">No hay variaciones de entrada para este período.</p>
+            @endforelse
+        </div>
+    </section>
+
+    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Revisión por jornada</p>
@@ -318,8 +364,11 @@
                                             {{ $review->analysis->entryAt?->format('H:i') ?? '—' }} → {{ $review->analysis->exitAt?->format('H:i') ?? '—' }}
                                         </p>
                                         <p class="mt-1 text-sm font-semibold text-slate-800">
-                                            {{ $candidate->minutes }} min · {{ number_format($candidate->minutes / 60, 2, ',', '.') }} h
+                                            {{ $candidate->minutes }} min{{ $review->analysis->payrollPolicyKey === \App\Models\WorkScheduleProfilePublication::DURATION_FIRST_V2 ? ' detectados' : '' }} · {{ number_format($candidate->minutes / 60, 2, ',', '.') }} h
                                         </p>
+                                        @if ($review->analysis->excludedTransferMinutes > 0)
+                                            <p class="mt-1 text-xs font-semibold text-sky-800">{{ $review->analysis->excludedTransferMinutes }} min de traslado excluidos</p>
+                                        @endif
                                         <p class="mt-1 text-xs text-slate-500">
                                             {{ $rateLabels->map(fn ($minutes, $rate) => $rate.': '.$minutes.' min')->implode(' · ') }}
                                         </p>

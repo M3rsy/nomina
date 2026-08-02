@@ -1,15 +1,21 @@
 <?php
 
 use App\Livewire\Nomina\Revisar;
+use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
+use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -183,4 +189,67 @@ test('uploaded file filter narrows raw marks by source file', function () {
         ->assertViewHas('records', function ($records) use ($targetMark) {
             return $records->count() === 1 && $records->first()->id === $targetMark->id;
         });
+});
+
+test('variation transfer tail is auditable and pay neutral in payroll review', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    foreach ([1, 2, 3] as $dayOfWeek) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $dayOfWeek,
+            'start_time' => '06:00',
+            'end_time' => '14:00',
+        ]);
+    }
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-22',
+        'status' => 'uploaded',
+    ]);
+    foreach ([
+        ['2026-07-20 07:00:00', '2026-07-20 15:00:00'],
+        ['2026-07-21 06:00:00', '2026-07-21 16:25:00'],
+        ['2026-07-22 06:00:00', '2026-07-22 16:31:00'],
+    ] as $pair) {
+        foreach ($pair as $eventAt) {
+            RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]);
+        }
+    }
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+        'payroll_policy_key' => 'duration-first-v2',
+        'published_by' => $admin->id,
+    ]);
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($admin);
+
+    $resolver = app(PayrollShiftEvaluationResolver::class);
+    $before = $resolver->resolve($payPeriod, $employee, '2026-07-20');
+    $variation = $resolver->review($payPeriod, $employee, '2026-07-20')->analysis->variations->sole();
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->assertSee('Variación de entrada')
+        ->assertSee('480 min ordinarios; no cambia el pago')
+        ->assertSee('120 min detectados')
+        ->assertSee('25 min de traslado excluidos')
+        ->assertSee('151 min detectados')
+        ->set('variationReason', 'Reviewed with employee')
+        ->call('acknowledgeVariation', $employee->id, '2026-07-20', $variation->key, $variation->fingerprint)
+        ->assertHasNoErrors()
+        ->assertSee('Reviewed with employee')
+        ->assertSee($admin->email);
+
+    $acknowledgement = DB::table('attendance_variation_acknowledgements')->sole();
+    $after = $resolver->resolve($payPeriod, $employee, '2026-07-20');
+
+    expect($acknowledgement->acknowledged_by)->toBe($admin->id)
+        ->and($acknowledgement->reason)->toBe('Reviewed with employee')
+        ->and($after->payableRates)->toEqual($before->payableRates)
+        ->and(fn () => AttendanceVariationAcknowledgement::findOrFail($acknowledgement->id)
+            ->update(['reason' => 'Changed']))->toThrow(LogicException::class);
 });
