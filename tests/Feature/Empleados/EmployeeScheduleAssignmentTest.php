@@ -5,7 +5,9 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -258,3 +260,55 @@ test('a backdated assignment cannot repartition the first work date of a locked 
         ->and($next->fresh()->effective_from->toDateString())->toBe('2026-08-01')
         ->and($employee->scheduleAssignments()->count())->toBe(2);
 });
+
+test('new employees resolve the exact general profile before on and after activation', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => $company->id]);
+    $previous = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'general', 'name' => 'Jornada general',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ]);
+    $publication = app(GeneralWorkSchedulePublisher::class)->activate(
+        $company, $actor, 'Activate date-effective profile', '2026-08-02 10:00:00',
+    );
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $dates = ['2026-12-31', '2027-01-01', '2027-02-01'];
+
+    $assignments = collect($dates)->map(function (string $date) use ($assigner, $company, $actor) {
+        $attributes = Employee::factory()->forCompany($company)->make(['hired_at' => $date])->getAttributes();
+
+        return $assigner->createAndAssignGeneral(
+            $attributes, $date, 'Jornada general vigente al contratar', $actor,
+        );
+    });
+
+    expect($assignments->pluck('work_schedule_profile_id')->all())->toBe([
+        $previous->id,
+        $publication->profile_id,
+        $publication->profile_id,
+    ]);
+});
+
+test('new employee assignment fails closed when the general profile is missing or ambiguous', function (bool $ambiguous) {
+    $company = Company::factory()->create();
+    if ($ambiguous) {
+        WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+        $overlap = WorkScheduleProfile::withoutEvents(fn () => WorkScheduleProfile::factory()->forCompany($company)
+            ->create(['profile_key' => 'general', 'version' => 2]));
+        WorkScheduleProfilePublication::withoutCompanyScope()->create([
+            'company_id' => $company->id, 'profile_key' => 'general', 'profile_id' => $overlap->id,
+            'payroll_policy_key' => WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+            'effective_from' => '1970-01-01', 'definition_hash' => str_repeat('a', 64),
+            'request_key' => str_repeat('b', 64), 'payload_hash' => str_repeat('c', 64),
+            'reason' => 'Ambiguous fixture',
+        ]);
+    }
+    $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+
+    expect(fn () => app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
+        $attributes, '2026-08-02', 'Exact-one general profile required',
+    ))->toThrow(ValidationException::class)
+        ->and(Employee::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(0);
+})->with(['missing' => false, 'ambiguous' => true]);

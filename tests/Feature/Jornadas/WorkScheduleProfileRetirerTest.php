@@ -234,3 +234,22 @@ test('repeating the same retirement is idempotent while changing its replacement
         $actor,
     ))->toThrow(ValidationException::class);
 });
+
+test('the general profile can only change through effective-dated activation', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $assignment = EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id, 'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $source->id, 'effective_from' => '2026-01-01',
+    ]);
+
+    expect(fn () => app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source, $replacement, 'Manual general replacement', $actor,
+    ))->toThrow(ValidationException::class)
+        ->and($source->fresh()->is_active)->toBeTrue()
+        ->and($assignment->fresh()->work_schedule_profile_id)->toBe($source->id)
+        ->and($source->publications()->sole()->effective_to)->toBeNull();
+});

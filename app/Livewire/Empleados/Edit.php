@@ -3,9 +3,10 @@
 namespace App\Livewire\Empleados;
 
 use App\Models\Employee;
-use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\GeneralWorkScheduleResolver;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -98,7 +99,7 @@ class Edit extends Component
             $rules['schedule_profile_id'] = [
                 'required',
                 Rule::exists('work_schedule_profiles', 'id')->where(
-                    fn ($query) => $query->where('company_id', $companyId)->where('is_active', true),
+                    fn ($query) => $query->where('company_id', $companyId),
                 ),
             ];
             $rules['schedule_effective_from'] = ['required', 'date'];
@@ -121,7 +122,12 @@ class Edit extends Component
             $this->employee->update($validated);
 
         } else {
-            $profile = WorkScheduleProfile::withoutCompanyScope()->findOrFail($profileId);
+            $profile = app(GeneralWorkScheduleResolver::class)->resolve($companyId, $effectiveFrom);
+            if ($profile->id !== $profileId) {
+                throw ValidationException::withMessages([
+                    'schedule_profile_id' => 'La jornada seleccionada no es la jornada general vigente para esa fecha.',
+                ]);
+            }
             app(EmployeeScheduleAssigner::class)->assign(
                 $this->employee,
                 $profile,
@@ -129,10 +135,18 @@ class Edit extends Component
                 $reason,
                 auth()->user(),
                 mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update($validated),
+                allowHistoricalProfile: true,
             );
         }
 
         $this->redirect('/empleados', navigate: true);
+    }
+
+    public function updatedScheduleEffectiveFrom(): void
+    {
+        if (! $this->employee->scheduleAssignments()->exists()) {
+            $this->schedule_profile_id = $this->scheduleProfiles()->first()?->id;
+        }
     }
 
     public function render()
@@ -151,12 +165,18 @@ class Edit extends Component
 
     private function scheduleProfiles()
     {
-        return WorkScheduleProfile::withoutCompanyScope()
-            ->where('company_id', $this->employee->company_id)
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->orderByDesc('version')
-            ->get();
+        if ($this->schedule_effective_from === '') {
+            return collect();
+        }
+
+        try {
+            return collect([app(GeneralWorkScheduleResolver::class)->resolve(
+                $this->employee->company_id,
+                $this->schedule_effective_from,
+            )]);
+        } catch (ValidationException) {
+            return collect();
+        }
     }
 
     private function messages(): array
