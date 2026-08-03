@@ -54,8 +54,8 @@ Chain strategy: feature-branch-chain
 
 ## Phase 4: Snapshots and Reports
 
-- [ ] 4.1 RED `PayrollProcessorTest::immutable_snapshot`: retry reuses;reset/conflict never-rewrite.
-- [ ] 4.2 GREEN snapshot migration/writer/processor persist publication/key,`rules_version`,marks,decisions,rates,rejected-complement,transfer/variation audit; blocked writes nothing; identical retry reuses.
+- [x] 4.1 RED `PayrollProcessorTest::immutable_snapshot`: retry reuses;reset/conflict never-rewrite.
+- [x] 4.2 GREEN snapshot migration/writer/processor persist publication/key,`rules_version`,marks,decisions,rates,rejected-complement,transfer/variation audit; blocked writes nothing; identical retry reuses.
 - [ ] 4.3 Cycle `tests/Feature/Nomina/{ExcelStructureTest,ExportarExcelTest,IndexTest}.php`→`app/Services/Payroll/{PayrollReportingRowAdapter,PayrollExcelExporter,PayrollStubExporter}.php`: legacy null/blank+`LEGACY`,no-recalculation; all columns,employee/grand totals; integer-minute sums,including two one-minute rows.
 
 ## Phase 5: Documentation and Lifecycle

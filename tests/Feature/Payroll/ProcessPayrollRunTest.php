@@ -76,10 +76,13 @@ test('processes a queued run through the payroll processor', function () {
     [$period, $run] = payrollRunWorkerFixture();
 
     (new ProcessPayrollRun($run->id))->handle(app(PayrollProcessor::class));
+    $results = PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->get();
 
     expect($period->fresh()->status)->toBe('processed')
         ->and($run->fresh()->status)->toBe('completed')
-        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBeGreaterThan(0);
+        ->and($results)->not->toBeEmpty()
+        ->and($results->every(fn (PayrollResult $result): bool => is_array($result->day_snapshot)
+            && is_string($result->snapshot_hash) && strlen($result->snapshot_hash) === 64))->toBeTrue();
 });
 
 test('runs payroll processing outside job state transactions', function () {
