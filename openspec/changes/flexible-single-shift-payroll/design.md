@@ -38,6 +38,8 @@ Insert-only snapshots persist publication ID/key, `rules_version`, marks, decisi
 
 Approved issue #165; draft/no-merge tracker #166. Exact bases: `tracker←PR1 identity←PR2 quota←PR3 variation←PR4 shortfall←PR5 blockers←PR6 overtime←PR7 activation/UI/reassignment←PR8 snapshots←PR9 reports←PR10 docs`. Each links #165, has exactly `type:feature`, clean predecessor diff, dependency diagram, rollback, conventional commit/no attribution; prefer ~400 authored lines, split before 800. PR1 is autonomous schema/backfill/resolution with legacy parity and no v2 publication; activation remains PR7.
 
+WU5 only has a maintainer-approved `size:exception` in Engram #2203: 809 authored lines, exactly 9 above 800, because splitting it would rewrite the reviewed WU5–WU10 chain. The hard 800-line maximum remains unchanged for every other work unit. This exception is delivery metadata only and does not complete task `0.1`.
+
 Every public behavior records independent-literal RED→minimal GREEN→REFACTOR/GREEN, focused command/result, runtime harness or N/A, rollback, and native attempt ledger. Post-apply full risk/resilience/readability/reliability review persists native transaction, findings/fixes/re-judgments, complete-content+HEAD receipt; validate pre-commit/push/PR. Any planning/implementation/content/HEAD change invalidates it and requires renewed full 4R/receipt.
 
 ## Threat/Rollout

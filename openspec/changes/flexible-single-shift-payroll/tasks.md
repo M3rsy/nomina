@@ -9,6 +9,8 @@ Chained PRs recommended: Yes
 Chain strategy: feature-branch-chain
 400-line budget risk: High
 
+WU5 `size:exception`: maintainer-approved in Engram #2203 for 809 authored lines (9 over the 800-line limit); applies only to WU5 and preserves the reviewed WU5–WU10 chain.
+
 ### Suggested Work Units
 
 | Slice/base/goal | Focused test command | Runtime harness | Rollback boundary |
@@ -29,7 +31,7 @@ Chain strategy: feature-branch-chain
 ## Phase 0: Delivery
 
 - [ ] 0.1 Preserve #165, duplicate check, draft/no-merge tracker #166, predecessor targets/diagrams/diffs, links, exactly `type:feature`, conventional commits/no attribution, and ~400/<800 limits.
-- [ ] 0.2 RED before each GREEN in `tests/Feature/Nomina/{RevisarTest,IndexTest}.php`,`tests/Feature/{Empleados/EmployeeScheduleAssignmentTest,Jornadas/WorkScheduleProfileRetirerTest}.php`: authorized same-tenant/current-fingerprint succeeds; foreign/unauthorized/stale/locked writes nothing. Shell/process/VCS/PR threats are N/A.
+- [x] 0.2 RED before each GREEN in `tests/Feature/Nomina/{RevisarTest,IndexTest}.php`,`tests/Feature/{Empleados/EmployeeScheduleAssignmentTest,Jornadas/WorkScheduleProfileRetirerTest}.php`: authorized same-tenant/current-fingerprint succeeds; foreign/unauthorized/stale/locked writes nothing. Shell/process/VCS/PR threats are N/A.
 
 ## Phase 1: Immutable Policy Identity
 
