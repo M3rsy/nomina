@@ -30,7 +30,7 @@ WU5 `size:exception`: maintainer-approved in Engram #2203 for 809 authored lines
 
 ## Phase 0: Delivery
 
-- [ ] 0.1 Preserve #165, duplicate check, draft/no-merge tracker #166, predecessor targets/diagrams/diffs, links, exactly `type:feature`, conventional commits/no attribution, and ~400/<800 limits.
+- [x] 0.1 Preserve #165, duplicate check, draft/no-merge tracker #166, predecessor targets/diagrams/diffs, links, exactly `type:feature`, conventional commits/no attribution, and ~400/<800 limits.
 - [x] 0.2 RED before each GREEN in `tests/Feature/Nomina/{RevisarTest,IndexTest}.php`,`tests/Feature/{Empleados/EmployeeScheduleAssignmentTest,Jornadas/WorkScheduleProfileRetirerTest}.php`: authorized same-tenant/current-fingerprint succeeds; foreign/unauthorized/stale/locked writes nothing. Shell/process/VCS/PR threats are N/A.
 
 ## Phase 1: Immutable Policy Identity
