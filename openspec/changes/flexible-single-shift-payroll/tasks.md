@@ -47,8 +47,8 @@ Chain strategy: feature-branch-chain
 ## Phase 3: Processing and Activation
 
 - [x] 3.1 Cycle locker/processor/job plus `EmployeeScheduleAssignmentTest::lock_order`: PR5 makes assigner company→profile; forbids nested/inverted path; zero/multiple blocks; job-state transactions stay outside payroll.
-- [ ] 3.2 RED `RevisarTest::partial_overtime`: 17:30–18:30 partial preserves complements/bands.
-- [ ] 3.3 GREEN `database/migrations/2026_07_30_000003_add_partial_overtime_resolution.php`,`app/{Models/OvertimeDecision,Services/Attendance/{OvertimeDecisionRecorder,OvertimeDecisionBatchRequester},Livewire/Nomina/Revisar}.php`: immutable whole decisions; exact 17–18,18–19,17:30–18:30 partial/complements; batch-partial refusal; band conservation/supersession; V1 parity/V2 `23514`.
+- [x] 3.2 RED `RevisarTest::partial_overtime`: 17:30–18:30 partial preserves complements/bands.
+- [x] 3.3 GREEN `database/migrations/2026_07_30_000003_add_partial_overtime_resolution.php`,`app/{Models/OvertimeDecision,Services/Attendance/{OvertimeDecisionRecorder,OvertimeDecisionBatchRequester},Livewire/Nomina/Revisar}.php`: immutable whole decisions; exact 17–18,18–19,17:30–18:30 partial/complements; batch-partial refusal; band conservation/supersession; V1 parity/V2 `23514`.
 - [ ] 3.4 RED `Jornadas/IndexTest::activation` + `EmployeeScheduleAssignmentTest::reassignment`: locked-unchanged;prospective exact-one.
 - [ ] 3.5 GREEN publisher/resolver/retirer/UI use PR5-migrated assigner: next-period activation; no-eligible/locked unchanged; hire-boundaries/history/exact-one/idempotency; `23503/23505/23P01` conflicts fail atomically.
 
