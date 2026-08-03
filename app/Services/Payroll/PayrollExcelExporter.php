@@ -31,11 +31,18 @@ class PayrollExcelExporter
         'H' => 16,
         'I' => 16,
         'J' => 17,
+        'K' => 15,
+        'L' => 13,
     ];
 
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
 
     private const DECIMAL_HOURS_FORMAT = '#,##0.00';
+
+    public function __construct(private ?PayrollReportingRowAdapter $rowAdapter = null)
+    {
+        $this->rowAdapter ??= new PayrollReportingRowAdapter;
+    }
 
     public function export(PayPeriod $payPeriod): string
     {
@@ -73,7 +80,7 @@ class PayrollExcelExporter
 
     private function writeTitleRows(Worksheet $sheet, PayPeriod $payPeriod): void
     {
-        $lastColumn = 'J';
+        $lastColumn = 'AD';
 
         $start = $payPeriod->start_date;
         $end = $payPeriod->end_date;
@@ -117,6 +124,26 @@ class PayrollExcelExporter
             'H5' => 'Horas Ext 50%',
             'I5' => 'Horas Ext 75%',
             'J5' => 'Horas Ext 100%',
+            'K5' => 'Fecha laboral',
+            'L5' => 'Estado de fila',
+            'M5' => 'Minutos observados',
+            'N5' => 'Marcas observadas',
+            'O5' => 'Revisiones de marcas',
+            'P5' => 'Minutos ordinarios',
+            'Q5' => 'Minutos Ext 25%',
+            'R5' => 'Minutos Ext 50%',
+            'S5' => 'Minutos Ext 75%',
+            'T5' => 'Minutos Ext 100%',
+            'U5' => 'Déficit minutos',
+            'V5' => 'Déficit estado',
+            'W5' => 'Déficit motivo',
+            'X5' => 'Hora extra detectada',
+            'Y5' => 'Hora extra aprobada',
+            'Z5' => 'Hora extra rechazada',
+            'AA5' => 'Variación',
+            'AB5' => 'Reconocimiento de variación',
+            'AC5' => 'Transferencia excluida',
+            'AD5' => 'Versión de reglas',
         ];
 
         foreach ($headers as $coordinate => $label) {
@@ -128,47 +155,60 @@ class PayrollExcelExporter
     {
         $results = PayrollResult::withoutCompanyScope()
             ->where('pay_period_id', $payPeriod->id)
-            ->with(['employee' => fn ($query) => $query->withTrashed()])
             ->orderBy('employee_id')
             ->orderBy('date')
             ->get();
 
         $row = 6;
+        $employeeId = null;
+        $employeeTotals = $this->emptyTotals();
+        $grandTotals = $this->emptyTotals();
 
         foreach ($results as $result) {
-            $employee = $result->employee;
+            $reportingRow = $this->rowAdapter->adapt($result);
 
-            $sheet->setCellValue("A{$row}", $result->employee_external_id ?: ($employee?->external_id ?? ''));
-            $sheet->setCellValue("B{$row}", $result->employee_name ?: ($employee?->full_name ?? ''));
+            if ($employeeId !== null && $employeeId !== $result->employee_id) {
+                $this->writeTotalsRow($sheet, $row++, 'EMPLOYEE SUBTOTAL', $employeeTotals);
+                $employeeTotals = $this->emptyTotals();
+            }
 
-            if ($result->entry_at !== null) {
-                $sheet->setCellValue("C{$row}", $result->entry_at->toDateTimeString());
+            $employeeId = $result->employee_id;
+
+            $sheet->setCellValue("A{$row}", $reportingRow['employee_external_id']);
+            $sheet->setCellValue("B{$row}", $reportingRow['employee_name']);
+
+            if ($reportingRow['entry_at'] !== null) {
+                $sheet->setCellValue("C{$row}", $reportingRow['entry_at'] instanceof \DateTimeInterface
+                    ? $reportingRow['entry_at']->format('Y-m-d H:i:s')
+                    : $reportingRow['entry_at']);
                 $sheet->getStyle("C{$row}")
                     ->getNumberFormat()
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            if ($result->exit_at !== null) {
-                $sheet->setCellValue("D{$row}", $result->exit_at->toDateTimeString());
+            if ($reportingRow['exit_at'] !== null) {
+                $sheet->setCellValue("D{$row}", $reportingRow['exit_at'] instanceof \DateTimeInterface
+                    ? $reportingRow['exit_at']->format('Y-m-d H:i:s')
+                    : $reportingRow['exit_at']);
                 $sheet->getStyle("D{$row}")
                     ->getNumberFormat()
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($result->worked_minutes));
+            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($reportingRow['worked_minutes']));
             $sheet->getStyle("E{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($result->ordinary_minutes));
+            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($reportingRow['ordinary_minutes']));
             $sheet->getStyle("F{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($result->extra_25_minutes));
-            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($result->extra_50_minutes));
-            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($result->extra_75_minutes));
-            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($result->extra_100_minutes));
+            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($reportingRow['extra_25_minutes']));
+            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($reportingRow['extra_50_minutes']));
+            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($reportingRow['extra_75_minutes']));
+            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($reportingRow['extra_100_minutes']));
 
             foreach (['G', 'H', 'I', 'J'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
@@ -176,18 +216,77 @@ class PayrollExcelExporter
                     ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
             }
 
+            foreach (array_combine(
+                ['K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'AA', 'AB', 'AC', 'AD'],
+                ['work_date', 'status', 'worked_minutes', 'observed_marks', 'mark_revisions', 'ordinary_minutes', 'extra_25_minutes', 'extra_50_minutes', 'extra_75_minutes', 'extra_100_minutes', 'shortfall_minutes', 'shortfall_state', 'shortfall_reason', 'detected_overtime', 'approved_overtime', 'rejected_overtime', 'variation', 'acknowledgement', 'excluded_transfer_minutes', 'rules_version'],
+            ) as $column => $key) {
+                $sheet->setCellValue("{$column}{$row}", $reportingRow[$key]);
+            }
+
+            $this->accumulate($employeeTotals, $reportingRow);
+            $this->accumulate($grandTotals, $reportingRow);
+
             $row++;
+        }
+
+        if ($employeeId !== null) {
+            $this->writeTotalsRow($sheet, $row++, 'EMPLOYEE SUBTOTAL', $employeeTotals);
+        }
+
+        $this->writeTotalsRow($sheet, $row, 'GRAND TOTAL', $grandTotals);
+    }
+
+    /** @return array<string, int> */
+    private function emptyTotals(): array
+    {
+        return array_fill_keys([
+            'worked_minutes', 'ordinary_minutes', 'extra_25_minutes', 'extra_50_minutes',
+            'extra_75_minutes', 'extra_100_minutes',
+        ], 0);
+    }
+
+    /**
+     * @param  array<string, int>  $totals
+     * @param  array<string, mixed>  $reportingRow
+     */
+    private function accumulate(array &$totals, array $reportingRow): void
+    {
+        foreach (array_keys($totals) as $key) {
+            $totals[$key] += $reportingRow[$key] ?? 0;
         }
     }
 
-    private function hoursFromMinutes(int $minutes): float
+    /** @param array<string, int> $totals */
+    private function writeTotalsRow(Worksheet $sheet, int $row, string $label, array $totals): void
     {
-        return $minutes / 60;
+        $sheet->setCellValue("B{$row}", $label);
+
+        foreach (array_combine(
+            ['E', 'F', 'G', 'H', 'I', 'J'],
+            ['M', 'P', 'Q', 'R', 'S', 'T'],
+        ) as $column => $sourceColumn) {
+            $sheet->setCellValue("{$column}{$row}", "={$sourceColumn}{$row}/60");
+        }
+
+        foreach (array_combine(
+            ['M', 'P', 'Q', 'R', 'S', 'T'],
+            ['worked_minutes', 'ordinary_minutes', 'extra_25_minutes', 'extra_50_minutes', 'extra_75_minutes', 'extra_100_minutes'],
+        ) as $column => $key) {
+            $sheet->setCellValue("{$column}{$row}", $totals[$key]);
+        }
+
+        $sheet->getStyle("B{$row}:T{$row}")->getFont()->setBold(true);
+        $sheet->getStyle("E{$row}:J{$row}")->getNumberFormat()->setFormatCode(self::DECIMAL_HOURS_FORMAT);
+    }
+
+    private function hoursFromMinutes(?int $minutes): ?float
+    {
+        return $minutes === null ? null : $minutes / 60;
     }
 
     private function applyHeaderStyle(Worksheet $sheet): void
     {
-        $range = 'A5:J5';
+        $range = 'A5:AD5';
         $style = $sheet->getStyle($range);
 
         $style->getFont()->setBold(true);
