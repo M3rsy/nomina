@@ -60,5 +60,5 @@ Chain strategy: feature-branch-chain
 
 ## Phase 5: Documentation and Lifecycle
 
-- [ ] 5.1 Update `CONTEXT.md`,supersede `docs/adr/0001-resolve-payroll-by-assigned-shift.md`,add `docs/adr/0002-duration-first-payroll.md`; run canonical Pest/SQLite/PostgreSQL suites.
+- [x] 5.1 Update `CONTEXT.md`,supersede `docs/adr/0001-resolve-payroll-by-assigned-shift.md`,add `docs/adr/0002-duration-first-payroll.md`; run canonical Pest/SQLite/PostgreSQL suites.
 - [ ] 5.2 Parent runs full 4R review; persist native transaction,findings/fixes/re-judgments,complete-content+HEAD receipt; validate pre-commit/push/PR. Planning/implementation/content/HEAD changes invalidate/full-renew; tracker stays no-merge.
