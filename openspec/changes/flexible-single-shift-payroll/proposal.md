@@ -57,7 +57,7 @@ Stop future activation and new-policy processing; retain additive audit/snapshot
 ## Dependencies
 
 - Duplicate search, one approved feature issue, then draft/no-merge Feature Branch Chain tracker and children; target ~400 authored lines (800 maximum), exactly `type:feature` per PR.
-- WU5 only has a maintainer-approved `size:exception` in Engram #2203: 809 authored lines, exactly 9 above 800, to preserve the reviewed WU5–WU10 chain. The hard 800-line maximum remains unchanged for every other work unit. This metadata does not complete delivery task `0.1`.
+- WU5 only has a maintainer-approved `size:exception` in Engram #2203: 809 authored lines, exactly 9 above 800, to preserve the reviewed WU5–WU10 chain. The hard 800-line maximum remains unchanged for every other work unit. This metadata does not complete delivery task `0.1`. WU10 has a separate maintainer-approved `size:exception` in Engram #2269 for a final child diff of exactly 418 authored lines and applies only to WU10: its prior child scope was 396 lines, and the review-mandated 14-line soft-deleted-period correction plus policy-alignment metadata brought the exact total to 418; splitting that correction into WU11 was rejected to keep it atomic. All other work units retain their existing limits.
 
 ## Success Criteria
 

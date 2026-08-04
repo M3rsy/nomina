@@ -9,7 +9,7 @@ Chained PRs recommended: Yes
 Chain strategy: feature-branch-chain
 400-line budget risk: High
 
-WU5 `size:exception`: maintainer-approved in Engram #2203 for 809 authored lines (9 over the 800-line limit); applies only to WU5 and preserves the reviewed WU5–WU10 chain.
+WU5 `size:exception`: maintainer-approved in Engram #2203 for 809 authored lines (9 over the 800-line limit); applies only to WU5 and preserves the reviewed WU5–WU10 chain. WU10 has a separate maintainer-approved `size:exception` in Engram #2269 for a final child diff of exactly 418 authored lines and applies only to WU10: its prior child scope was 396 lines, and the review-mandated 14-line soft-deleted-period correction plus policy-alignment metadata brought the exact total to 418; splitting that correction into WU11 was rejected to keep it atomic. All other work units retain their existing limits.
 
 ### Suggested Work Units
 
