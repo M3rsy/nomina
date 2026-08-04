@@ -20,7 +20,13 @@ class ShiftOccurrence
 
     public const MISSING_ASSIGNMENT = 'missing_assignment';
 
+    public const AMBIGUOUS_ASSIGNMENT = 'ambiguous_assignment';
+
     public const MISSING_SCHEDULE = 'missing_schedule';
+
+    public const MISSING_PUBLICATION = 'missing_publication';
+
+    public const AMBIGUOUS_PUBLICATION = 'ambiguous_publication';
 
     /**
      * @param  Collection<int, RawMark>  $marks
@@ -34,6 +40,8 @@ class ShiftOccurrence
         public readonly Collection $marks,
         public readonly string $status,
         public readonly int $factGeneration = 0,
+        public readonly ?int $publicationId = null,
+        public readonly ?string $payrollPolicyKey = null,
     ) {}
 
     public function entryMark(): ?RawMark

@@ -10,6 +10,24 @@ use InvalidArgumentException;
 
 class PayPeriodRangeGuard
 {
+    public function assertAvailableLocked(
+        LockedPayrollContext $context,
+        CarbonInterface|string $startDate,
+        CarbonInterface|string $endDate,
+        ?int $exceptPayPeriodId = null,
+    ): void {
+        $start = CarbonImmutable::parse($startDate)->startOfDay();
+        $end = CarbonImmutable::parse($endDate)->startOfDay();
+        $overlaps = $context->payPeriods->contains(fn (PayPeriod $period): bool => ! $period->trashed()
+            && $period->id !== $exceptPayPeriodId
+            && $period->start_date->startOfDay()->lte($end)
+            && $period->end_date->startOfDay()->gte($start));
+
+        if ($overlaps) {
+            throw new InvalidArgumentException('Las fechas se superponen con otro período de la empresa.');
+        }
+    }
+
     public function assertAvailable(
         int $companyId,
         CarbonInterface|string $startDate,

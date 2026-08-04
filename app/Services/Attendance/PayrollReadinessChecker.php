@@ -11,7 +11,7 @@ class PayrollReadinessChecker
         private PayrollPeriodReviewSnapshot $snapshots,
     ) {}
 
-    /** @return Collection<int, array{employee_id:int,employee_name:string,employee_external_id:string,work_date:string,code:string,candidate_key?:string}> */
+    /** @return Collection<int, array{employee_id:int,employee_name:string,employee_external_id:string,work_date:string,code:string,candidate_key?:string,deficit_key?:string}> */
     public function blockers(
         PayPeriod $payPeriod,
         ?HolidayCalendarContext $calendarContext = null,
