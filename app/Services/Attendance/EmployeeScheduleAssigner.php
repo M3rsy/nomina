@@ -17,7 +17,29 @@ use Illuminate\Validation\ValidationException;
 
 class EmployeeScheduleAssigner
 {
-    public function __construct(private PayrollContextLocker $contextLocker) {}
+    public function __construct(
+        private PayrollContextLocker $contextLocker,
+        private GeneralWorkScheduleResolver $generalResolver,
+    ) {}
+
+    /** @param array<string, mixed> $attributes */
+    public function createAndAssignGeneral(
+        array $attributes,
+        CarbonInterface|string $effectiveFrom,
+        string $reason,
+        ?User $actor = null,
+    ): EmployeeScheduleAssignment {
+        $companyId = (int) ($attributes['company_id'] ?? 0);
+
+        return $this->createAndAssign(
+            $attributes,
+            $this->generalResolver->resolve($companyId, $effectiveFrom),
+            $effectiveFrom,
+            $reason,
+            $actor,
+            true,
+        );
+    }
 
     /** @param array<string, mixed> $attributes */
     public function createAndAssign(
@@ -26,6 +48,7 @@ class EmployeeScheduleAssigner
         CarbonInterface|string $effectiveFrom,
         string $reason,
         ?User $actor = null,
+        bool $allowHistoricalProfile = false,
     ): EmployeeScheduleAssignment {
         $companyId = (int) ($attributes['company_id'] ?? 0);
         $reason = $this->validateReason($reason);
@@ -37,8 +60,8 @@ class EmployeeScheduleAssigner
                 payPeriodIds: $this->affectedPeriodIds($companyId, null, $from),
                 profileIds: [$profile->id],
             ),
-            function (LockedPayrollContext $context) use ($attributes, $profile, $companyId, $from, $reason, $actor): EmployeeScheduleAssignment {
-                $lockedProfile = $this->availableProfile($companyId, $context->profile($profile->id));
+            function (LockedPayrollContext $context) use ($attributes, $profile, $companyId, $from, $reason, $actor, $allowHistoricalProfile): EmployeeScheduleAssignment {
+                $lockedProfile = $this->lockedProfile($companyId, $context->profile($profile->id), $from, $allowHistoricalProfile);
                 $employee = Employee::withoutCompanyScope()->create($attributes);
 
                 return $this->storeAssignment($context, $employee, $lockedProfile, $from, $reason, $actor);
@@ -53,6 +76,7 @@ class EmployeeScheduleAssigner
         string $reason,
         ?User $actor = null,
         ?Closure $mutateEmployee = null,
+        bool $allowHistoricalProfile = false,
     ): EmployeeScheduleAssignment {
         $reason = $this->validateReason($reason);
         $from = CarbonImmutable::parse($effectiveFrom)->startOfDay();
@@ -65,8 +89,8 @@ class EmployeeScheduleAssigner
                 profileIds: [$profile->id],
                 assignmentIds: $this->assignmentIds($employee->id),
             ),
-            function (LockedPayrollContext $context) use ($employee, $profile, $from, $reason, $actor, $mutateEmployee): EmployeeScheduleAssignment {
-                $lockedProfile = $this->availableProfile($employee->company_id, $context->profile($profile->id));
+            function (LockedPayrollContext $context) use ($employee, $profile, $from, $reason, $actor, $mutateEmployee, $allowHistoricalProfile): EmployeeScheduleAssignment {
+                $lockedProfile = $this->lockedProfile($employee->company_id, $context->profile($profile->id), $from, $allowHistoricalProfile);
                 $lockedEmployee = $context->employee($employee->id);
 
                 return $this->storeAssignment(
@@ -79,6 +103,24 @@ class EmployeeScheduleAssigner
                     $mutateEmployee,
                 );
             },
+        );
+    }
+
+    public function assignLocked(
+        LockedPayrollContext $context,
+        Employee $employee,
+        WorkScheduleProfile $profile,
+        CarbonInterface|string $effectiveFrom,
+        string $reason,
+        ?User $actor = null,
+    ): EmployeeScheduleAssignment {
+        return $this->storeAssignment(
+            $context,
+            $employee,
+            $profile,
+            CarbonImmutable::parse($effectiveFrom)->startOfDay(),
+            $this->validateReason($reason),
+            $actor,
         );
     }
 
@@ -171,6 +213,25 @@ class EmployeeScheduleAssigner
         if (! $profile->is_active || $profile->retired_at !== null) {
             throw ValidationException::withMessages([
                 'schedule_profile_id' => 'La jornada seleccionada ya no está disponible.',
+            ]);
+        }
+
+        return $profile;
+    }
+
+    private function lockedProfile(
+        int $companyId,
+        WorkScheduleProfile $profile,
+        CarbonImmutable $from,
+        bool $allowHistoricalProfile,
+    ): WorkScheduleProfile {
+        if (! $allowHistoricalProfile) {
+            return $this->availableProfile($companyId, $profile);
+        }
+
+        if ($this->generalResolver->resolve($companyId, $from)->id !== $profile->id) {
+            throw ValidationException::withMessages([
+                'schedule_profile_id' => 'La jornada general vigente cambió durante la asignación.',
             ]);
         }
 

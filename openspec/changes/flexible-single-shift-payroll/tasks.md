@@ -9,6 +9,8 @@ Chained PRs recommended: Yes
 Chain strategy: feature-branch-chain
 400-line budget risk: High
 
+WU5 `size:exception`: maintainer-approved in Engram #2203 for 809 authored lines (9 over the 800-line limit); applies only to WU5 and preserves the reviewed WU5–WU10 chain. WU10 has a separate maintainer-approved `size:exception` in Engram #2269 for a final child diff of exactly 418 authored lines and applies only to WU10: its prior child scope was 396 lines, and the review-mandated 14-line soft-deleted-period correction plus policy-alignment metadata brought the exact total to 418; splitting that correction into WU11 was rejected to keep it atomic. All other work units retain their existing limits.
+
 ### Suggested Work Units
 
 | Slice/base/goal | Focused test command | Runtime harness | Rollback boundary |
@@ -28,8 +30,8 @@ Chain strategy: feature-branch-chain
 
 ## Phase 0: Delivery
 
-- [ ] 0.1 Preserve #165, duplicate check, draft/no-merge tracker #166, predecessor targets/diagrams/diffs, links, exactly `type:feature`, conventional commits/no attribution, and ~400/<800 limits.
-- [ ] 0.2 RED before each GREEN in `tests/Feature/Nomina/{RevisarTest,IndexTest}.php`,`tests/Feature/{Empleados/EmployeeScheduleAssignmentTest,Jornadas/WorkScheduleProfileRetirerTest}.php`: authorized same-tenant/current-fingerprint succeeds; foreign/unauthorized/stale/locked writes nothing. Shell/process/VCS/PR threats are N/A.
+- [x] 0.1 Preserve #165, duplicate check, draft/no-merge tracker #166, predecessor targets/diagrams/diffs, links, exactly `type:feature`, conventional commits/no attribution, and ~400/<800 limits.
+- [x] 0.2 RED before each GREEN in `tests/Feature/Nomina/{RevisarTest,IndexTest}.php`,`tests/Feature/{Empleados/EmployeeScheduleAssignmentTest,Jornadas/WorkScheduleProfileRetirerTest}.php`: authorized same-tenant/current-fingerprint succeeds; foreign/unauthorized/stale/locked writes nothing. Shell/process/VCS/PR threats are N/A.
 
 ## Phase 1: Immutable Policy Identity
 
@@ -47,18 +49,18 @@ Chain strategy: feature-branch-chain
 ## Phase 3: Processing and Activation
 
 - [x] 3.1 Cycle locker/processor/job plus `EmployeeScheduleAssignmentTest::lock_order`: PR5 makes assigner company→profile; forbids nested/inverted path; zero/multiple blocks; job-state transactions stay outside payroll.
-- [ ] 3.2 RED `RevisarTest::partial_overtime`: 17:30–18:30 partial preserves complements/bands.
-- [ ] 3.3 GREEN `database/migrations/2026_07_30_000003_add_partial_overtime_resolution.php`,`app/{Models/OvertimeDecision,Services/Attendance/{OvertimeDecisionRecorder,OvertimeDecisionBatchRequester},Livewire/Nomina/Revisar}.php`: immutable whole decisions; exact 17–18,18–19,17:30–18:30 partial/complements; batch-partial refusal; band conservation/supersession; V1 parity/V2 `23514`.
-- [ ] 3.4 RED `Jornadas/IndexTest::activation` + `EmployeeScheduleAssignmentTest::reassignment`: locked-unchanged;prospective exact-one.
-- [ ] 3.5 GREEN publisher/resolver/retirer/UI use PR5-migrated assigner: next-period activation; no-eligible/locked unchanged; hire-boundaries/history/exact-one/idempotency; `23503/23505/23P01` conflicts fail atomically.
+- [x] 3.2 RED `RevisarTest::partial_overtime`: 17:30–18:30 partial preserves complements/bands.
+- [x] 3.3 GREEN `database/migrations/2026_07_30_000003_add_partial_overtime_resolution.php`,`app/{Models/OvertimeDecision,Services/Attendance/{OvertimeDecisionRecorder,OvertimeDecisionBatchRequester},Livewire/Nomina/Revisar}.php`: immutable whole decisions; exact 17–18,18–19,17:30–18:30 partial/complements; batch-partial refusal; band conservation/supersession; V1 parity/V2 `23514`.
+- [x] 3.4 RED `Jornadas/IndexTest::activation` + `EmployeeScheduleAssignmentTest::reassignment`: locked-unchanged;prospective exact-one.
+- [x] 3.5 GREEN publisher/resolver/retirer/UI use PR5-migrated assigner: next-period activation; no-eligible/locked unchanged; hire-boundaries/history/exact-one/idempotency; `23503/23505/23P01` conflicts fail atomically.
 
 ## Phase 4: Snapshots and Reports
 
-- [ ] 4.1 RED `PayrollProcessorTest::immutable_snapshot`: retry reuses;reset/conflict never-rewrite.
-- [ ] 4.2 GREEN snapshot migration/writer/processor persist publication/key,`rules_version`,marks,decisions,rates,rejected-complement,transfer/variation audit; blocked writes nothing; identical retry reuses.
-- [ ] 4.3 Cycle `tests/Feature/Nomina/{ExcelStructureTest,ExportarExcelTest,IndexTest}.php`→`app/Services/Payroll/{PayrollReportingRowAdapter,PayrollExcelExporter,PayrollStubExporter}.php`: legacy null/blank+`LEGACY`,no-recalculation; all columns,employee/grand totals; integer-minute sums,including two one-minute rows.
+- [x] 4.1 RED `PayrollProcessorTest::immutable_snapshot`: retry reuses;reset/conflict never-rewrite.
+- [x] 4.2 GREEN snapshot migration/writer/processor persist publication/key,`rules_version`,marks,decisions,rates,rejected-complement,transfer/variation audit; blocked writes nothing; identical retry reuses.
+- [x] 4.3 Cycle `tests/Feature/Nomina/{ExcelStructureTest,ExportarExcelTest,IndexTest}.php`→`app/Services/Payroll/{PayrollReportingRowAdapter,PayrollExcelExporter,PayrollStubExporter}.php`: legacy null/blank+`LEGACY`,no-recalculation; all columns,employee/grand totals; integer-minute sums,including two one-minute rows.
 
 ## Phase 5: Documentation and Lifecycle
 
-- [ ] 5.1 Update `CONTEXT.md`,supersede `docs/adr/0001-resolve-payroll-by-assigned-shift.md`,add `docs/adr/0002-duration-first-payroll.md`; run canonical Pest/SQLite/PostgreSQL suites.
-- [ ] 5.2 Parent runs full 4R review; persist native transaction,findings/fixes/re-judgments,complete-content+HEAD receipt; validate pre-commit/push/PR. Planning/implementation/content/HEAD changes invalidate/full-renew; tracker stays no-merge.
+- [x] 5.1 Update `CONTEXT.md`,supersede `docs/adr/0001-resolve-payroll-by-assigned-shift.md`,add `docs/adr/0002-duration-first-payroll.md`; run canonical Pest/SQLite/PostgreSQL suites.
+- [ ] 5.2 Parent runs one native evidence-classified cumulative bounded review. The current neutral cumulative candidate is expected to select `reliability`; the contract defers to the native selected lens set rather than fabricating risk or claiming all four lenses. Issue #2387 is a future upstream enhancement, not a blocker. Task `5.2` remains unchecked until the cumulative receipt, fixes/follow-ups, final evidence, delivery gates, and SDD binding are complete. Planning/implementation/content/HEAD changes invalidate the receipt and require renewal. One-review-budget and receipt-validation semantics remain unchanged. The tracker stays no-merge.

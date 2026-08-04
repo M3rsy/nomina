@@ -164,6 +164,12 @@ class WorkScheduleProfileRetirer
         WorkScheduleProfile $source,
         WorkScheduleProfile $replacement,
     ): void {
+        if ($source->profile_key === 'general') {
+            throw ValidationException::withMessages([
+                'replacementProfileId' => 'La jornada general solo puede cambiar mediante una activación con fecha de vigencia.',
+            ]);
+        }
+
         if ($source->id === $replacement->id) {
             throw ValidationException::withMessages([
                 'replacementProfileId' => 'Elegí una jornada reemplazante distinta.',

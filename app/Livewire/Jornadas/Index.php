@@ -7,6 +7,7 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use App\Services\Attendance\WorkScheduleProfileRetirer;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,10 @@ class Index extends Component
     public bool $hasCompany = true;
 
     public bool $showSuccess = false;
+
+    public string $activationReason = '';
+
+    public ?string $activationEffectiveFrom = null;
 
     public bool $showHistoricalImpactWarning = false;
 
@@ -274,6 +279,32 @@ class Index extends Component
         $this->newProfileName = '';
         $this->showCreateProfile = false;
         $this->showSuccess = true;
+        $this->loadSchedules();
+    }
+
+    public function activateGeneralProfile(?string $reason = null): void
+    {
+        $this->authorize('create', WorkSchedule::class);
+        if ($reason !== null) {
+            $this->activationReason = $reason;
+        }
+        $company = current_company();
+        if ($company === null) {
+            throw ValidationException::withMessages(['activationReason' => 'Seleccioná una empresa para activar la jornada general.']);
+        }
+
+        $this->validate([
+            'activationReason' => ['required', 'string', 'max:500'],
+        ], ['activationReason.required' => 'Ingresá el motivo de la activación.']);
+
+        $publication = app(GeneralWorkSchedulePublisher::class)->activate(
+            $company,
+            auth()->user(),
+            $this->activationReason,
+        );
+        $this->selectedProfileId = $publication->profile_id;
+        $this->activationEffectiveFrom = $publication->effective_from->toDateString();
+        $this->activationReason = '';
         $this->loadSchedules();
     }
 

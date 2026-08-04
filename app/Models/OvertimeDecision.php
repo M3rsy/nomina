@@ -18,9 +18,16 @@ class OvertimeDecision extends Model
 
     public const REJECTED = 'rejected';
 
+    public const PARTIAL = 'partial';
+
+    public const WHOLE_APPROVE = 'whole_approve';
+
+    public const WHOLE_REJECT = 'whole_reject';
+
     public const UPDATED_AT = null;
 
     protected $fillable = [
+        'record_version',
         'company_id',
         'pay_period_id',
         'employee_id',
@@ -37,16 +44,43 @@ class OvertimeDecision extends Model
         'decided_by',
         'supersedes_id',
         'batch_item_id',
+        'resolution_kind',
+        'approved_starts_at',
+        'approved_ends_at',
+        'rejected_before_starts_at',
+        'rejected_before_ends_at',
+        'rejected_after_starts_at',
+        'rejected_after_ends_at',
+        'approved_minutes',
+        'rejected_minutes',
+        'rejected_before_minutes',
+        'rejected_after_minutes',
+        'approved_rate_minutes',
+        'rejected_rate_minutes',
+        'resolution_hash',
     ];
 
     protected function casts(): array
     {
         return [
+            'record_version' => 'integer',
             'work_date' => 'date',
             'starts_at' => 'immutable_datetime',
             'ends_at' => 'immutable_datetime',
             'minutes' => 'integer',
             'rate_minutes' => 'array',
+            'approved_starts_at' => 'immutable_datetime',
+            'approved_ends_at' => 'immutable_datetime',
+            'rejected_before_starts_at' => 'immutable_datetime',
+            'rejected_before_ends_at' => 'immutable_datetime',
+            'rejected_after_starts_at' => 'immutable_datetime',
+            'rejected_after_ends_at' => 'immutable_datetime',
+            'approved_minutes' => 'integer',
+            'rejected_minutes' => 'integer',
+            'rejected_before_minutes' => 'integer',
+            'rejected_after_minutes' => 'integer',
+            'approved_rate_minutes' => 'array',
+            'rejected_rate_minutes' => 'array',
             'created_at' => 'immutable_datetime',
         ];
     }

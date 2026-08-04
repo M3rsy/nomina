@@ -46,11 +46,19 @@ function payrollResultSqlState(Closure $operation): ?string
     return null;
 }
 
-function insertPayrollResult(Company $company, PayPeriod $period, Employee $employee, string $date = '2026-01-05'): void
-{
+function insertPayrollResult(
+    Company $company,
+    PayPeriod $period,
+    Employee $employee,
+    string $date = '2026-01-05',
+    int $generation = 1,
+    ?int $supersedesId = null,
+): void {
     DB::table('payroll_results')->insert([
         'company_id' => $company->id,
         'pay_period_id' => $period->id,
+        'result_generation' => $generation,
+        'supersedes_id' => $supersedesId,
         'employee_id' => $employee->id,
         'date' => $date,
     ]);
@@ -68,6 +76,28 @@ test('accepts a payroll result whose tenant references are coherent', function (
         'pay_period_id' => $period->id,
         'employee_id' => $employee->id,
     ])->exists())->toBeTrue();
+});
+
+test('rejects duplicate result generations and branching successors', function () {
+    DB::beginTransaction();
+    try {
+        $company = Company::factory()->create();
+        $period = PayPeriod::factory()->forCompany($company)->create();
+        $employee = Employee::factory()->forCompany($company)->create();
+        insertPayrollResult($company, $period, $employee);
+        $predecessorId = DB::table('payroll_results')->value('id');
+        insertPayrollResult($company, $period, $employee, generation: 2, supersedesId: $predecessorId);
+        $constraints = DB::table('pg_constraint')->whereIn('conname', [
+            'payroll_result_generation_unique', 'payroll_results_supersedes_id_unique',
+        ])->count();
+
+        expect($constraints)->toBe(2)
+            ->and(payrollResultSqlState(fn () => insertPayrollResult(
+                $company, $period, $employee, generation: 3, supersedesId: $predecessorId
+            )))->toBe('23505');
+    } finally {
+        DB::rollBack();
+    }
 });
 
 test('rejects a payroll result linked to a tenant reference from another company', function (string $foreignKey) {
@@ -89,7 +119,7 @@ test('rejects a payroll result linked to a tenant reference from another company
     'employee' => 'employee_id',
 ]);
 
-test('rejects changing a payroll result to a tenant reference from another company', function (string $foreignKey) {
+test('rejects changing any payroll result before tenant references can be rewritten', function (string $foreignKey) {
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
     $employee = Employee::factory()->forCompany($company)->create();
@@ -102,13 +132,25 @@ test('rejects changing a payroll result to a tenant reference from another compa
 
     expect(payrollResultSqlState(
         fn () => DB::table('payroll_results')->update([$foreignKey => $foreignId])
-    ))->toBe('23503')
+    ))->toBe('23514')
         ->and(DB::table('payroll_results')->value($foreignKey))
         ->toBe($foreignKey === 'pay_period_id' ? $period->id : $employee->id);
 })->with([
     'pay period' => 'pay_period_id',
     'employee' => 'employee_id',
 ]);
+
+test('rejects deleting a payroll result at the PostgreSQL boundary', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    insertPayrollResult($company, $period, $employee);
+
+    expect(payrollResultSqlState(
+        fn () => DB::table('payroll_results')->delete()
+    ))->toBe('23514')
+        ->and(DB::table('payroll_results')->count())->toBe(1);
+});
 
 test('aborts before changing the catalog when a historical tenant reference is inconsistent', function (string $foreignKey) {
     rollbackPayrollResultTenantInvariantsMigration();
