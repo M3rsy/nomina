@@ -2,6 +2,7 @@
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
@@ -127,13 +128,18 @@ test('a backdated schedule assignment is bounded by its neighboring assignments'
 test('an employee cannot receive a schedule profile from another company', function () {
     $employee = Employee::factory()->forCompany()->create();
     $foreignProfile = WorkScheduleProfile::factory()->forCompany()->create();
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshot = $foreignProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->assign(
         $employee,
         $foreignProfile,
         '2026-07-01',
         'Asignación inválida',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($foreignProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('a stale form cannot assign a retired schedule profile', function () {
@@ -143,13 +149,18 @@ test('a stale form cannot assign a retired schedule profile', function () {
         'is_active' => false,
         'retired_at' => now(),
     ]);
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshot = $retiredProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->assign(
         $employee,
         $retiredProfile,
         '2026-07-01',
         'Formulario abierto antes del retiro.',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($retiredProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('employee creation cannot use a stale retired schedule profile', function () {
@@ -159,13 +170,17 @@ test('employee creation cannot use a stale retired schedule profile', function (
         'retired_at' => now(),
     ]);
     $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+    $profileSnapshot = $retiredProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->createAndAssign(
         $attributes,
         $retiredProfile,
         '2026-07-01',
         'Formulario de alta abierto antes del retiro.',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(Employee::withoutCompanyScope()->count())->toBe(0)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($retiredProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('an assignment requires a reason and a unique effective date', function () {
@@ -190,16 +205,24 @@ test('an assignment cannot change dates covered by a locked payroll period', fun
     $assigner = app(EmployeeScheduleAssigner::class);
     $current = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
 
-    PayPeriod::factory()->forCompany($company)->create([
+    $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',
         'end_date' => '2026-07-27',
         'status' => $status,
     ]);
+    $assignmentSnapshot = $current->fresh()->getAttributes();
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshots = $profiles->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all();
+    $periodSnapshot = $period->fresh()->getAttributes();
 
     expect(fn () => $assigner->assign($employee, $profiles[1], '2026-07-15', 'Cambio retroactivo'))
         ->toThrow(ValidationException::class)
         ->and($current->fresh()->effective_to)->toBeNull()
-        ->and($employee->scheduleAssignments()->count())->toBe(1);
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(1)
+        ->and($current->fresh()->getAttributes())->toBe($assignmentSnapshot)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($profiles->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all())->toBe($profileSnapshots)
+        ->and($period->fresh()->getAttributes())->toBe($periodSnapshot);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
 test('an assignment may start after a locked payroll period', function () {
