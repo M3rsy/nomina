@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionRecorder;
@@ -103,6 +104,19 @@ if ($mode === 'barrier') {
                 User::query()->findOrFail($payload['user_id']),
             ]);
         $emit('succeeded', ['fingerprint' => $decision->fingerprint]);
+    } catch (Throwable $exception) {
+        $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
+    }
+} elseif ($mode === 'general-profile-activate') {
+    $await('start');
+    try {
+        $publication = app(GeneralWorkSchedulePublisher::class)->activate(
+            Company::query()->findOrFail($payload['company_id']),
+            User::query()->findOrFail($payload['user_id']),
+            'Concurrent equivalent activation',
+            $payload['requested_at'],
+        );
+        $emit('succeeded', ['publication_id' => $publication->id]);
     } catch (Throwable $exception) {
         $emit('failed', ['exception' => $exception::class, 'message' => $exception->getMessage()]);
     }

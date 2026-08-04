@@ -139,8 +139,11 @@ class PayrollShiftEvaluator
             }
 
             if ($decision->decision === OvertimeDecision::APPROVED) {
-                $payableRates = $payableRates->plus($candidate->rateMinutes);
-                $approvedMinutes += $candidate->minutes;
+                $approvedRates = (int) ($decision->record_version ?? 1) === 2
+                    ? $this->bandSplit($decision->approved_rate_minutes)
+                    : $candidate->rateMinutes;
+                $payableRates = $payableRates->plus($approvedRates);
+                $approvedMinutes += (int) ($decision->approved_minutes ?? $candidate->minutes);
             }
         }
 
@@ -183,19 +186,46 @@ class PayrollShiftEvaluator
 
     private function matches(?OvertimeDecision $decision, AttendanceSegment $candidate): bool
     {
-        return $decision !== null
+        $candidateRates = [
+            'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
+            'extra25' => $candidate->rateMinutes->extra25Minutes,
+            'extra50' => $candidate->rateMinutes->extra50Minutes,
+            'extra75' => $candidate->rateMinutes->extra75Minutes,
+            'extra100' => $candidate->rateMinutes->extra100Minutes,
+        ];
+        $matchesCandidate = $decision !== null
             && $decision->fingerprint === $candidate->fingerprint
             && $decision->minutes === $candidate->minutes
             && $decision->starts_at?->equalTo($candidate->start)
             && $decision->ends_at?->equalTo($candidate->end)
             && in_array($decision->decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)
-            && $decision->rate_minutes === [
-                'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
-                'extra25' => $candidate->rateMinutes->extra25Minutes,
-                'extra50' => $candidate->rateMinutes->extra50Minutes,
-                'extra75' => $candidate->rateMinutes->extra75Minutes,
-                'extra100' => $candidate->rateMinutes->extra100Minutes,
-            ];
+            && $decision->rate_minutes === $candidateRates;
+        if (! $matchesCandidate || (int) ($decision->record_version ?? 1) === 1) {
+            return $matchesCandidate;
+        }
+
+        $approved = $this->bandSplit($decision->approved_rate_minutes);
+        $rejected = $this->bandSplit($decision->rejected_rate_minutes);
+
+        return in_array($decision->resolution_kind, [
+            OvertimeDecision::WHOLE_APPROVE, OvertimeDecision::WHOLE_REJECT, OvertimeDecision::PARTIAL,
+        ], true)
+            && is_string($decision->resolution_hash) && strlen($decision->resolution_hash) === 64
+            && $approved->totalMinutes() === $decision->approved_minutes
+            && $rejected->totalMinutes() === $decision->rejected_minutes
+            && $decision->approved_minutes + $decision->rejected_minutes === $candidate->minutes
+            && $approved->plus($rejected) == $candidate->rateMinutes;
+    }
+
+    private function bandSplit(?array $rates): BandSplit
+    {
+        return new BandSplit(
+            ordinaryMinutes: (int) ($rates['ordinary'] ?? -1),
+            extra25Minutes: (int) ($rates['extra25'] ?? -1),
+            extra50Minutes: (int) ($rates['extra50'] ?? -1),
+            extra75Minutes: (int) ($rates['extra75'] ?? -1),
+            extra100Minutes: (int) ($rates['extra100'] ?? -1),
+        );
     }
 
     private function matchesException(?AttendanceException $exception, AttendanceSegment $deficit): bool

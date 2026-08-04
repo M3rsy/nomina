@@ -152,6 +152,8 @@ test('company admin can create a draft period for own company and continue to up
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
+    expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
+
     $component = Livewire::test(Index::class)
         ->set('name', 'Primera quincena de agosto')
         ->set('start_date', '2026-08-01')
@@ -161,7 +163,8 @@ test('company admin can create a draft period for own company and continue to up
 
     $payPeriod = PayPeriod::withoutCompanyScope()->sole();
 
-    expect($payPeriod->company_id)->toBe($company->id)
+    expect(PayPeriod::withoutCompanyScope()->count())->toBe(1)
+        ->and($payPeriod->company_id)->toBe($company->id)
         ->and($payPeriod->slug)->toBe('primera-quincena-de-agosto')
         ->and($payPeriod->name)->toBe('Primera quincena de agosto')
         ->and($payPeriod->start_date->toDateString())->toBe('2026-08-01')
@@ -190,7 +193,9 @@ test('super admin creates a period only for the selected active company', functi
 
     $payPeriod = PayPeriod::withoutCompanyScope()->sole();
 
-    expect($payPeriod->company_id)->toBe($activeCompany->id)
+    expect(PayPeriod::withoutCompanyScope()->where('company_id', $activeCompany->id)->count())->toBe(1)
+        ->and(PayPeriod::withoutCompanyScope()->where('company_id', $otherCompany->id)->count())->toBe(0)
+        ->and($payPeriod->company_id)->toBe($activeCompany->id)
         ->and($payPeriod->company_id)->not->toBe($otherCompany->id)
         ->and($payPeriod->status)->toBe('draft');
 });
@@ -280,10 +285,11 @@ test('period creation rejects dates that overlap another company period', functi
 
 test('period creation reports a same-company slug collision without adding a row', function () {
     $company = Company::factory()->create();
-    PayPeriod::factory()->forCompany($company)->create([
+    $existing = PayPeriod::factory()->forCompany($company)->create([
         'slug' => 'primera-quincena-de-agosto',
     ]);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $periodSnapshot = $existing->fresh()->getAttributes();
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
@@ -295,7 +301,8 @@ test('period creation reports a same-company slug collision without adding a row
         ->call('store')
         ->assertHasErrors('name');
 
-    expect(PayPeriod::withoutCompanyScope()->count())->toBe(1);
+    expect(PayPeriod::withoutCompanyScope()->count())->toBe(1)
+        ->and($existing->fresh()->getAttributes())->toBe($periodSnapshot);
 });
 
 test('manual period creation validates its input contract', function (array $values, string $field, string $rule, string $message) {

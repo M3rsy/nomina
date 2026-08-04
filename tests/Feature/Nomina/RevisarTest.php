@@ -5,6 +5,7 @@ use App\Models\AttendanceException;
 use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
@@ -234,6 +235,8 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
     $before = $resolver->resolve($payPeriod, $employee, '2026-07-20');
     $variation = $resolver->review($payPeriod, $employee, '2026-07-20')->analysis->variations->sole();
 
+    expect(AttendanceVariationAcknowledgement::withoutCompanyScope()->count())->toBe(0);
+
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->assertSee('Variación de entrada')
         ->assertSee('480 min ordinarios; no cambia el pago')
@@ -249,12 +252,89 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
     $acknowledgement = DB::table('attendance_variation_acknowledgements')->sole();
     $after = $resolver->resolve($payPeriod, $employee, '2026-07-20');
 
-    expect($acknowledgement->acknowledged_by)->toBe($admin->id)
+    expect(AttendanceVariationAcknowledgement::withoutCompanyScope()->count())->toBe(1)
+        ->and($acknowledgement->acknowledged_by)->toBe($admin->id)
         ->and($acknowledgement->reason)->toBe('Reviewed with employee')
         ->and($after->payableRates)->toEqual($before->payableRates)
         ->and(fn () => AttendanceVariationAcknowledgement::findOrFail($acknowledgement->id)
             ->update(['reason' => 'Changed']))->toThrow(LogicException::class);
 });
+
+test('variation acknowledgement writes nothing for foreign unauthorized stale or locked requests', function (string $threat) {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-20',
+        'status' => 'uploaded',
+    ]);
+    foreach (['2026-07-20 07:00:00', '2026-07-20 15:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+            'event_at' => $eventAt,
+            'status' => 'valid',
+        ]);
+    }
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+        'payroll_policy_key' => 'duration-first-v2',
+        'published_by' => $admin->id,
+    ]);
+    $variation = app(PayrollShiftEvaluationResolver::class)
+        ->review($period, $employee, '2026-07-20')->analysis->variations->sole();
+
+    if ($threat === 'foreign') {
+        $foreignCompany = Company::factory()->create();
+        $actor = User::factory()->forCompany($foreignCompany)->create()->assignRole('company_admin');
+        app(CurrentCompany::class)->set($foreignCompany);
+    } elseif ($threat === 'unauthorized') {
+        $actor = User::factory()->forCompany($company)->create();
+        $actor->givePermissionTo('pay_periods.view');
+        app(CurrentCompany::class)->set($company);
+    } else {
+        $actor = $admin;
+        app(CurrentCompany::class)->set($company);
+    }
+    if ($threat === 'locked') {
+        $period->update(['status' => 'processed']);
+    }
+
+    $rawMarkSnapshot = RawMark::withoutCompanyScope()->orderBy('id')->get()
+        ->map(fn (RawMark $mark): array => $mark->getAttributes())->all();
+    $periodSnapshot = $period->fresh()->getAttributes();
+    $this->actingAs($actor);
+
+    if (in_array($threat, ['foreign', 'unauthorized'], true)) {
+        Livewire::test(Revisar::class, ['payPeriod' => $period])->assertForbidden();
+    } else {
+        $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
+            ->set('variationReason', 'Threat matrix attempt')
+            ->call(
+                'acknowledgeVariation',
+                $employee->id,
+                '2026-07-20',
+                $variation->key,
+                $threat === 'stale' ? str_repeat('0', 64) : $variation->fingerprint,
+            );
+
+        if ($threat === 'stale') {
+            $component->assertHasErrors(['variation_key']);
+        } else {
+            $component->assertHasNoErrors();
+        }
+    }
+
+    expect(AttendanceVariationAcknowledgement::withoutCompanyScope()->count())->toBe(0)
+        ->and(RawMark::withoutCompanyScope()->orderBy('id')->get()
+            ->map(fn (RawMark $mark): array => $mark->getAttributes())->all())->toBe($rawMarkSnapshot)
+        ->and($period->fresh()->getAttributes())->toBe($periodSnapshot);
+})->with(['foreign', 'unauthorized', 'stale', 'locked']);
 
 test('daily shortfall stays pending until the complete audited deficit is granted or rejected', function () {
     $company = Company::factory()->create();
@@ -388,4 +468,70 @@ test('daily shortfall stays pending until the complete audited deficit is grante
         ->and($currentException->decision)->toBe(AttendanceException::REJECTED)
         ->and($currentException->supersedes_id)->toBe($exceptions[2]->id)
         ->and(AttendanceException::query()->count())->toBe(4);
+});
+
+test('partial overtime approval preserves exact rejected complements and payable bands', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-20',
+        'status' => 'uploaded',
+    ]);
+    foreach (['2026-07-20 09:00:00', '2026-07-20 19:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+            'event_at' => $eventAt,
+            'status' => 'valid',
+        ]);
+    }
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+        'payroll_policy_key' => 'duration-first-v2',
+        'published_by' => $admin->id,
+    ]);
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($admin);
+    $resolver = app(PayrollShiftEvaluationResolver::class);
+    $candidate = $resolver->review($period, $employee, '2026-07-20')->analysis->overtimeCandidates->sole();
+
+    Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('openOvertimeDecision', $employee->id, '2026-07-20', $candidate->key, 'partial')
+        ->assertSet('showOvertimeDecisionModal', true)
+        ->assertSee('Aprobar tramo parcial')
+        ->set('overtimeApprovedStartsAt', '2026-07-20T17:30')
+        ->set('overtimeApprovedEndsAt', '2026-07-20T18:30')
+        ->set('overtimeDecisionReason', 'Approved exact worked interval')
+        ->call('saveOvertimeDecision')
+        ->assertHasNoErrors()
+        ->assertSee('Tramo parcial aprobado');
+
+    $decision = OvertimeDecision::withoutCompanyScope()->sole();
+    $evaluation = $resolver->resolve($period, $employee, '2026-07-20');
+
+    expect($candidate->start->toDateTimeString())->toBe('2026-07-20 17:00:00')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 19:00:00')
+        ->and($decision->record_version)->toBe(2)
+        ->and($decision->resolution_kind)->toBe('partial')
+        ->and($decision->approved_minutes)->toBe(60)
+        ->and($decision->rejected_before_minutes)->toBe(30)
+        ->and($decision->rejected_after_minutes)->toBe(30)
+        ->and($decision->approved_rate_minutes)->toBe([
+            'ordinary' => 0, 'extra25' => 30, 'extra50' => 30, 'extra75' => 0, 'extra100' => 0,
+        ])
+        ->and($decision->rejected_rate_minutes)->toBe([
+            'ordinary' => 0, 'extra25' => 30, 'extra50' => 30, 'extra75' => 0, 'extra100' => 0,
+        ])
+        ->and($evaluation->status)->toBe('processable')
+        ->and($evaluation->recognizedMinutes)->toBe(540)
+        ->and($evaluation->approvedOvertimeMinutes)->toBe(60)
+        ->and($evaluation->payableRates->extra25Minutes)->toBe(30)
+        ->and($evaluation->payableRates->extra50Minutes)->toBe(30)
+        ->and($evaluation->blockers)->toBeEmpty();
 });

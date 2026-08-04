@@ -88,7 +88,8 @@ final readonly class PayrollPeriodSnapshotData
             ->where('company_id', $period->company_id)
             ->where('pay_period_id', $period->id)
             ->whereIn('employee_id', $employeeIds)
-            ->whereBetween('work_date', [$period->start_date->toDateString(), $period->end_date->toDateString()])
+            ->whereDate('work_date', '>=', $period->start_date->toDateString())
+            ->whereDate('work_date', '<=', $period->end_date->toDateString())
             ->with('acknowledger')
             ->get();
 

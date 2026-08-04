@@ -20,6 +20,8 @@ class PayrollResultFactory extends Factory
         return [
             'company_id' => Company::factory(),
             'pay_period_id' => fn (array $attributes) => PayPeriod::factory()->forCompany(Company::find($attributes['company_id'])),
+            'result_generation' => 1,
+            'supersedes_id' => null,
             'employee_id' => fn (array $attributes) => Employee::factory()->forCompany(Company::find($attributes['company_id'])),
             'date' => fake()->date(),
             'entry_at' => null,
@@ -57,6 +59,8 @@ class PayrollResultFactory extends Factory
             'unjustified' => false,
             'notes' => fake()->optional()->sentence(),
             'rules_version' => '1',
+            'day_snapshot' => null,
+            'snapshot_hash' => null,
             'metadata' => null,
         ];
     }
