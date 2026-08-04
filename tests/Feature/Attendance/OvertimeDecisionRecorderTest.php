@@ -22,6 +22,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
@@ -42,6 +43,8 @@ test('approves exactly the server-calculated candidate in integer minutes', func
     );
 
     expect($decision->segment_kind)->toBe('post_shift')
+        ->and($decision->record_version)->toBe(1)
+        ->and($decision->resolution_kind)->toBeNull()
         ->and($decision->starts_at->toDateTimeString())->toBe('2026-07-20 14:00:00')
         ->and($decision->ends_at->toDateTimeString())->toBe('2026-07-20 14:30:00')
         ->and($decision->minutes)->toBe(30)
@@ -100,6 +103,53 @@ test('changes a decision by appending a superseding audit record', function () {
     expect($rejected->supersedes_id)->toBe($approved->id)
         ->and($approved->fresh()->decision)->toBe(OvertimeDecision::APPROVED)
         ->and(OvertimeDecision::current()->sole()->is($rejected))->toBeTrue()
+        ->and(OvertimeDecision::query()->count())->toBe(2);
+});
+
+test('approves one exact V2 overtime subinterval and conserves every payable band', function (
+    string $approvedStart, string $approvedEnd, array $approvedRates, int $before, int $after,
+) {
+    $context = overtimeDecisionFixture('2026-07-20 19:00:00', durationFirst: true, entryAt: '2026-07-20 09:00:00');
+
+    $decision = app(OvertimeDecisionRecorder::class)->approvePartial(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        "2026-07-20 {$approvedStart}:00", "2026-07-20 {$approvedEnd}:00",
+        'Approved exact payable interval', $context['actor'],
+    );
+    $evaluation = app(PayrollShiftEvaluationResolver::class)
+        ->resolve($context['period'], $context['employee'], '2026-07-20');
+
+    expect($decision->approved_rate_minutes)->toBe($approvedRates)
+        ->and($decision->approved_minutes)->toBe(60)
+        ->and($decision->rejected_before_minutes)->toBe($before)
+        ->and($decision->rejected_after_minutes)->toBe($after)
+        ->and($decision->approved_minutes + $decision->rejected_minutes)->toBe(120)
+        ->and(array_map(fn (string $band) => $decision->approved_rate_minutes[$band] + $decision->rejected_rate_minutes[$band], array_keys($approvedRates)))
+        ->toBe([0, 60, 60, 0, 0])
+        ->and($evaluation->approvedOvertimeMinutes)->toBe(60)
+        ->and($evaluation->payableRates->extra25Minutes)->toBe($approvedRates['extra25'])
+        ->and($evaluation->payableRates->extra50Minutes)->toBe($approvedRates['extra50']);
+})->with([
+    '17:00-18:00' => ['17:00', '18:00', ['ordinary' => 0, 'extra25' => 60, 'extra50' => 0, 'extra75' => 0, 'extra100' => 0], 0, 60],
+    '18:00-19:00' => ['18:00', '19:00', ['ordinary' => 0, 'extra25' => 0, 'extra50' => 60, 'extra75' => 0, 'extra100' => 0], 60, 0],
+    '17:30-18:30' => ['17:30', '18:30', ['ordinary' => 0, 'extra25' => 30, 'extra50' => 30, 'extra75' => 0, 'extra100' => 0], 30, 30],
+]);
+
+test('supersedes a V2 partial resolution without mutating its audit history', function () {
+    $context = overtimeDecisionFixture('2026-07-20 19:00:00', durationFirst: true, entryAt: '2026-07-20 09:00:00');
+    $recorder = app(OvertimeDecisionRecorder::class);
+    $first = $recorder->approvePartial(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        '2026-07-20 17:00:00', '2026-07-20 18:00:00', 'Initial interval', $context['actor'],
+    );
+    $current = $recorder->approvePartial(
+        $context['period'], $context['employee'], '2026-07-20', $context['candidate_key'],
+        '2026-07-20 18:00:00', '2026-07-20 19:00:00', 'Corrected interval', $context['actor'],
+    );
+
+    expect($current->supersedes_id)->toBe($first->id)
+        ->and($first->fresh()->approved_rate_minutes['extra25'])->toBe(60)
+        ->and(OvertimeDecision::current()->sole()->is($current))->toBeTrue()
         ->and(OvertimeDecision::query()->count())->toBe(2);
 });
 
@@ -311,8 +361,12 @@ test('rejects a duplicate decision that would not change candidate state', funct
         ->and(OvertimeDecision::query()->count())->toBe(1);
 });
 
-function overtimeDecisionFixture(string $exitAt = '2026-07-20 14:30:00', string $periodStatus = 'uploaded'): array
-{
+function overtimeDecisionFixture(
+    string $exitAt = '2026-07-20 14:30:00',
+    string $periodStatus = 'uploaded',
+    bool $durationFirst = false,
+    string $entryAt = '2026-07-20 06:00:00',
+): array {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
     WorkSchedule::factory()->forProfile($profile)->create([
@@ -330,7 +384,7 @@ function overtimeDecisionFixture(string $exitAt = '2026-07-20 14:30:00', string 
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
 
-    $marks = collect(['2026-07-20 06:00:00', $exitAt])->map(
+    $marks = collect([$entryAt, $exitAt])->map(
         fn (string $eventAt) => RawMark::factory()->forCompany($company)->forPayPeriod($period)
             ->forUploadedFile($file)->forEmployee($employee)->create([
                 'event_at' => $eventAt,
@@ -339,6 +393,11 @@ function overtimeDecisionFixture(string $exitAt = '2026-07-20 14:30:00', string 
     );
 
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    if ($durationFirst) {
+        DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+            'payroll_policy_key' => 'duration-first-v2', 'published_by' => $actor->id,
+        ]);
+    }
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
     $holiday = app(PayrollRules::class)->isHoliday($company, $occurrence->workDate);
     $candidate = app(AttendanceShiftAnalyzer::class)

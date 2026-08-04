@@ -3,6 +3,7 @@
 namespace App\Services\Attendance;
 
 use App\Models\AttendanceException;
+use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
@@ -78,7 +79,15 @@ class PayrollShiftEvaluationResolver
                 ->current()
                 ->with('decider')
                 ->get();
+        $variationAcknowledgements = $snapshot?->variationAcknowledgements($employee, $date)
+            ?? AttendanceVariationAcknowledgement::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->where('pay_period_id', $payPeriod->id)
+                ->where('employee_id', $employee->id)
+                ->whereDate('work_date', $date->toDateString())
+                ->with('acknowledger')
+                ->get();
 
-        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions, $exceptions);
+        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions, $exceptions, $variationAcknowledgements);
     }
 }

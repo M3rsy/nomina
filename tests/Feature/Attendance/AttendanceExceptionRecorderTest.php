@@ -18,6 +18,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\PayrollRules;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
@@ -98,6 +99,72 @@ test('records a deficit from the current holiday calendar generation', function 
     );
 
     expect($exception->fingerprint)->toBe($deficit->fingerprint);
+});
+
+test('rejects one complete non-interval V2 shortfall and refuses to revoke the rejection', function () {
+    $context = attendanceExceptionRecorderFixture(durationFirst: true);
+    $recorder = app(AttendanceExceptionRecorder::class);
+
+    $rejected = $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::REJECTED, 'Daily shortfall remains unpaid', $context['actor'],
+    );
+
+    expect($rejected->record_version)->toBe(2)
+        ->and($rejected->segment_kind)->toBe('daily_shortfall')
+        ->and($rejected->starts_at)->toBeNull()
+        ->and($rejected->ends_at)->toBeNull()
+        ->and($rejected->minutes)->toBe(15)
+        ->and($rejected->rate_minutes['ordinary'])->toBe(15)
+        ->and($rejected->fingerprint)->toHaveLength(64)
+        ->and($rejected->reason)->toBe('Daily shortfall remains unpaid')
+        ->and($rejected->decided_by)->toBe($context['actor']->id)
+        ->and($rejected->created_at)->not->toBeNull()
+        ->and($rejected->supersedes_id)->toBeNull()
+        ->and(fn () => $recorder->decide(
+            $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+            AttendanceException::REVOKED, 'Invalid rejection revocation', $context['actor'],
+        ))->toThrow(ValidationException::class)
+        ->and(AttendanceException::query()->count())->toBe(1);
+});
+
+test('reopens a revoked daily shortfall with one new effective decision', function () {
+    $context = attendanceExceptionRecorderFixture(durationFirst: true);
+    $recorder = app(AttendanceExceptionRecorder::class);
+
+    $granted = $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::GRANTED, 'Daily shortfall authorized', $context['actor'],
+    );
+    $revoked = $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::REVOKED, 'Authorization revoked', $context['actor'],
+    );
+    $rejected = $recorder->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::REJECTED, 'Shortfall remains unpaid', $context['actor'],
+    );
+
+    expect(AttendanceException::query()->orderBy('id')->pluck('decision')->all())
+        ->toBe(['granted', 'revoked', 'rejected'])
+        ->and($revoked->supersedes_id)->toBe($granted->id)
+        ->and($rejected->supersedes_id)->toBe($revoked->id)
+        ->and(AttendanceException::current()->sole()->is($rejected))->toBeTrue()
+        ->and(fn () => $recorder->decide(
+            $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+            AttendanceException::GRANTED, 'Duplicate effective decision', $context['actor'],
+        ))->toThrow(ValidationException::class)
+        ->and(AttendanceException::query()->count())->toBe(3);
+});
+
+test('refuses rejection for a legacy interval deficit without appending a decision', function () {
+    $context = attendanceExceptionRecorderFixture();
+
+    expect(fn () => app(AttendanceExceptionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $context['deficit_key'],
+        AttendanceException::REJECTED, 'Legacy interval must preserve V1 behavior', $context['actor'],
+    ))->toThrow(ValidationException::class)
+        ->and(AttendanceException::query()->count())->toBe(0);
 });
 
 test('grants and revokes an exact full-day no-mark deficit', function () {
@@ -198,10 +265,15 @@ test('blocks exceptions while the payroll period is locked', function (string $s
         ->and(AttendanceException::query()->count())->toBe(0);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
-function attendanceExceptionRecorderFixture(string $periodStatus = 'uploaded', bool $withMarks = true): array
-{
+function attendanceExceptionRecorderFixture(
+    string $periodStatus = 'uploaded',
+    bool $withMarks = true,
+    bool $durationFirst = false,
+): array {
     $company = Company::factory()->create();
-    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => $durationFirst ? 'general' : 'default',
+    ]);
     WorkSchedule::factory()->forProfile($profile)->create([
         'day_of_week' => 1,
         'start_time' => '06:00',
@@ -226,6 +298,12 @@ function attendanceExceptionRecorderFixture(string $periodStatus = 'uploaded', b
         )
         : collect();
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    if ($durationFirst) {
+        DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+            'payroll_policy_key' => 'duration-first-v2',
+            'published_by' => $actor->id,
+        ]);
+    }
     $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
     $holiday = app(PayrollRules::class)->isHoliday($company, $occurrence->workDate);
     $deficit = app(AttendanceShiftAnalyzer::class)->analyze($occurrence, $holiday)->deficits->sole();

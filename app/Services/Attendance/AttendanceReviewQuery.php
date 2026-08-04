@@ -18,6 +18,7 @@ class AttendanceReviewQuery
         return ($snapshot ?? $this->snapshots->forPeriod($payPeriod))['reviews']
             ->filter(fn (PayrollShiftReview $review): bool => $review->analysis->overtimeCandidates->isNotEmpty()
                 || $review->analysis->deficits->isNotEmpty()
+                || $review->analysis->variations->isNotEmpty()
             )
             ->when(
                 $uploadedFileId !== null,

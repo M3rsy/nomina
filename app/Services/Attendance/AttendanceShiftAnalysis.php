@@ -31,5 +31,7 @@ readonly class AttendanceShiftAnalysis
         public bool $isHoliday = false,
         public ?int $publicationId = null,
         public ?string $payrollPolicyKey = null,
+        public Collection $variations = new Collection,
+        public int $excludedTransferMinutes = 0,
     ) {}
 }

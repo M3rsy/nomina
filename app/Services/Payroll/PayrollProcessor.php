@@ -2,15 +2,18 @@
 
 namespace App\Services\Payroll;
 
-use App\Models\Company;
 use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
 use App\Models\PayPeriod;
-use App\Models\PayrollResult;
-use App\Services\Attendance\HolidayCalendar;
+use App\Models\RawMark;
+use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
+use App\Services\Attendance\PayrollPeriodSnapshotData;
 use App\Services\Attendance\PayrollShiftEvaluation;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use App\Services\Attendance\PayrollShiftEvaluator;
+use App\Services\Attendance\PayrollShiftReview;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class PayrollProcessor
@@ -18,87 +21,153 @@ class PayrollProcessor
     public function __construct(
         private PayrollShiftEvaluationResolver $evaluationResolver,
         private PayPeriodRangeGuard $rangeGuard,
-        private HolidayCalendar $holidayCalendar,
+        private PayrollContextLocker $contextLocker,
+        private PayrollDaySnapshotWriter $snapshotWriter,
+        private PayrollShiftEvaluator $shiftEvaluator,
     ) {}
 
     public function processPayPeriod(PayPeriod $payPeriod): PayrollProcessReport
     {
-        $report = new PayrollProcessReport;
+        $report = $this->contextLocker->within(
+            $payPeriod->company_id,
+            fn (): PayrollContextTargets => $this->targets($payPeriod),
+            function (LockedPayrollContext $context) use ($payPeriod): PayrollProcessReport {
+                $report = new PayrollProcessReport;
+                $payPeriod = $context->payPeriod($payPeriod->id);
+                $payPeriod->setRelation('company', $context->company);
 
-        DB::transaction(function () use ($payPeriod, &$report) {
-            $company = Company::query()
-                ->whereKey($payPeriod->company_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $payPeriod = PayPeriod::withoutCompanyScope()
-                ->whereKey($payPeriod->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $payPeriod->setRelation('company', $company);
-
-            if ($payPeriod->status !== 'ready') {
-                throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
-            }
-
-            $this->rangeGuard->assertAvailable(
-                $payPeriod->company_id,
-                $payPeriod->start_date,
-                $payPeriod->end_date,
-                $payPeriod->id,
-            );
-
-            $payPeriod->status = 'processing';
-            $payPeriod->save();
-
-            $companyId = $payPeriod->company_id;
-            $start = CarbonImmutable::parse($payPeriod->start_date);
-            $end = CarbonImmutable::parse($payPeriod->end_date);
-            $calendarContext = $this->holidayCalendar->capture($company, $start, $end);
-
-            $employees = Employee::withoutCompanyScope()
-                ->where('company_id', $companyId)
-                ->get();
-
-            $rulesVersion = config('payroll.rules_version', '1');
-
-            for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
-                foreach ($employees as $employee) {
-                    $result = $this->evaluationResolver->resolve($payPeriod, $employee, $date, $calendarContext);
-
-                    if ($result->status === PayrollShiftEvaluation::BLOCKED) {
-                        throw new PayrollProcessingBlocked([[
-                            'employee_id' => $employee->id,
-                            'work_date' => $date->toDateString(),
-                            'blockers' => $result->blockers->all(),
-                        ]]);
-                    }
-
-                    if ($this->shouldSkip($result)) {
-                        continue;
-                    }
-
-                    $this->storeResult(
-                        $payPeriod,
-                        $employee,
-                        $date,
-                        $result,
-                        $calendarContext->generation($date),
-                        $rulesVersion,
-                        $report,
-                    );
-                    $report->daysProcessed++;
+                if ($payPeriod->status !== 'ready') {
+                    throw new InvalidArgumentException('PayPeriod must be in ready state to process.');
                 }
-            }
 
-            $report->employeesProcessed = $employees->count();
+                $this->rangeGuard->assertAvailableLocked(
+                    $context,
+                    $payPeriod->start_date,
+                    $payPeriod->end_date,
+                    $payPeriod->id,
+                );
 
-            $payPeriod->status = 'processed';
-            $payPeriod->save();
-        });
+                $payPeriod->status = 'processing';
+                $payPeriod->save();
+
+                $start = CarbonImmutable::parse($payPeriod->start_date);
+                $end = CarbonImmutable::parse($payPeriod->end_date);
+                $calendarContext = $context->holidayCalendar
+                    ?? throw new InvalidArgumentException('Payroll context must include a holiday calendar.');
+                $employees = $context->employees;
+                $snapshot = PayrollPeriodSnapshotData::capture($payPeriod, $employees);
+
+                $rulesVersion = config('payroll.rules_version', '1');
+                $resultGeneration = $payPeriod->authorized_result_generation ?? $payPeriod->current_result_generation;
+
+                for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
+                    foreach ($employees as $employee) {
+                        $review = $this->evaluationResolver->review($payPeriod, $employee, $date, $calendarContext, $snapshot);
+                        $result = $this->shiftEvaluator->evaluate(
+                            $review->occurrence,
+                            $review->analysis,
+                            $review->currentDecisions,
+                            $review->currentExceptions,
+                        );
+
+                        if ($result->status === PayrollShiftEvaluation::BLOCKED) {
+                            throw new PayrollProcessingBlocked([[
+                                'employee_id' => $employee->id,
+                                'work_date' => $date->toDateString(),
+                                'blockers' => $result->blockers->all(),
+                            ]]);
+                        }
+
+                        if ($this->shouldSkip($result)) {
+                            continue;
+                        }
+
+                        $this->storeResult(
+                            $payPeriod,
+                            $employee,
+                            $date,
+                            $review,
+                            $result,
+                            $calendarContext->generation($date),
+                            $rulesVersion,
+                            $resultGeneration,
+                            $report,
+                        );
+                        $report->daysProcessed++;
+                    }
+                }
+
+                $report->employeesProcessed = $employees->count();
+
+                $payPeriod->status = 'processed';
+                $payPeriod->current_result_generation = $resultGeneration;
+                $payPeriod->authorized_result_generation = null;
+                $payPeriod->save();
+
+                return $report;
+            },
+        );
 
         $payPeriod->refresh();
 
         return $report;
+    }
+
+    private function targets(PayPeriod $requestedPeriod): PayrollContextTargets
+    {
+        $period = PayPeriod::withoutCompanyScope()->withTrashed()
+            ->where('company_id', $requestedPeriod->company_id)
+            ->findOrFail($requestedPeriod->id);
+        $start = CarbonImmutable::parse($period->start_date)->subDays(2);
+        $end = CarbonImmutable::parse($period->end_date)->addDays(2);
+        $employeeIds = Employee::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->pluck('id');
+        $assignments = EmployeeScheduleAssignment::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('employee_id', $employeeIds)
+            ->whereDate('effective_from', '<=', $end)
+            ->where(fn ($query) => $query->whereNull('effective_to')->orWhereDate('effective_to', '>=', $start))
+            ->get();
+        $profileIds = $assignments->pluck('work_schedule_profile_id')->unique();
+        $existingProfileIds = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('id', $profileIds)
+            ->pluck('id');
+
+        if ($existingProfileIds->count() !== $profileIds->count()) {
+            throw new PayrollProcessingBlocked([[
+                'employee_id' => (int) $assignments->first()?->employee_id,
+                'work_date' => $period->start_date->toDateString(),
+                'blockers' => [['code' => 'missing_profile']],
+            ]]);
+        }
+
+        $publicationIds = WorkScheduleProfilePublication::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('profile_id', $profileIds)
+            ->whereDate('effective_from', '<=', $end)
+            ->where(fn ($query) => $query->whereNull('effective_to')->orWhereDate('effective_to', '>', $start))
+            ->pluck('id');
+        $rawMarkIds = RawMark::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('employee_id', $employeeIds)
+            ->whereIn('status', ['valid', 'corrected'])
+            ->where('event_at', '>=', $start->startOfDay())
+            ->where('event_at', '<', $end->addDay()->startOfDay())
+            ->pluck('id');
+
+        return new PayrollContextTargets(
+            payPeriodIds: PayPeriod::withoutCompanyScope()->withTrashed()
+                ->where('company_id', $period->company_id)->pluck('id')->all(),
+            profileIds: $profileIds->all(),
+            publicationIds: $publicationIds->all(),
+            employeeIds: $employeeIds->all(),
+            assignmentIds: $assignments->pluck('id')->all(),
+            rawMarkIds: $rawMarkIds->all(),
+            holidayStart: $period->start_date,
+            holidayEnd: $period->end_date,
+        );
     }
 
     private function shouldSkip(PayrollShiftEvaluation $result): bool
@@ -110,21 +179,17 @@ class PayrollProcessor
         PayPeriod $payPeriod,
         Employee $employee,
         CarbonImmutable $date,
+        PayrollShiftReview $review,
         PayrollShiftEvaluation $result,
         int $calendarGeneration,
         string $rulesVersion,
+        int $resultGeneration,
         PayrollProcessReport $report,
     ): void {
-        $existing = PayrollResult::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('date', $date->toDateString())
-            ->first();
-
         $attributes = [
             'company_id' => $payPeriod->company_id,
             'pay_period_id' => $payPeriod->id,
+            'result_generation' => $resultGeneration,
             'employee_id' => $employee->id,
             'date' => $date->toDateString(),
             'employee_external_id' => $employee->external_id,
@@ -158,12 +223,13 @@ class PayrollProcessor
             'metadata' => $result->metadata,
         ];
 
-        if ($existing !== null) {
-            $existing->update($attributes);
-            $report->resultsUpdated++;
-        } else {
-            PayrollResult::create($attributes);
+        $snapshot = PayrollDaySnapshot::capture($employee, $review, $result, $calendarGeneration, $rulesVersion);
+        $stored = $this->snapshotWriter->write($attributes, $snapshot);
+
+        if ($stored->wasRecentlyCreated) {
             $report->resultsInserted++;
+        } else {
+            $report->resultsReused++;
         }
 
         if ($result->isAbsence && $result->isJustified) {

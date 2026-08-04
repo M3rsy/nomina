@@ -11,7 +11,6 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
-use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\PayrollPeriodSnapshotData;
@@ -461,8 +460,11 @@ test('propagates publication provenance through payroll evaluation output', func
         ->and($evaluation->metadata['payroll_policy_key'])->toBe('schedule-overlap-v1');
 });
 
-test('does not run legacy analysis for an explicitly published duration first policy', function () {
-    ['company' => $company, 'profile' => $profile, 'employee' => $employee] = payrollPolicyFixture([], ['profile_key' => 'general']);
+test('recognizes the duration-first ordinary quota through its published policy identity', function () {
+    ['company' => $company, 'profile' => $profile, 'employee' => $employee] = payrollPolicyFixture(
+        ['2026-07-20 06:00:00', '2026-07-20 14:00:00'],
+        ['profile_key' => 'general'],
+    );
     $actor = User::factory()->forCompany($company)->create();
     $publication = WorkScheduleProfilePublication::withoutCompanyScope()->where('profile_id', $profile->id)->sole();
     $publication->delete();
@@ -474,12 +476,77 @@ test('does not run legacy analysis for an explicitly published duration first po
         'published_by' => $actor->id,
     ])->save();
 
-    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(
-        app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20'),
-    );
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-20');
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
 
-    expect($analysis->status)->toBe(AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY)
+    expect($occurrence->payrollPolicyKey)->toBe('duration-first-v2')
+        ->and($analysis->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($analysis->workedMinutes)->toBe(480)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
         ->and($analysis->deficits)->toHaveCount(0)
         ->and($analysis->overtimeCandidates)->toHaveCount(0)
         ->and($analysis->payrollPolicyKey)->toBe('duration-first-v2');
+});
+
+test('keeps Saturday overnight V2 quota on its starting work date and wall-clock bands', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 6,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+        'base_ordinary_hours' => 8,
+    ]);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 0,
+        'is_working_day' => false,
+        'start_time' => null,
+        'end_time' => null,
+        'base_ordinary_hours' => 0,
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create();
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada general');
+    $actor = User::factory()->forCompany($company)->create();
+    $publication = WorkScheduleProfilePublication::withoutCompanyScope()->where('profile_id', $profile->id)->sole();
+    $publication->delete();
+    $publication->forceFill([
+        'id' => null,
+        'payroll_policy_key' => 'duration-first-v2',
+        'request_key' => str_repeat('1', 64),
+        'payload_hash' => str_repeat('2', 64),
+        'published_by' => $actor->id,
+    ])->save();
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-18',
+        'end_date' => '2026-07-19',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+
+    foreach (['2026-07-18 15:00:00', '2026-07-19 00:30:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => $eventAt,
+                'status' => 'valid',
+            ]);
+    }
+
+    $occurrence = app(ShiftOccurrenceResolver::class)->resolve($employee, '2026-07-18');
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $postQuotaCandidate = $analysis->overtimeCandidates->sole();
+
+    expect($occurrence->workDate->toDateString())->toBe('2026-07-18')
+        ->and($analysis->workDate->toDateString())->toBe('2026-07-18')
+        ->and($occurrence->entryMark()?->event_at->toDateTimeString())->toBe('2026-07-18 15:00:00')
+        ->and($occurrence->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-19 00:30:00')
+        ->and($analysis->workedMinutes)->toBe(570)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($postQuotaCandidate->start->toDateTimeString())->toBe('2026-07-18 23:00:00')
+        ->and($postQuotaCandidate->end->toDateTimeString())->toBe('2026-07-19 00:00:00')
+        ->and($postQuotaCandidate->minutes)->toBe(60)
+        ->and($postQuotaCandidate->rateMinutes->extra50Minutes)->toBe(60)
+        ->and($postQuotaCandidate->rateMinutes->extra75Minutes)->toBe(0)
+        ->and($postQuotaCandidate->rateMinutes->extra100Minutes)->toBe(0)
+        ->and($analysis->excludedTransferMinutes)->toBe(30);
 });

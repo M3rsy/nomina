@@ -283,6 +283,17 @@ test('rejects invalid request input without writing a batch', function (string $
         ->toThrow(ValidationException::class)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with(['decision', 'reason', 'key', 'targets', 'shape']);
+test('prohibits partial batch authorization without appending a request or decision', function () {
+    $context = batchRequestFixture();
+
+    expect(fn () => requestBatch($context, ['decision' => OvertimeDecision::PARTIAL]))
+        ->toThrow(ValidationException::class)
+        ->and(fn () => requestBatch($context, ['targets' => [[
+            ...batchTarget($context), 'approved_starts_at' => '2026-07-20 14:00:00',
+        ]]]))->toThrow(ValidationException::class)
+        ->and(OvertimeDecisionBatch::query()->count())->toBe(0)
+        ->and(OvertimeDecision::query()->count())->toBe(0);
+});
 test('atomically rejects stale, decided, or unknown candidates', function (string $case) {
     $context = batchRequestFixture();
     $targets = [batchTarget($context)];
@@ -471,7 +482,7 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
         $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
     );
     $bulkReview = new PayrollShiftReview(
-        $review->employee, $review->occurrence, $analysis, collect(), collect(),
+        $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
     );
     $query = Mockery::mock(AttendanceReviewQuery::class);
     $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));
