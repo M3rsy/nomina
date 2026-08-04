@@ -57,8 +57,9 @@ Stop future activation and new-policy processing; retain additive audit/snapshot
 ## Dependencies
 
 - Duplicate search, one approved feature issue, then draft/no-merge Feature Branch Chain tracker and children; target ~400 authored lines (800 maximum), exactly `type:feature` per PR.
+- WU5 only has a maintainer-approved `size:exception` in Engram #2203: 809 authored lines, exactly 9 above 800, to preserve the reviewed WU5–WU10 chain. The hard 800-line maximum remains unchanged for every other work unit. This metadata does not complete delivery task `0.1`. WU10 has a separate maintainer-approved `size:exception` in Engram #2269 for a final child diff of exactly 418 authored lines and applies only to WU10: its prior child scope was 396 lines, and the review-mandated 14-line soft-deleted-period correction plus policy-alignment metadata brought the exact total to 418; splitting that correction into WU11 was rejected to keep it atomic. All other work units retain their existing limits.
 
 ## Success Criteria
 
 - [ ] Public-interface tests cover 06–14, 08–16, 09–17, 12–20, 06–16, 09–19, 12–21, Sunday/holiday, 06:20–14:20, 07–15, 06–16:25/16:31; all decision states, stale fingerprints, profile timing/concurrency/new hires, blockers, immutable processing, legacy/null exports, and totals.
-- [ ] Conventional commits, behavior-named tests, no AI attribution, content-bound receipt lifecycle, and final risk/resilience/readability/reliability review complete.
+- [ ] Conventional commits, behavior-named tests, no AI attribution, and the content-bound receipt lifecycle remain required. Final acceptance uses one native evidence-classified cumulative bounded review. The current neutral cumulative candidate is expected to select `reliability`; the contract defers to the native selected lens set rather than fabricating risk or claiming all four lenses. Issue #2387 is a future upstream enhancement, not a blocker. Task `5.2` remains unchecked until the cumulative receipt, fixes/follow-ups, final evidence, delivery gates, and SDD binding are complete. One-review-budget and receipt-validation semantics remain unchanged.

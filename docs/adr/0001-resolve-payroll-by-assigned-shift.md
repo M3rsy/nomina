@@ -1,5 +1,10 @@
 # Resolver la nomina desde la jornada asignada
 
+Estado: supersedida
+Supersedida por: [ADR 0002 — Nómina basada primero en duración](0002-duration-first-payroll.md)
+
+Esta decisión se conserva como registro histórico y continúa describiendo `schedule-overlap-v1`. Las publicaciones nuevas con `duration-first-v2` se rigen por ADR 0002; ni la forma de la jornada ni la versión del perfil seleccionan esa política.
+
 La nomina se resolvera por la jornada vigente de cada empleado y su fecha laboral, no por la fecha calendario de cada marca ni por un horario unico de empresa. El tiempo programado se clasificara automaticamente por las bandas salariales; solo los tramos cubiertos por marcas de asistencia fuera de la jornada seran candidatos que una persona autorizada debe aprobar o rechazar completos y con motivo. Esta separacion conserva el reloj como evidencia, permite turnos nocturnos y evita pagar automaticamente demoras de traslado u otros excesos no autorizados.
 
 ## Consecuencias

@@ -30,8 +30,8 @@ test('activation publishes the next not-started general profile and reassigns cu
         'work_schedule_profile_id' => $previous->id, 'effective_from' => '2026-07-01',
     ]);
     PayPeriod::factory()->forCompany($company)->create([
-        'start_date' => '2026-08-01', 'end_date' => '2026-12-31', 'status' => 'draft',
-    ]);
+        'start_date' => '2026-12-01', 'end_date' => '2026-12-31', 'status' => 'draft',
+    ])->delete();
     PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
     ]);
@@ -64,11 +64,17 @@ test('activation without a later configured pay period fails atomically', functi
     $company = Company::factory()->create();
     $actor = User::factory()->create(['company_id' => null]);
     WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ])->delete();
 
     expect(fn () => app(GeneralWorkSchedulePublisher::class)->activate(
         $company, $actor, 'Activation without a later period', '2026-08-02 10:00:00',
     ))->toThrow(ValidationException::class)
-        ->and(WorkScheduleProfile::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(1);
+        ->and(WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $company->id)->count())->toBe(1)
+        ->and(WorkScheduleProfilePublication::withoutCompanyScope()
+            ->where('company_id', $company->id)->count())->toBe(1);
 });
 
 test('equivalent activation retries return the existing publication without duplicate assignments', function () {
