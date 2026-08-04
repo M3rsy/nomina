@@ -40,7 +40,7 @@ Approved issue #165; draft/no-merge tracker #166. Exact bases: `tracker←PR1 id
 
 WU5 only has a maintainer-approved `size:exception` in Engram #2203: 809 authored lines, exactly 9 above 800, because splitting it would rewrite the reviewed WU5–WU10 chain. The hard 800-line maximum remains unchanged for every other work unit. This exception is delivery metadata only and does not complete task `0.1`.
 
-Every public behavior records independent-literal RED→minimal GREEN→REFACTOR/GREEN, focused command/result, runtime harness or N/A, rollback, and native attempt ledger. Post-apply full risk/resilience/readability/reliability review persists native transaction, findings/fixes/re-judgments, complete-content+HEAD receipt; validate pre-commit/push/PR. Any planning/implementation/content/HEAD change invalidates it and requires renewed full 4R/receipt.
+Every public behavior records independent-literal RED→minimal GREEN→REFACTOR/GREEN, focused command/result, runtime harness or N/A, rollback, and native attempt ledger. Post-apply final acceptance uses one native evidence-classified cumulative bounded review. The current neutral cumulative candidate is expected to select `reliability`; the contract defers to the native selected lens set rather than fabricating risk or claiming all four lenses. Issue #2387 is a future upstream enhancement, not a blocker. Task `5.2` remains unchecked until the cumulative receipt, fixes/follow-ups, final evidence, delivery gates, and SDD binding are complete. Any planning/implementation/content/HEAD change invalidates the receipt and requires renewal. One-review-budget and receipt-validation semantics remain unchanged.
 
 ## Threat/Rollout
 
