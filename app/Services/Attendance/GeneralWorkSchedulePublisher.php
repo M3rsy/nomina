@@ -43,7 +43,7 @@ final class GeneralWorkSchedulePublisher
             return $this->contextLocker->within(
                 $company->id,
                 function () use ($company, $requestedAt, &$effectiveFrom): PayrollContextTargets {
-                    $period = PayPeriod::withoutCompanyScope()->withTrashed()
+                    $period = PayPeriod::withoutCompanyScope()
                         ->where('company_id', $company->id)
                         ->whereDate('start_date', '>', $requestedAt->toDateString())
                         ->orderBy('start_date')->orderBy('id')->first();
