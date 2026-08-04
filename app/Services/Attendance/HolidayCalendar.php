@@ -5,6 +5,7 @@ namespace App\Services\Attendance;
 use App\Models\Company;
 use App\Models\Holiday;
 use App\Models\PayPeriod;
+use App\Services\Payroll\LockedPayrollContext;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -26,30 +27,51 @@ final class HolidayCalendar
         }
 
         return DB::transaction(function () use ($company, $start, $end): HolidayCalendarContext {
-            Company::query()->whereKey($company->id)->lockForUpdate()->firstOrFail();
-            $activeDates = Holiday::withoutCompanyScope()
-                ->where('company_id', $company->id)
-                ->whereDate('date', '>=', $start->toDateString())
-                ->whereDate('date', '<=', $end->toDateString())
-                ->where('is_active', true)
-                ->pluck('date')
-                ->mapWithKeys(fn (mixed $date): array => [CarbonImmutable::parse($date)->toDateString() => true]);
-            $generations = DB::table('holiday_calendar_generations')
-                ->where('company_id', $company->id)
-                ->whereBetween('calendar_date', [$start->toDateString(), $end->toDateString()])
-                ->pluck('generation', 'calendar_date');
-            $dates = [];
+            $company = Company::query()->whereKey($company->id)->orderBy('id')->lockForUpdate()->firstOrFail();
 
-            for ($date = $start; $date->lte($end); $date = $date->addDay()) {
-                $key = $date->toDateString();
-                $dates[$key] = [
-                    'is_holiday' => $activeDates->has($key),
-                    'generation' => (int) ($generations[$key] ?? 0),
-                ];
-            }
-
-            return new HolidayCalendarContext($dates);
+            return $this->readContext($company, $start, $end);
         });
+    }
+
+    public function captureLocked(
+        LockedPayrollContext $context,
+        CarbonInterface|string $startDate,
+        CarbonInterface|string|null $endDate = null,
+    ): HolidayCalendarContext {
+        $start = CarbonImmutable::parse($startDate)->startOfDay();
+        $end = CarbonImmutable::parse($endDate ?? $startDate)->startOfDay();
+
+        if ($end->lt($start)) {
+            throw new InvalidArgumentException('Holiday context end date must not precede its start date.');
+        }
+
+        return $this->readContext($context->company, $start, $end);
+    }
+
+    private function readContext(Company $company, CarbonImmutable $start, CarbonImmutable $end): HolidayCalendarContext
+    {
+        $activeDates = Holiday::withoutCompanyScope()
+            ->where('company_id', $company->id)
+            ->whereDate('date', '>=', $start->toDateString())
+            ->whereDate('date', '<=', $end->toDateString())
+            ->where('is_active', true)
+            ->pluck('date')
+            ->mapWithKeys(fn (mixed $date): array => [CarbonImmutable::parse($date)->toDateString() => true]);
+        $generations = DB::table('holiday_calendar_generations')
+            ->where('company_id', $company->id)
+            ->whereBetween('calendar_date', [$start->toDateString(), $end->toDateString()])
+            ->pluck('generation', 'calendar_date');
+        $dates = [];
+
+        for ($date = $start; $date->lte($end); $date = $date->addDay()) {
+            $key = $date->toDateString();
+            $dates[$key] = [
+                'is_holiday' => $activeDates->has($key),
+                'generation' => (int) ($generations[$key] ?? 0),
+            ];
+        }
+
+        return new HolidayCalendarContext($dates);
     }
 
     /** @param array{date: CarbonInterface|string, name: string, description: ?string, is_active: bool} $attributes */

@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use Database\Factories\PayrollResultFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LogicException;
 
 class PayrollResult extends Model
 {
@@ -16,6 +18,8 @@ class PayrollResult extends Model
     protected $fillable = [
         'company_id',
         'pay_period_id',
+        'result_generation',
+        'supersedes_id',
         'employee_id',
         'employee_external_id',
         'employee_name',
@@ -44,6 +48,8 @@ class PayrollResult extends Model
         'notes',
         'rules_version',
         'calendar_generation',
+        'day_snapshot',
+        'snapshot_hash',
         'metadata',
     ];
 
@@ -51,6 +57,7 @@ class PayrollResult extends Model
     {
         return [
             'date' => 'date',
+            'result_generation' => 'integer',
             'entry_at' => 'datetime',
             'exit_at' => 'datetime',
             'employee_external_id' => 'string',
@@ -75,8 +82,21 @@ class PayrollResult extends Model
             'is_justified' => 'boolean',
             'unjustified' => 'boolean',
             'calendar_generation' => 'integer',
+            'day_snapshot' => 'array',
             'metadata' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('currentGeneration', function (Builder $query): void {
+            $query->where('payroll_results.result_generation', function ($periods): void {
+                $periods->select('current_result_generation')->from('pay_periods')
+                    ->whereColumn('pay_periods.id', 'payroll_results.pay_period_id')->limit(1);
+            });
+        });
+        static::updating(fn () => throw new LogicException('Payroll results are insert-only.'));
+        static::deleting(fn () => throw new LogicException('Payroll results are insert-only.'));
     }
 
     public function company(): BelongsTo

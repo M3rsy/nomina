@@ -140,6 +140,10 @@ class Revisar extends Component
 
     public string $overtimeCandidateSummary = '';
 
+    public string $overtimeApprovedStartsAt = '';
+
+    public string $overtimeApprovedEndsAt = '';
+
     public array $selectedOvertimeCandidates = [];
 
     public bool $allFilteredOvertimeSelected = false;
@@ -951,7 +955,7 @@ class Revisar extends Component
 
         $this->closeOvertimeDecisionModal();
 
-        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)) {
+        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL], true)) {
             $this->addError('overtimeDecision', 'La decisión debe aprobar o rechazar el tramo completo.');
 
             return;
@@ -986,6 +990,12 @@ class Revisar extends Component
 
             return;
         }
+        if ($decision === OvertimeDecision::PARTIAL
+            && $review->analysis->payrollPolicyKey !== 'duration-first-v2') {
+            $this->addError('overtimeDecision', 'La aprobación parcial solo está disponible para candidatos de duración primero.');
+
+            return;
+        }
 
         $this->overtimeDecisionEmployeeId = $employee->id;
         $this->overtimeDecisionWorkDate = $review->analysis->workDate->toDateString();
@@ -994,6 +1004,8 @@ class Revisar extends Component
         $this->overtimeCandidateSummary = $candidate->start->format('H:i')
             .' → '.$candidate->end->format('H:i')
             .' · '.$candidate->minutes.' min';
+        $this->overtimeApprovedStartsAt = $candidate->start->format('Y-m-d\TH:i');
+        $this->overtimeApprovedEndsAt = $candidate->end->format('Y-m-d\TH:i');
         $this->showOvertimeDecisionModal = true;
     }
 
@@ -1006,6 +1018,8 @@ class Revisar extends Component
         $this->overtimeDecision = '';
         $this->overtimeDecisionReason = '';
         $this->overtimeCandidateSummary = '';
+        $this->overtimeApprovedStartsAt = '';
+        $this->overtimeApprovedEndsAt = '';
         $this->resetErrorBag();
     }
 
@@ -1019,8 +1033,10 @@ class Revisar extends Component
             'overtimeDecisionEmployeeId' => ['required', 'integer'],
             'overtimeDecisionWorkDate' => ['required', 'date_format:Y-m-d'],
             'overtimeCandidateKey' => ['required', 'string', 'size:64'],
-            'overtimeDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
+            'overtimeDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL])],
             'overtimeDecisionReason' => ['required', 'string', 'max:500'],
+            'overtimeApprovedStartsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i'],
+            'overtimeApprovedEndsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i', 'after:overtimeApprovedStartsAt'],
         ], [
             'overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.',
         ]);
@@ -1032,23 +1048,30 @@ class Revisar extends Component
             return;
         }
 
-        app(OvertimeDecisionRecorder::class)->decide(
-            $this->payPeriod,
-            $employee,
-            $validated['overtimeDecisionWorkDate'],
-            $validated['overtimeCandidateKey'],
-            $validated['overtimeDecision'],
-            $validated['overtimeDecisionReason'],
-            Auth::user(),
-        );
+        $recorder = app(OvertimeDecisionRecorder::class);
+        if ($validated['overtimeDecision'] === OvertimeDecision::PARTIAL) {
+            $recorder->approvePartial(
+                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
+                $validated['overtimeCandidateKey'], $validated['overtimeApprovedStartsAt'],
+                $validated['overtimeApprovedEndsAt'], $validated['overtimeDecisionReason'], Auth::user(),
+            );
+        } else {
+            $recorder->decide(
+                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
+                $validated['overtimeCandidateKey'], $validated['overtimeDecision'],
+                $validated['overtimeDecisionReason'], Auth::user(),
+            );
+        }
 
-        $decision = $validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado';
+        $message = $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
+            ? 'Tramo parcial aprobado y complemento rechazado.'
+            : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.';
         $this->closeOvertimeDecisionModal();
         $this->resetPage('overtimePage');
         $this->resetOvertimeSelection();
         $this->loadReadinessBlockers();
 
-        session()->flash('success', "Tramo completo {$decision} y registrado en el historial.");
+        session()->flash('success', $message);
     }
 
     public function openAttendanceException(
@@ -1063,8 +1086,8 @@ class Revisar extends Component
 
         $this->closeAttendanceExceptionModal();
 
-        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REVOKED], true)) {
-            $this->addError('attendanceExceptionDecision', 'La decisión debe conceder o revocar la excepción completa.');
+        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED], true)) {
+            $this->addError('attendanceExceptionDecision', 'La decisión debe conceder, rechazar o revocar la excepción completa.');
 
             return;
         }
@@ -1108,13 +1131,22 @@ class Revisar extends Component
             return;
         }
 
+        if ($deficit->kind === 'daily_shortfall'
+            && $decision !== AttendanceException::REVOKED
+            && $currentException !== null
+            && $currentException->decision !== AttendanceException::REVOKED) {
+            $this->addError('attendanceExceptionDecision', 'El déficit diario ya tiene una decisión vigente.');
+
+            return;
+        }
+
         $this->attendanceExceptionEmployeeId = $employee->id;
         $this->attendanceExceptionWorkDate = $review->analysis->workDate->toDateString();
         $this->attendanceDeficitKey = $deficit->key;
         $this->attendanceExceptionDecision = $decision;
-        $this->attendanceDeficitSummary = $deficit->start->format('H:i')
-            .' → '.$deficit->end->format('H:i')
-            .' · '.$deficit->minutes.' min';
+        $this->attendanceDeficitSummary = $deficit->start === null
+            ? 'Déficit diario · '.$deficit->minutes.' min'
+            : $deficit->start->format('H:i').' → '.$deficit->end->format('H:i').' · '.$deficit->minutes.' min';
         $this->showAttendanceExceptionModal = true;
     }
 
@@ -1140,7 +1172,7 @@ class Revisar extends Component
             'attendanceExceptionEmployeeId' => ['required', 'integer'],
             'attendanceExceptionWorkDate' => ['required', 'date_format:Y-m-d'],
             'attendanceDeficitKey' => ['required', 'string', 'size:64'],
-            'attendanceExceptionDecision' => ['required', Rule::in([AttendanceException::GRANTED, AttendanceException::REVOKED])],
+            'attendanceExceptionDecision' => ['required', Rule::in([AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED])],
             'attendanceExceptionReason' => ['required', 'string', 'max:500'],
         ], [
             'attendanceExceptionReason.required' => 'Debe indicar el motivo de la excepción.',
@@ -1163,7 +1195,12 @@ class Revisar extends Component
             Auth::user(),
         );
 
-        $decision = $validated['attendanceExceptionDecision'] === AttendanceException::GRANTED ? 'concedida' : 'revocada';
+        $decision = match ($validated['attendanceExceptionDecision']) {
+            AttendanceException::GRANTED => 'concedida',
+            AttendanceException::REJECTED => 'rechazada',
+            default => 'revocada',
+        };
+        $this->periodReviewSnapshot = null;
         $this->closeAttendanceExceptionModal();
 
         session()->flash('success', "Excepción completa {$decision} y registrada en el historial.");

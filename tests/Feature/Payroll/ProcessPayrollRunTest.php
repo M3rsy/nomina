@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollProcessor;
+use App\Services\Payroll\PayrollProcessReport;
 use App\Services\Payroll\PayrollRunRequester;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Queue\TimeoutExceededException;
@@ -75,13 +76,36 @@ test('processes a queued run through the payroll processor', function () {
     [$period, $run] = payrollRunWorkerFixture();
 
     (new ProcessPayrollRun($run->id))->handle(app(PayrollProcessor::class));
+    $results = PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->get();
 
     expect($period->fresh()->status)->toBe('processed')
         ->and($run->fresh()->status)->toBe('completed')
-        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBeGreaterThan(0);
+        ->and($results)->not->toBeEmpty()
+        ->and($results->every(fn (PayrollResult $result): bool => is_array($result->day_snapshot)
+            && is_string($result->snapshot_hash) && strlen($result->snapshot_hash) === 64))->toBeTrue();
 });
 
-test('rolls back calculation when completion fails and persists terminal failure separately', function () {
+test('runs payroll processing outside job state transactions', function () {
+    [$period, $actor] = queuedPayrollRun();
+    $run = app(PayrollRunRequester::class)->request($period, $actor, (string) Str::uuid());
+    $harnessLevel = DB::transactionLevel();
+    $processingLevel = null;
+    $processor = Mockery::mock(PayrollProcessor::class);
+    $processor->shouldReceive('processPayPeriod')->once()->andReturnUsing(
+        function () use (&$processingLevel): PayrollProcessReport {
+            $processingLevel = DB::transactionLevel();
+
+            return new PayrollProcessReport;
+        },
+    );
+
+    (new ProcessPayrollRun($run->id))->handle($processor);
+
+    expect($processingLevel)->toBe($harnessLevel)
+        ->and($run->fresh()->status)->toBe('completed');
+});
+
+test('reconciles committed payroll when completion persistence fails', function () {
     [$period, $run] = payrollRunWorkerFixture();
     $job = new ProcessPayrollRun($run->id);
     DB::statement("create trigger reject_payroll_completion before update of status on payroll_runs when new.status = 'completed' begin select raise(abort, 'completion failed'); end");
@@ -95,15 +119,19 @@ test('rolls back calculation when completion fails and persists terminal failure
         DB::statement('drop trigger reject_payroll_completion');
     }
 
+    $resultIds = PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->pluck('id');
     expect($failure)->not->toBeNull()
-        ->and($period->fresh()->status)->toBe('ready')
-        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBe(0)
-        ->and($run->fresh()->status)->toBe('processing');
-
-    $job->failed($failure);
-
-    expect($run->fresh()->status)->toBe('failed')
+        ->and($period->fresh()->status)->toBe('processed')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->count())->toBeGreaterThan(0)
+        ->and($run->fresh()->status)->toBe('processing')
         ->and($run->fresh()->last_error)->toContain('completion failed');
+
+    $processor = Mockery::mock(PayrollProcessor::class);
+    $processor->shouldNotReceive('processPayPeriod');
+    $job->handle($processor);
+
+    expect($run->fresh()->status)->toBe('completed')
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->pluck('id'))->toEqual($resultIds);
 });
 
 test('completed replay is a no-op', function () {

@@ -163,6 +163,23 @@ test('keeps a scheduled day with no marks as an unpaid absence', function () {
         ->and($evaluation->recognizedMinutes)->toBe(0);
 });
 
+test('blocks a duration-first no-mark day with one pending daily shortfall', function () {
+    [$occurrence, $analysis] = payrollShiftWithoutMarks(
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    );
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect());
+    $deficit = $analysis->deficits->sole();
+
+    expect($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(480)
+        ->and($deficit->start)->toBeNull()
+        ->and($deficit->end)->toBeNull()
+        ->and($evaluation->status)->toBe('blocked')
+        ->and($evaluation->recognizedMinutes)->toBe(0)
+        ->and($evaluation->blockers->sole()['code'])->toBe('pending_daily_shortfall');
+});
+
 test('credits a scheduled no-mark shift through an append-only attendance exception', function () {
     [$occurrence, $analysis] = payrollShiftWithoutMarks();
     $deficit = $analysis->deficits->sole();
@@ -259,6 +276,28 @@ test('keeps V2 overtime pending until approval then recognizes the exact candida
         ->and($approvedEvaluation->payrollPolicyKey)->toBe('duration-first-v2');
 });
 
+test('recognizes only the conserved approved bands from a partial V2 decision', function () {
+    [$occurrence, $analysis] = payrollShift(
+        workDate: '2026-07-20', entryAt: '2026-07-20 09:00:00', exitAt: '2026-07-20 19:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    );
+    $candidate = $analysis->overtimeCandidates->sole();
+    $decision = payrollDecision($candidate, OvertimeDecision::APPROVED, [
+        'record_version' => 2, 'resolution_kind' => 'partial', 'resolution_hash' => str_repeat('a', 64),
+        'approved_minutes' => 60, 'rejected_minutes' => 60,
+        'approved_rate_minutes' => ['ordinary' => 0, 'extra25' => 30, 'extra50' => 30, 'extra75' => 0, 'extra100' => 0],
+        'rejected_rate_minutes' => ['ordinary' => 0, 'extra25' => 30, 'extra50' => 30, 'extra75' => 0, 'extra100' => 0],
+    ]);
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate($occurrence, $analysis, collect([$decision]));
+
+    expect($evaluation->status)->toBe('processable')
+        ->and($evaluation->recognizedMinutes)->toBe(540)
+        ->and($evaluation->approvedOvertimeMinutes)->toBe(60)
+        ->and($evaluation->payableRates->extra25Minutes)->toBe(30)
+        ->and($evaluation->payableRates->extra50Minutes)->toBe(30);
+});
+
 function payrollShift(
     string $workDate,
     string $entryAt,
@@ -299,7 +338,7 @@ function payrollShift(
     return [$occurrence, app(AttendanceShiftAnalyzer::class)->analyze($occurrence)];
 }
 
-function payrollDecision(AttendanceSegment $candidate, string $decision): OvertimeDecision
+function payrollDecision(AttendanceSegment $candidate, string $decision, array $resolution = []): OvertimeDecision
 {
     return (new OvertimeDecision)->forceFill([
         'candidate_key' => $candidate->key,
@@ -315,6 +354,7 @@ function payrollDecision(AttendanceSegment $candidate, string $decision): Overti
             'extra100' => $candidate->rateMinutes->extra100Minutes,
         ],
         'decision' => $decision,
+        ...$resolution,
     ]);
 }
 
@@ -342,6 +382,7 @@ function payrollShiftWithoutMarks(
     bool $isWorkingDay = true,
     string $scheduledStart = '06:00',
     string $scheduledEnd = '14:00',
+    string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
 ): array {
     $date = CarbonImmutable::parse('2026-07-20')->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -366,7 +407,7 @@ function payrollShiftWithoutMarks(
         $end,
         collect(),
         ShiftOccurrence::NO_MARKS,
-        payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+        payrollPolicyKey: $payrollPolicyKey,
     );
 
     return [$occurrence, app(AttendanceShiftAnalyzer::class)->analyze($occurrence)];

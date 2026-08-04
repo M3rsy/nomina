@@ -12,6 +12,8 @@ class PayrollProcessReport
 
     public int $resultsUpdated = 0;
 
+    public int $resultsReused = 0;
+
     public int $missingSingleMarkCount = 0;
 
     public int $justifiedAbsenceCount = 0;
