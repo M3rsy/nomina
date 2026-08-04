@@ -34,9 +34,9 @@ class AttendanceExceptionRecorder
         string $reason,
         User $actor,
     ): AttendanceException {
-        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REVOKED], true)) {
+        if (! in_array($decision, [AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED], true)) {
             throw ValidationException::withMessages([
-                'decision' => 'La decisión debe conceder o revocar la excepción completa.',
+                'decision' => 'La decisión debe conceder, rechazar o revocar la excepción completa.',
             ]);
         }
 
@@ -83,6 +83,14 @@ class AttendanceExceptionRecorder
                     ]);
                 }
 
+                $isDailyShortfall = $deficit->kind === 'daily_shortfall';
+
+                if ($decision === AttendanceException::REJECTED && ! $isDailyShortfall) {
+                    throw ValidationException::withMessages([
+                        'decision' => 'Solo los déficits diarios admiten una decisión de rechazo.',
+                    ]);
+                }
+
                 $previous = AttendanceException::withoutCompanyScope()
                     ->where('company_id', $company->id)
                     ->where('pay_period_id', $lockedPeriod->id)
@@ -106,7 +114,17 @@ class AttendanceExceptionRecorder
                     ]);
                 }
 
+                if ($isDailyShortfall
+                    && $decision !== AttendanceException::REVOKED
+                    && $previous !== null
+                    && $previous->decision !== AttendanceException::REVOKED) {
+                    throw ValidationException::withMessages([
+                        'decision' => 'El déficit diario ya tiene historial y no admite otra decisión inicial.',
+                    ]);
+                }
+
                 return AttendanceException::withoutCompanyScope()->create([
+                    'record_version' => $isDailyShortfall ? 2 : 1,
                     'company_id' => $company->id,
                     'pay_period_id' => $lockedPeriod->id,
                     'employee_id' => $lockedEmployee->id,
@@ -121,7 +139,9 @@ class AttendanceExceptionRecorder
                     'decision' => $decision,
                     'reason' => $reason,
                     'decided_by' => $currentActor->id,
-                    'supersedes_id' => $previous?->id,
+                    'supersedes_id' => $decision === AttendanceException::REVOKED || ($isDailyShortfall && $previous !== null)
+                        ? $previous?->id
+                        : null,
                 ]);
             },
         );

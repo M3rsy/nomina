@@ -4,9 +4,11 @@ use App\Livewire\Empleados\Create;
 use App\Livewire\Empleados\Edit;
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
@@ -121,7 +123,7 @@ test('company admin create employee forces own company', function () {
 test('super admin can switch company and create employee', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
-    $profile = WorkScheduleProfile::factory()->forCompany($companyB)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($companyB)->create(['profile_key' => 'general']);
 
     $admin = User::factory()->create([
         'company_id' => null,
@@ -155,6 +157,7 @@ test('super admin can switch company and create employee', function () {
 test('company admin creates an employee with an effective schedule assignment', function () {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'general',
         'name' => 'Jornada diurna',
     ]);
     $admin = User::factory()->create([
@@ -184,10 +187,13 @@ test('company admin creates an employee with an effective schedule assignment', 
         ->and($assignment->assigned_by)->toBe($admin->id);
 });
 
-test('employee forms expose only active schedule profiles from the selected company', function () {
+test('employee forms expose only the date-effective general profile from the selected company', function () {
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
-    WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Jornada permitida']);
+    WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'general',
+        'name' => 'Jornada permitida',
+    ]);
     WorkScheduleProfile::factory()->forCompany($company)->create([
         'name' => 'Jornada anterior',
         'is_active' => false,
@@ -241,7 +247,7 @@ test('duplicate external id within same company is rejected', function () {
 test('duplicate external id in other company is allowed', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
-    $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create(['profile_key' => 'general']);
 
     $admin = User::factory()->create([
         'company_id' => $companyA->id,
@@ -283,7 +289,7 @@ test('update employee audits sensitive fields', function () {
         'expected_salary' => 10000,
         'job_title' => 'Operador',
     ]);
-    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
 
     $this->actingAs($admin);
 
@@ -336,39 +342,47 @@ test('an employee cannot be transferred directly to another company', function (
     expect($employee->fresh()->company_id)->toBe($companyA->id);
 });
 
-test('company admin assigns a new employee schedule from an effective date', function () {
+test('company admin assigns the date-effective general schedule', function () {
     $company = Company::factory()->create();
-    $dayProfile = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Diurna']);
-    $nightProfile = WorkScheduleProfile::factory()->forCompany($company)->create(['name' => 'Nocturna']);
+    $previous = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'general', 'name' => 'Jornada general',
+    ]);
     $admin = User::factory()->create([
         'company_id' => $company->id,
         'password' => Hash::make('password'),
     ]);
     $admin->assignRole('company_admin');
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create(['is_active' => false]);
     $initial = app(EmployeeScheduleAssigner::class)->assign(
         $employee,
-        $dayProfile,
+        $previous,
         '2026-07-01',
         'Turno inicial',
         $admin,
     );
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ]);
+    $publication = app(GeneralWorkSchedulePublisher::class)->activate(
+        $company, $admin, 'Activate future general profile', '2026-08-02 10:00:00',
+    );
+    $employee->update(['is_active' => true]);
 
     $this->actingAs($admin);
 
     Livewire::test(Edit::class, ['employee' => $employee])
-        ->set('schedule_profile_id', $nightProfile->id)
-        ->set('schedule_effective_from', '2026-07-20')
-        ->set('schedule_reason', 'Rotación nocturna')
+        ->set('schedule_profile_id', $publication->profile_id)
+        ->set('schedule_effective_from', '2027-01-01')
+        ->set('schedule_reason', 'Nueva jornada general')
         ->call('save')
         ->assertHasNoErrors();
 
     $latest = $employee->scheduleAssignments()->latest('effective_from')->firstOrFail();
 
-    expect($initial->fresh()->effective_to?->toDateString())->toBe('2026-07-19')
-        ->and($latest->work_schedule_profile_id)->toBe($nightProfile->id)
-        ->and($latest->effective_from->toDateString())->toBe('2026-07-20')
-        ->and($latest->reason)->toBe('Rotación nocturna');
+    expect($initial->fresh()->effective_to?->toDateString())->toBe('2026-12-31')
+        ->and($latest->work_schedule_profile_id)->toBe($publication->profile_id)
+        ->and($latest->effective_from->toDateString())->toBe('2027-01-01')
+        ->and($latest->reason)->toBe('Nueva jornada general');
 });
 
 test('deactivate employee requires permission', function () {
@@ -410,4 +424,53 @@ test('soft delete employee preserves revisions', function () {
 
     expect($employee->trashed())->toBeTrue();
     expect($employee->revisions()->count())->toBe(1);
+});
+
+test('employee create resolves the sole general profile on the assignment date', function () {
+    $company = Company::factory()->create();
+    $previous = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ]);
+    app(GeneralWorkSchedulePublisher::class)->activate(
+        $company, $admin, 'Activate future general profile', '2026-08-02 10:00:00',
+    );
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->set('schedule_effective_from', '2026-12-31')
+        ->assertSet('schedule_profile_id', $previous->id)
+        ->set('external_id', 'DATE-001')
+        ->set('first_name', 'Fecha')
+        ->set('last_name', 'Laboral')
+        ->set('schedule_reason', 'General profile by date')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Employee::withoutCompanyScope()->where('external_id', 'DATE-001')->sole()
+        ->scheduleAssignments()->sole()->work_schedule_profile_id)->toBe($previous->id);
+});
+
+test('employee edit assigns an unassigned employee from date-effective general history', function () {
+    $company = Company::factory()->create();
+    $previous = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->for($company)->create()->assignRole('company_admin');
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ]);
+    app(GeneralWorkSchedulePublisher::class)->activate(
+        $company, $admin, 'Activate future general profile', '2026-08-02 10:00:00',
+    );
+    $employee = Employee::factory()->forCompany($company)->create();
+    $this->actingAs($admin);
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->set('schedule_effective_from', '2026-12-31')
+        ->assertSet('schedule_profile_id', $previous->id)
+        ->set('schedule_reason', 'Recover date-effective assignment')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($employee->scheduleAssignments()->sole()->work_schedule_profile_id)->toBe($previous->id);
 });

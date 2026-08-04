@@ -36,7 +36,6 @@ class PayPeriodReopener
                 ->where('company_id', $lockedPeriod->company_id)
                 ->where('pay_period_id', $lockedPeriod->id);
             $invalidatedResults = $results->count();
-            $results->delete();
 
             $metadata = $lockedPeriod->metadata ?? [];
             $reopenings = $metadata['reopenings'] ?? [];
@@ -46,9 +45,12 @@ class PayPeriodReopener
                 'reason' => $reason,
                 'user_id' => $actor->id,
                 'invalidated_results' => $invalidatedResults,
+                'preserved_results' => $invalidatedResults,
+                'results_retained' => true,
                 'at' => now()->toDateTimeString(),
             ];
             $metadata['reopenings'] = $reopenings;
+            $lockedPeriod->authorized_result_generation = $lockedPeriod->current_result_generation + 1;
 
             $lockedPeriod->update([
                 'status' => 'validating',

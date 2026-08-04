@@ -264,6 +264,19 @@
 
                 <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
                     @if ($canManageSchedules)
+                        <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de activación
+                            <input type="text" wire:model="activationReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué se activa la nueva política" />
+                            @error('activationReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                        </label>
+                        <button
+                            type="button"
+                            wire:click="activateGeneralProfile"
+                            wire:loading.attr="disabled"
+                            wire:target="activateGeneralProfile"
+                            class="inline-flex items-center rounded-full bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-emerald-800 disabled:opacity-70"
+                        >
+                            Activar jornada general
+                        </button>
                         @if ($selectedProfileId)
                             <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de la nueva versión
                                 <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué cambia la jornada" />

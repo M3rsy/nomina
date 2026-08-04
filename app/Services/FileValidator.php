@@ -217,7 +217,10 @@ class FileValidator
             ->pluck('id')
             ->all();
 
-        return new PayrollContextTargets($periodIds, $employees->pluck('id')->all());
+        return new PayrollContextTargets(
+            payPeriodIds: $periodIds,
+            employeeIds: $employees->pluck('id')->all(),
+        );
     }
 
     private function computeFileStatus(int $validCount, int $issueCount): string

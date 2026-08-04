@@ -22,6 +22,7 @@ class OvertimeDecisionFactory extends Factory
         $end = (clone $start)->modify('+30 minutes');
 
         return [
+            'record_version' => 1,
             'company_id' => Company::factory(),
             'pay_period_id' => fn (array $attributes) => PayPeriod::factory()->forCompany(Company::find($attributes['company_id'])),
             'employee_id' => fn (array $attributes) => Employee::factory()->forCompany(Company::find($attributes['company_id'])),

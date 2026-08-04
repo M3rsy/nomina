@@ -543,9 +543,10 @@ test('keeps Saturday overnight V2 quota on its starting work date and wall-clock
         ->and($analysis->scheduledMinutes)->toBe(480)
         ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
         ->and($postQuotaCandidate->start->toDateTimeString())->toBe('2026-07-18 23:00:00')
-        ->and($postQuotaCandidate->end->toDateTimeString())->toBe('2026-07-19 00:30:00')
+        ->and($postQuotaCandidate->end->toDateTimeString())->toBe('2026-07-19 00:00:00')
+        ->and($postQuotaCandidate->minutes)->toBe(60)
         ->and($postQuotaCandidate->rateMinutes->extra50Minutes)->toBe(60)
-        ->and($postQuotaCandidate->rateMinutes->extra75Minutes)->toBe(30)
+        ->and($postQuotaCandidate->rateMinutes->extra75Minutes)->toBe(0)
         ->and($postQuotaCandidate->rateMinutes->extra100Minutes)->toBe(0)
-        ->and($postQuotaCandidate->minutes)->toBe(90);
+        ->and($analysis->excludedTransferMinutes)->toBe(30);
 });
