@@ -5,13 +5,14 @@ namespace App\Services\Payroll;
 use App\Models\Employee;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\PayPeriod;
-use App\Models\PayrollResult;
 use App\Models\RawMark;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\PayrollPeriodSnapshotData;
 use App\Services\Attendance\PayrollShiftEvaluation;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
+use App\Services\Attendance\PayrollShiftEvaluator;
+use App\Services\Attendance\PayrollShiftReview;
 use Carbon\CarbonImmutable;
 use InvalidArgumentException;
 
@@ -21,6 +22,8 @@ class PayrollProcessor
         private PayrollShiftEvaluationResolver $evaluationResolver,
         private PayPeriodRangeGuard $rangeGuard,
         private PayrollContextLocker $contextLocker,
+        private PayrollDaySnapshotWriter $snapshotWriter,
+        private PayrollShiftEvaluator $shiftEvaluator,
     ) {}
 
     public function processPayPeriod(PayPeriod $payPeriod): PayrollProcessReport
@@ -55,10 +58,17 @@ class PayrollProcessor
                 $snapshot = PayrollPeriodSnapshotData::capture($payPeriod, $employees);
 
                 $rulesVersion = config('payroll.rules_version', '1');
+                $resultGeneration = $payPeriod->authorized_result_generation ?? $payPeriod->current_result_generation;
 
                 for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
                     foreach ($employees as $employee) {
-                        $result = $this->evaluationResolver->resolve($payPeriod, $employee, $date, $calendarContext, $snapshot);
+                        $review = $this->evaluationResolver->review($payPeriod, $employee, $date, $calendarContext, $snapshot);
+                        $result = $this->shiftEvaluator->evaluate(
+                            $review->occurrence,
+                            $review->analysis,
+                            $review->currentDecisions,
+                            $review->currentExceptions,
+                        );
 
                         if ($result->status === PayrollShiftEvaluation::BLOCKED) {
                             throw new PayrollProcessingBlocked([[
@@ -76,9 +86,11 @@ class PayrollProcessor
                             $payPeriod,
                             $employee,
                             $date,
+                            $review,
                             $result,
                             $calendarContext->generation($date),
                             $rulesVersion,
+                            $resultGeneration,
                             $report,
                         );
                         $report->daysProcessed++;
@@ -88,6 +100,8 @@ class PayrollProcessor
                 $report->employeesProcessed = $employees->count();
 
                 $payPeriod->status = 'processed';
+                $payPeriod->current_result_generation = $resultGeneration;
+                $payPeriod->authorized_result_generation = null;
                 $payPeriod->save();
 
                 return $report;
@@ -165,21 +179,17 @@ class PayrollProcessor
         PayPeriod $payPeriod,
         Employee $employee,
         CarbonImmutable $date,
+        PayrollShiftReview $review,
         PayrollShiftEvaluation $result,
         int $calendarGeneration,
         string $rulesVersion,
+        int $resultGeneration,
         PayrollProcessReport $report,
     ): void {
-        $existing = PayrollResult::withoutCompanyScope()
-            ->where('company_id', $payPeriod->company_id)
-            ->where('pay_period_id', $payPeriod->id)
-            ->where('employee_id', $employee->id)
-            ->whereDate('date', $date->toDateString())
-            ->first();
-
         $attributes = [
             'company_id' => $payPeriod->company_id,
             'pay_period_id' => $payPeriod->id,
+            'result_generation' => $resultGeneration,
             'employee_id' => $employee->id,
             'date' => $date->toDateString(),
             'employee_external_id' => $employee->external_id,
@@ -213,12 +223,13 @@ class PayrollProcessor
             'metadata' => $result->metadata,
         ];
 
-        if ($existing !== null) {
-            $existing->update($attributes);
-            $report->resultsUpdated++;
-        } else {
-            PayrollResult::create($attributes);
+        $snapshot = PayrollDaySnapshot::capture($employee, $review, $result, $calendarGeneration, $rulesVersion);
+        $stored = $this->snapshotWriter->write($attributes, $snapshot);
+
+        if ($stored->wasRecentlyCreated) {
             $report->resultsInserted++;
+        } else {
+            $report->resultsReused++;
         }
 
         if ($result->isAbsence && $result->isJustified) {

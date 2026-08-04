@@ -187,9 +187,11 @@ test('mutations recheck the current period status after the review was opened', 
     expect($rawMark->fresh()->status)->toBe('valid');
 });
 
-test('processed payroll can be reopened with an audited reason and stale results are removed', function () {
+test('processed payroll can be reopened without deleting immutable results', function () {
     [$company, $payPeriod, $file, $employee, $admin] = setupLockedRevisar('processed');
-    PayrollResult::factory()->forCompany($company)->for($payPeriod)->for($employee)->create();
+    $result = PayrollResult::factory()->forCompany($company)->for($payPeriod)->for($employee)->create();
+    $result->refresh();
+    $originalResult = $result->getRawOriginal();
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
@@ -203,13 +205,18 @@ test('processed payroll can be reopened with an audited reason and stale results
     $reopening = $payPeriod->fresh()->metadata['reopenings'][0];
 
     expect($payPeriod->fresh()->status)->toBe('validating')
-        ->and($payPeriod->payrollResults()->count())->toBe(0)
+        ->and($payPeriod->fresh()->current_result_generation)->toBe(1)
+        ->and($payPeriod->fresh()->authorized_result_generation)->toBe(2)
+        ->and($payPeriod->payrollResults()->count())->toBe(1)
+        ->and($result->fresh()->getRawOriginal())->toBe($originalResult)
         ->and($reopening)->toMatchArray([
             'from_status' => 'processed',
             'to_status' => 'validating',
             'reason' => 'Corregir una marca observada',
             'user_id' => $admin->id,
             'invalidated_results' => 1,
+            'preserved_results' => 1,
+            'results_retained' => true,
         ])
         ->and($reopening['at'])->not->toBeEmpty();
 });
