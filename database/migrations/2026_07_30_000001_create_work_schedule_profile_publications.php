@@ -94,6 +94,7 @@ return new class extends Migration
                     EXCLUDE USING gist (company_id WITH =, profile_key WITH =,
                         daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[)') WITH &&)
                     WHERE (payroll_policy_key = 'duration-first-v2');
+            DROP FUNCTION IF EXISTS reject_work_schedule_publication_mutation() CASCADE;
             CREATE FUNCTION reject_work_schedule_publication_mutation() RETURNS trigger AS $$
             BEGIN
                 IF TG_OP = 'UPDATE' AND OLD.effective_to IS NULL AND NEW.effective_to IS NOT NULL

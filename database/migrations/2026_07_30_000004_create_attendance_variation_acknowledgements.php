@@ -37,6 +37,7 @@ return new class extends Migration
                         AND variation_key ~ '^[a-f0-9]{64}$' AND fingerprint ~ '^[a-f0-9]{64}$'
                         AND btrim(reason) <> ''
                     );
+                DROP FUNCTION IF EXISTS reject_attendance_variation_ack_mutation() CASCADE;
                 CREATE FUNCTION reject_attendance_variation_ack_mutation() RETURNS trigger AS $$
                 BEGIN
                     RAISE EXCEPTION 'attendance variation acknowledgements are append-only' USING ERRCODE = '23514';

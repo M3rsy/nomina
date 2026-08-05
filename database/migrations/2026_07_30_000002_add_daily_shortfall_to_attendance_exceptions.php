@@ -42,6 +42,7 @@ return new class extends Migration
                     )
                 );
 
+            DROP FUNCTION IF EXISTS enforce_attendance_exception_append_only() CASCADE;
             CREATE FUNCTION enforce_attendance_exception_append_only() RETURNS trigger AS $$
             DECLARE
                 parent attendance_exceptions%ROWTYPE;

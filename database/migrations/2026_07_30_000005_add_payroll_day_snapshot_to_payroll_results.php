@@ -35,6 +35,7 @@ return new class extends Migration
 
         if (DB::getDriverName() === 'pgsql') {
             DB::unprepared(<<<'SQL'
+                DROP FUNCTION IF EXISTS reject_payroll_result_mutation() CASCADE;
                 CREATE FUNCTION reject_payroll_result_mutation() RETURNS trigger AS $$
                 BEGIN
                     RAISE EXCEPTION 'payroll_results are insert-only' USING ERRCODE = '23514';

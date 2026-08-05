@@ -133,6 +133,7 @@ return new class extends Migration
                 ON overtime_decisions (company_id, pay_period_id, employee_id, work_date, candidate_key)
                 WHERE record_version = 2 AND supersedes_id IS NULL;
 
+            DROP FUNCTION IF EXISTS enforce_overtime_decision_append_only() CASCADE;
             CREATE FUNCTION enforce_overtime_decision_append_only() RETURNS trigger AS $$
             DECLARE parent overtime_decisions%ROWTYPE;
             BEGIN
