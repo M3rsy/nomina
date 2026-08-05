@@ -16,11 +16,14 @@ class AttendanceException extends Model
 
     public const GRANTED = 'granted';
 
+    public const REJECTED = 'rejected';
+
     public const REVOKED = 'revoked';
 
     public const UPDATED_AT = null;
 
     protected $fillable = [
+        'record_version',
         'company_id',
         'pay_period_id',
         'employee_id',
@@ -41,6 +44,7 @@ class AttendanceException extends Model
     protected function casts(): array
     {
         return [
+            'record_version' => 'integer',
             'work_date' => 'date',
             'starts_at' => 'immutable_datetime',
             'ends_at' => 'immutable_datetime',

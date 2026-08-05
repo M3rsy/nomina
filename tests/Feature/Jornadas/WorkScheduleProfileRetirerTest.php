@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Jornadas\Index;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\EmployeeScheduleAssignment;
@@ -7,10 +8,13 @@ use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\WorkScheduleProfileRetirer;
+use App\Services\CurrentCompany;
 use Carbon\CarbonImmutable;
+use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 beforeEach(function (): void {
     CarbonImmutable::setTestNow('2026-02-16 10:00:00');
@@ -106,11 +110,15 @@ test('a locked payroll period rolls back the complete profile retirement', funct
         'effective_from' => '2026-01-01',
         'effective_to' => null,
     ]);
-    PayPeriod::factory()->forCompany($company)->create([
+    $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-02-01',
         'end_date' => '2026-02-28',
         'status' => 'processed',
     ]);
+    $profileSnapshots = collect([$source, $replacement])
+        ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all();
+    $assignmentSnapshot = $assignment->fresh()->getAttributes();
+    $periodSnapshot = $period->fresh()->getAttributes();
 
     expect(fn () => app(WorkScheduleProfileRetirer::class)->retireAndReassign(
         $source,
@@ -122,7 +130,70 @@ test('a locked payroll period rolls back the complete profile retirement', funct
     expect($source->fresh()->is_active)->toBeTrue()
         ->and($source->fresh()->retired_at)->toBeNull()
         ->and($assignment->fresh()->work_schedule_profile_id)->toBe($source->id)
-        ->and($assignment->fresh()->effective_to)->toBeNull();
+        ->and($assignment->fresh()->effective_to)->toBeNull()
+        ->and(WorkScheduleProfile::withoutCompanyScope()->count())->toBe(2)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(1)
+        ->and(collect([$source, $replacement])
+            ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all())->toBe($profileSnapshots)
+        ->and($assignment->fresh()->getAttributes())->toBe($assignmentSnapshot)
+        ->and($period->fresh()->getAttributes())->toBe($periodSnapshot);
+});
+
+test('a foreign replacement profile writes nothing', function () {
+    $company = Company::factory()->create();
+    $foreignCompany = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $foreignReplacement = WorkScheduleProfile::factory()->forCompany($foreignCompany)->create();
+    $profileSnapshots = collect([$source, $foreignReplacement])
+        ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all();
+
+    expect(fn () => app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source,
+        $foreignReplacement,
+        'Foreign replacement attempt.',
+        $actor,
+    ))->toThrow(ValidationException::class)
+        ->and(WorkScheduleProfile::withoutCompanyScope()->count())->toBe(2)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and(collect([$source, $foreignReplacement])
+            ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all())->toBe($profileSnapshots);
+});
+
+test('an unauthorized actor cannot retire a profile or rewrite assignments', function () {
+    $this->seed(PermissionRoleSeeder::class);
+    $company = Company::factory()->create();
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $assignment = EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id,
+        'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $source->id,
+        'effective_from' => '2026-01-01',
+        'effective_to' => null,
+    ]);
+    $profileSnapshots = collect([$source, $replacement])
+        ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all();
+    $assignmentSnapshot = $assignment->fresh()->getAttributes();
+
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($actor);
+
+    Livewire::test(Index::class)
+        ->set('retiringProfileId', $source->id)
+        ->set('replacementProfileId', $replacement->id)
+        ->set('retirementReason', 'Unauthorized retirement attempt.')
+        ->call('retireProfile')
+        ->assertForbidden();
+
+    expect($source->fresh()->is_active)->toBeTrue()
+        ->and(WorkScheduleProfile::withoutCompanyScope()->count())->toBe(2)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(1)
+        ->and(collect([$source, $replacement])
+            ->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all())->toBe($profileSnapshots)
+        ->and($assignment->fresh()->getAttributes())->toBe($assignmentSnapshot);
 });
 
 test('retirement locks payroll periods before employees', function () {
@@ -233,4 +304,23 @@ test('repeating the same retirement is idempotent while changing its replacement
         'Intento conflictivo.',
         $actor,
     ))->toThrow(ValidationException::class);
+});
+
+test('the general profile can only change through effective-dated activation', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $source = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $replacement = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $assignment = EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id, 'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $source->id, 'effective_from' => '2026-01-01',
+    ]);
+
+    expect(fn () => app(WorkScheduleProfileRetirer::class)->retireAndReassign(
+        $source, $replacement, 'Manual general replacement', $actor,
+    ))->toThrow(ValidationException::class)
+        ->and($source->fresh()->is_active)->toBeTrue()
+        ->and($assignment->fresh()->work_schedule_profile_id)->toBe($source->id)
+        ->and($source->publications()->sole()->effective_to)->toBeNull();
 });

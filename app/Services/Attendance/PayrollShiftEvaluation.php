@@ -15,7 +15,7 @@ readonly class PayrollShiftEvaluation
     public const SKIP = 'skip';
 
     /**
-     * @param  Collection<int, array{code:string,candidate_key?:string}>  $blockers
+     * @param  Collection<int, array{code:string,candidate_key?:string,deficit_key?:string}>  $blockers
      * @param  array<string, mixed>  $metadata
      */
     public function __construct(
@@ -35,5 +35,7 @@ readonly class PayrollShiftEvaluation
         public bool $unjustified = false,
         public Collection $blockers = new Collection,
         public array $metadata = [],
+        public ?int $publicationId = null,
+        public ?string $payrollPolicyKey = null,
     ) {}
 }

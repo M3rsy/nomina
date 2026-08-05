@@ -2,10 +2,14 @@
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\GeneralWorkSchedulePublisher;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 test('assigning a new schedule closes the previous assignment without overlap', function () {
@@ -24,6 +28,49 @@ test('assigning a new schedule closes the previous assignment without overlap', 
         ->and($second->effective_to)->toBeNull()
         ->and($second->assigned_by)->toBe($actor->id)
         ->and($second->reason)->toBe('Cambio a turno nocturno');
+});
+
+test('schedule assignment locks the company before the profile', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $lockOrder = [];
+
+    Company::retrieved(function (Company $retrieved) use ($company, &$lockOrder): void {
+        if ($retrieved->is($company)) {
+            $lockOrder[] = 'company';
+        }
+    });
+    WorkScheduleProfile::retrieved(function (WorkScheduleProfile $retrieved) use ($profile, &$lockOrder): void {
+        if ($retrieved->is($profile)) {
+            $lockOrder[] = 'profile';
+        }
+    });
+
+    $assigner->assign($employee, $profile, '2026-07-01', 'Canonical lock order');
+
+    expect(array_slice($lockOrder, 0, 2))->toBe(['company', 'profile']);
+});
+
+test('schedule assignment uses one transaction without a savepoint', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $transactionLevel = null;
+    $harnessLevel = DB::transactionLevel();
+
+    app(EmployeeScheduleAssigner::class)->assign(
+        $employee,
+        $profile,
+        '2026-07-01',
+        'Single transaction',
+        mutateEmployee: function () use (&$transactionLevel): void {
+            $transactionLevel = DB::transactionLevel();
+        },
+    );
+
+    expect($transactionLevel)->toBe($harnessLevel + 1);
 });
 
 test('creates an employee and initial assigned schedule inside one payroll context', function () {
@@ -81,13 +128,18 @@ test('a backdated schedule assignment is bounded by its neighboring assignments'
 test('an employee cannot receive a schedule profile from another company', function () {
     $employee = Employee::factory()->forCompany()->create();
     $foreignProfile = WorkScheduleProfile::factory()->forCompany()->create();
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshot = $foreignProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->assign(
         $employee,
         $foreignProfile,
         '2026-07-01',
         'Asignación inválida',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($foreignProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('a stale form cannot assign a retired schedule profile', function () {
@@ -97,13 +149,18 @@ test('a stale form cannot assign a retired schedule profile', function () {
         'is_active' => false,
         'retired_at' => now(),
     ]);
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshot = $retiredProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->assign(
         $employee,
         $retiredProfile,
         '2026-07-01',
         'Formulario abierto antes del retiro.',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($retiredProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('employee creation cannot use a stale retired schedule profile', function () {
@@ -113,13 +170,17 @@ test('employee creation cannot use a stale retired schedule profile', function (
         'retired_at' => now(),
     ]);
     $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+    $profileSnapshot = $retiredProfile->fresh()->getAttributes();
 
     expect(fn () => app(EmployeeScheduleAssigner::class)->createAndAssign(
         $attributes,
         $retiredProfile,
         '2026-07-01',
         'Formulario de alta abierto antes del retiro.',
-    ))->toThrow(ValidationException::class);
+    ))->toThrow(ValidationException::class)
+        ->and(Employee::withoutCompanyScope()->count())->toBe(0)
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(0)
+        ->and($retiredProfile->fresh()->getAttributes())->toBe($profileSnapshot);
 });
 
 test('an assignment requires a reason and a unique effective date', function () {
@@ -144,16 +205,24 @@ test('an assignment cannot change dates covered by a locked payroll period', fun
     $assigner = app(EmployeeScheduleAssigner::class);
     $current = $assigner->assign($employee, $profiles[0], '2026-07-01', 'Asignación inicial');
 
-    PayPeriod::factory()->forCompany($company)->create([
+    $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',
         'end_date' => '2026-07-27',
         'status' => $status,
     ]);
+    $assignmentSnapshot = $current->fresh()->getAttributes();
+    $employeeSnapshot = $employee->fresh()->getAttributes();
+    $profileSnapshots = $profiles->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all();
+    $periodSnapshot = $period->fresh()->getAttributes();
 
     expect(fn () => $assigner->assign($employee, $profiles[1], '2026-07-15', 'Cambio retroactivo'))
         ->toThrow(ValidationException::class)
         ->and($current->fresh()->effective_to)->toBeNull()
-        ->and($employee->scheduleAssignments()->count())->toBe(1);
+        ->and(EmployeeScheduleAssignment::withoutCompanyScope()->count())->toBe(1)
+        ->and($current->fresh()->getAttributes())->toBe($assignmentSnapshot)
+        ->and($employee->fresh()->getAttributes())->toBe($employeeSnapshot)
+        ->and($profiles->map(fn (WorkScheduleProfile $profile): array => $profile->fresh()->getAttributes())->all())->toBe($profileSnapshots)
+        ->and($period->fresh()->getAttributes())->toBe($periodSnapshot);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
 test('an assignment may start after a locked payroll period', function () {
@@ -214,3 +283,55 @@ test('a backdated assignment cannot repartition the first work date of a locked 
         ->and($next->fresh()->effective_from->toDateString())->toBe('2026-08-01')
         ->and($employee->scheduleAssignments()->count())->toBe(2);
 });
+
+test('new employees resolve the exact general profile before on and after activation', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => $company->id]);
+    $previous = WorkScheduleProfile::factory()->forCompany($company)->create([
+        'profile_key' => 'general', 'name' => 'Jornada general',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01', 'end_date' => '2027-01-15', 'status' => 'draft',
+    ]);
+    $publication = app(GeneralWorkSchedulePublisher::class)->activate(
+        $company, $actor, 'Activate date-effective profile', '2026-08-02 10:00:00',
+    );
+    $assigner = app(EmployeeScheduleAssigner::class);
+    $dates = ['2026-12-31', '2027-01-01', '2027-02-01'];
+
+    $assignments = collect($dates)->map(function (string $date) use ($assigner, $company, $actor) {
+        $attributes = Employee::factory()->forCompany($company)->make(['hired_at' => $date])->getAttributes();
+
+        return $assigner->createAndAssignGeneral(
+            $attributes, $date, 'Jornada general vigente al contratar', $actor,
+        );
+    });
+
+    expect($assignments->pluck('work_schedule_profile_id')->all())->toBe([
+        $previous->id,
+        $publication->profile_id,
+        $publication->profile_id,
+    ]);
+});
+
+test('new employee assignment fails closed when the general profile is missing or ambiguous', function (bool $ambiguous) {
+    $company = Company::factory()->create();
+    if ($ambiguous) {
+        WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+        $overlap = WorkScheduleProfile::withoutEvents(fn () => WorkScheduleProfile::factory()->forCompany($company)
+            ->create(['profile_key' => 'general', 'version' => 2]));
+        WorkScheduleProfilePublication::withoutCompanyScope()->create([
+            'company_id' => $company->id, 'profile_key' => 'general', 'profile_id' => $overlap->id,
+            'payroll_policy_key' => WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+            'effective_from' => '1970-01-01', 'definition_hash' => str_repeat('a', 64),
+            'request_key' => str_repeat('b', 64), 'payload_hash' => str_repeat('c', 64),
+            'reason' => 'Ambiguous fixture',
+        ]);
+    }
+    $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+
+    expect(fn () => app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
+        $attributes, '2026-08-02', 'Exact-one general profile required',
+    ))->toThrow(ValidationException::class)
+        ->and(Employee::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(0);
+})->with(['missing' => false, 'ambiguous' => true]);

@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfilePublication;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -34,11 +35,28 @@ class ShiftOccurrenceResolver
     public function resolve(Employee $employee, CarbonInterface|string $workDate): ShiftOccurrence
     {
         $date = CarbonImmutable::parse($workDate)->startOfDay();
-        $assignment = $this->assignmentFor($employee, $date);
+        $assignments = $this->assignmentsFor($employee, $date);
 
-        if ($assignment === null) {
-            return $this->emptyOccurrence($date, ShiftOccurrence::MISSING_ASSIGNMENT);
+        if ($assignments->count() !== 1) {
+            return $this->emptyOccurrence(
+                $date,
+                $assignments->isEmpty() ? ShiftOccurrence::MISSING_ASSIGNMENT : ShiftOccurrence::AMBIGUOUS_ASSIGNMENT,
+            );
         }
+
+        $assignment = $assignments->sole();
+
+        $publications = $this->publicationsFor($employee, $assignment, $date);
+
+        if ($publications->count() !== 1) {
+            return $this->emptyOccurrence(
+                $date,
+                $publications->isEmpty() ? ShiftOccurrence::MISSING_PUBLICATION : ShiftOccurrence::AMBIGUOUS_PUBLICATION,
+                $assignment,
+            );
+        }
+
+        $publication = $publications->sole();
 
         $schedule = $this->scheduleFor($employee, $assignment, $date);
 
@@ -74,6 +92,8 @@ class ShiftOccurrenceResolver
             // Adjacent facts can move a boundary, so they also invalidate this occurrence identity.
             factGeneration: $this->snapshot?->factGeneration($employee, [$date->subDay(), $date, $date->addDay()])
                 ?? $this->factGenerations->currentForDates($employee, [$date->subDay(), $date, $date->addDay()]),
+            publicationId: $publication->id,
+            payrollPolicyKey: $publication->payroll_policy_key,
         );
     }
 
@@ -87,7 +107,9 @@ class ShiftOccurrenceResolver
 
         foreach ([$calendarDate->subDay(), $calendarDate, $calendarDate->addDay()] as $workDate) {
             $assignment = $this->assignmentFor($employee, $workDate);
-            $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $workDate);
+            $schedule = $assignment === null || $this->publicationsFor($employee, $assignment, $workDate)->count() !== 1
+                ? null
+                : $this->scheduleFor($employee, $assignment, $workDate);
 
             if ($schedule === null) {
                 continue;
@@ -111,8 +133,35 @@ class ShiftOccurrenceResolver
 
     private function assignmentFor(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
     {
+        $assignments = $this->assignmentsFor($employee, $date);
+
+        return $assignments->count() === 1 ? $assignments->sole() : null;
+    }
+
+    /** @return Collection<int, WorkScheduleProfilePublication> */
+    private function publicationsFor(
+        Employee $employee,
+        EmployeeScheduleAssignment $assignment,
+        CarbonImmutable $date,
+    ): Collection {
         if ($this->snapshot !== null) {
-            return $this->snapshot->assignment($employee, $date);
+            return $this->snapshot->publications($assignment, $date);
+        }
+
+        return WorkScheduleProfilePublication::withoutCompanyScope()
+            ->where('company_id', $employee->company_id)
+            ->where('profile_id', $assignment->work_schedule_profile_id)
+            ->whereDate('effective_from', '<=', $date->toDateString())
+            ->where(fn ($query) => $query->whereNull('effective_to')->orWhereDate('effective_to', '>', $date->toDateString()))
+            ->orderBy('id')
+            ->get();
+    }
+
+    /** @return Collection<int, EmployeeScheduleAssignment> */
+    private function assignmentsFor(Employee $employee, CarbonImmutable $date): Collection
+    {
+        if ($this->snapshot !== null) {
+            return $this->snapshot->assignments($employee, $date);
         }
 
         return EmployeeScheduleAssignment::withoutCompanyScope()
@@ -124,7 +173,8 @@ class ShiftOccurrenceResolver
                     ->orWhereDate('effective_to', '>=', $date->toDateString());
             })
             ->orderByDesc('effective_from')
-            ->first();
+            ->orderByDesc('id')
+            ->get();
     }
 
     /**
@@ -265,7 +315,9 @@ class ShiftOccurrenceResolver
         }
 
         $assignment = $this->assignmentFor($employee, $rightDate);
-        $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $rightDate);
+        $schedule = $assignment === null || $this->publicationsFor($employee, $assignment, $rightDate)->count() !== 1
+            ? null
+            : $this->scheduleFor($employee, $assignment, $rightDate);
 
         return $schedule !== null && ! $schedule->is_working_day;
     }
@@ -274,7 +326,9 @@ class ShiftOccurrenceResolver
     private function assignedInterval(Employee $employee, CarbonImmutable $date): array
     {
         $assignment = $this->assignmentFor($employee, $date);
-        $schedule = $assignment === null ? null : $this->scheduleFor($employee, $assignment, $date);
+        $schedule = $assignment === null || $this->publicationsFor($employee, $assignment, $date)->count() !== 1
+            ? null
+            : $this->scheduleFor($employee, $assignment, $date);
 
         return $schedule === null ? [null, null] : $this->scheduledInterval($date, $schedule);
     }

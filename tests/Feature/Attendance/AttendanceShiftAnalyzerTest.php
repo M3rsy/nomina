@@ -3,6 +3,7 @@
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\ShiftOccurrence;
@@ -306,6 +307,297 @@ test('blocks a resolved pair whose timestamps do not form an interval', function
         ->and($analysis->overtimeCandidates)->toBeEmpty();
 });
 
+test('splits duration-first post-quota time at the eighteen hundred wall-clock boundary', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 09:30:00',
+        exitAt: '2026-07-20 18:30:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(540)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($candidate->kind)->toBe('post_quota_overtime')
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 17:30:00')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 18:30:00')
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(30)
+        ->and($candidate->rateMinutes->extra50Minutes)->toBe(30)
+        ->and($candidate->rateMinutes->totalMinutes())->toBe(60);
+});
+
+test('keeps exactly 480 whole minutes for a 480 minute 59 second duration-first interval', function () {
+    $occurrence = attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:00:59',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    );
+    $analyzer = app(AttendanceShiftAnalyzer::class);
+
+    $firstAnalysis = $analyzer->analyze($occurrence);
+    $repeatedAnalysis = $analyzer->analyze($occurrence);
+
+    expect($firstAnalysis->workedMinutes)->toBe(480)
+        ->and($firstAnalysis->scheduledMinutes)->toBe(480)
+        ->and($firstAnalysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($firstAnalysis->overtimeCandidates)->toBeEmpty()
+        ->and($repeatedAnalysis->workedMinutes)->toBe(480)
+        ->and($repeatedAnalysis->scheduledRates->totalMinutes())->toBe(480)
+        ->and($occurrence->entryMark()?->event_at->toDateTimeString())->toBe('2026-07-20 06:00:00')
+        ->and($occurrence->exitMark()?->event_at->toDateTimeString())->toBe('2026-07-20 14:00:59')
+        ->and($occurrence->entryMark()?->metadata['revisions'])->toBe([['revision' => 1]])
+        ->and($occurrence->exitMark()?->metadata['revisions'])->toBe([['revision' => 2]]);
+});
+
+test('keeps shifted duration-first eight-hour days at 480 ordinary minutes', function (string $entryAt, string $exitAt) {
+    $shiftAnalysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: $entryAt,
+        exitAt: $exitAt,
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($shiftAnalysis->workedMinutes)->toBe(480)
+        ->and($shiftAnalysis->scheduledMinutes)->toBe(480)
+        ->and($shiftAnalysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($shiftAnalysis->scheduledRates->totalMinutes())->toBe(480)
+        ->and($shiftAnalysis->deficits)->toBeEmpty()
+        ->and($shiftAnalysis->overtimeCandidates)->toBeEmpty();
+})->with([
+    '08:00-16:00' => ['2026-07-20 08:00:00', '2026-07-20 16:00:00'],
+    '09:00-17:00' => ['2026-07-20 09:00:00', '2026-07-20 17:00:00'],
+    '12:00-20:00' => ['2026-07-20 12:00:00', '2026-07-20 20:00:00'],
+]);
+
+test('allocates each duration-first post-quota worked example by wall clock', function (
+    string $entryAt,
+    string $exitAt,
+    string $candidateStart,
+    int $workedMinutes,
+    int $candidateMinutes,
+    int $extra25Minutes,
+    int $extra50Minutes,
+) {
+    $quotaAnalysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: $entryAt,
+        exitAt: $exitAt,
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $quotaAnalysis->overtimeCandidates->sole();
+
+    expect($quotaAnalysis->workedMinutes)->toBe($workedMinutes)
+        ->and($quotaAnalysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($candidate->start->toDateTimeString())->toBe($candidateStart)
+        ->and($candidate->end->toDateTimeString())->toBe($exitAt)
+        ->and($candidate->rateMinutes->ordinaryMinutes)->toBe(0)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe($extra25Minutes)
+        ->and($candidate->rateMinutes->extra50Minutes)->toBe($extra50Minutes)
+        ->and($candidate->rateMinutes->totalMinutes())->toBe($candidateMinutes);
+})->with([
+    '06:00-16:00' => ['2026-07-20 06:00:00', '2026-07-20 16:00:00', '2026-07-20 14:00:00', 600, 120, 120, 0],
+    '09:00-19:00' => ['2026-07-20 09:00:00', '2026-07-20 19:00:00', '2026-07-20 17:00:00', 600, 120, 60, 60],
+    '12:00-21:00' => ['2026-07-20 12:00:00', '2026-07-20 21:00:00', '2026-07-20 20:00:00', 540, 60, 0, 60],
+]);
+
+test('keeps 00:00-09:00 at 480 ordinary plus 60 wall-clock extra25 minutes', function () {
+    $preShiftAnalysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 00:00:00',
+        exitAt: '2026-07-20 09:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $preShiftAnalysis->overtimeCandidates->sole();
+
+    expect($preShiftAnalysis->workedMinutes)->toBe(540)
+        ->and($preShiftAnalysis->scheduledMinutes)->toBe(480)
+        ->and($preShiftAnalysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-20 08:00:00')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 09:00:00')
+        ->and($candidate->rateMinutes->ordinaryMinutes)->toBe(0)
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(60)
+        ->and($candidate->rateMinutes->extra75Minutes)->toBe(0)
+        ->and($candidate->minutes)->toBe(60);
+});
+
+test('duration-first entry at 06:20 is within variation tolerance', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:20:00', '2026-07-20 14:20:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->variations)->toBeEmpty();
+});
+
+test('duration-first 07:00-15:00 exposes a pay-neutral entry variation', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 07:00:00', '2026-07-20 15:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $variation = $analysis->variations->sole();
+
+    expect($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->overtimeCandidates)->toBeEmpty()
+        ->and($variation->kind)->toBe('schedule_entry')
+        ->and($variation->entryAt->toDateTimeString())->toBe('2026-07-20 07:00:00')
+        ->and($variation->fingerprint)->toHaveLength(64);
+});
+
+test('duration-first incomplete quota emits no entry variation', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 07:00:00', '2026-07-20 14:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->scheduledMinutes)->toBe(420)
+        ->and($analysis->variations)->toBeEmpty();
+});
+
+test('duration-first keeps an overnight daily shortfall on its starting work date', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 18:00:00', '2026-07-19 01:00:00', '18:00', '02:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $deficit = $analysis->deficits->sole();
+
+    expect($analysis->workDate->toDateString())->toBe('2026-07-18')
+        ->and($analysis->workedMinutes)->toBe(420)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(420)
+        ->and($analysis->scheduledRates->extra100Minutes)->toBe(0)
+        ->and($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(60)
+        ->and($deficit->start)->toBeNull()
+        ->and($deficit->end)->toBeNull()
+        ->and($deficit->rateMinutes->ordinaryMinutes)->toBe(60);
+});
+
+test('duration-first completed overtime hour has zero transfer residual', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 15:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->overtimeCandidates->sole()->minutes)->toBe(60)
+        ->and($analysis->excludedTransferMinutes)->toBe(0);
+});
+
+test('duration-first excludes an exact one-minute transfer residual', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 15:01:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->overtimeCandidates->sole()->minutes)->toBe(60)
+        ->and($analysis->excludedTransferMinutes)->toBe(1)
+        ->and($analysis->exitAt?->toDateTimeString())->toBe('2026-07-20 15:01:00');
+});
+
+test('duration-first aligns transfer exclusion to a Saturday overnight work date', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 18:00:00', '2026-07-19 03:20:00', '18:00', '02:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workDate->toDateString())->toBe('2026-07-18')
+        ->and($analysis->exitAt?->toDateTimeString())->toBe('2026-07-19 03:20:00')
+        ->and($analysis->excludedTransferMinutes)->toBe(20)
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-19 02:00:00')
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-19 03:00:00')
+        ->and($candidate->rateMinutes->extra75Minutes)->toBe(60);
+});
+
+test('duration-first excludes a 25-minute transfer residual exactly', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 16:25:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(625)
+        ->and($analysis->excludedTransferMinutes)->toBe(25)
+        ->and($candidate->minutes)->toBe(120)
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 16:00:00')
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(120);
+});
+
+test('duration-first preserves every post-quota minute above the transfer threshold', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 16:31:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->excludedTransferMinutes)->toBe(0)
+        ->and($candidate->minutes)->toBe(151)
+        ->and($candidate->end->toDateTimeString())->toBe('2026-07-20 16:31:00')
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(151);
+});
+
+test('duration-first excludes a 30-minute transfer residual at the threshold', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 15:30:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->excludedTransferMinutes)->toBe(30)
+        ->and($analysis->overtimeCandidates->sole()->minutes)->toBe(60);
+});
+
+test('duration-first keeps residual when no overtime hour is complete', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:25:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->excludedTransferMinutes)->toBe(0)
+        ->and($analysis->overtimeCandidates->sole()->minutes)->toBe(25);
+});
+
+test('overrides the entire duration-first interval on a Sunday or holiday', function (
+    string $workDate,
+    bool $isHoliday,
+) {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: $workDate,
+        entryAt: "{$workDate} 06:00:00",
+        exitAt: "{$workDate} 16:00:00",
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ), isHoliday: $isHoliday);
+
+    expect($analysis->workedMinutes)->toBe(600)
+        ->and($analysis->scheduledMinutes)->toBe(600)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra25Minutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra50Minutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra75Minutes)->toBe(0)
+        ->and($analysis->scheduledRates->extra100Minutes)->toBe(600)
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+})->with([
+    'Sunday work date' => ['2026-07-19', false],
+    'configured holiday work date' => ['2026-07-20', true],
+]);
+
+test('rejects a resolved occurrence with an unsupported immutable payroll policy key', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:00:00',
+        payrollPolicyKey: 'duration-first-v3',
+    ));
+
+    expect($analysis->status)->toBe(AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY)
+        ->and($analysis->workedMinutes)->toBe(0)
+        ->and($analysis->scheduledMinutes)->toBe(0)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(0)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($analysis->overtimeCandidates)->toBeEmpty()
+        ->and($analysis->payrollPolicyKey)->toBe('duration-first-v3');
+});
+
 function attendanceOccurrence(
     string $workDate,
     string $entryAt,
@@ -314,6 +606,7 @@ function attendanceOccurrence(
     ?string $scheduledEnd = '14:00',
     ?array $bands = null,
     int $factGeneration = 0,
+    string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
 ): ShiftOccurrence {
     $date = CarbonImmutable::parse($workDate)->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -328,8 +621,18 @@ function attendanceOccurrence(
         'id' => 30,
         'work_schedule_profile_id' => 20,
     ]);
-    $entry = (new RawMark)->forceFill(['id' => 40, 'event_at' => $entryAt, 'status' => 'valid']);
-    $exit = (new RawMark)->forceFill(['id' => 41, 'event_at' => $exitAt, 'status' => 'valid']);
+    $entry = (new RawMark)->forceFill([
+        'id' => 40,
+        'event_at' => $entryAt,
+        'status' => 'valid',
+        'metadata' => ['revisions' => [['revision' => 1]]],
+    ]);
+    $exit = (new RawMark)->forceFill([
+        'id' => 41,
+        'event_at' => $exitAt,
+        'status' => 'valid',
+        'metadata' => ['revisions' => [['revision' => 2]]],
+    ]);
     $start = $scheduledStart === null ? null : $date->setTimeFromTimeString($scheduledStart);
     $end = $scheduledEnd === null ? null : $date->setTimeFromTimeString($scheduledEnd);
 
@@ -346,5 +649,6 @@ function attendanceOccurrence(
         marks: collect([$entry, $exit]),
         status: ShiftOccurrence::RESOLVED,
         factGeneration: $factGeneration,
+        payrollPolicyKey: $payrollPolicyKey,
     );
 }
