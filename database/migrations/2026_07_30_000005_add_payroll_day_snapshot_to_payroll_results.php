@@ -51,6 +51,8 @@ return new class extends Migration
 
     public function down(): void
     {
+        $this->ensureNoImmutablePayrollHistoryExists();
+
         if (DB::getDriverName() === 'sqlite') {
             DB::unprepared('DROP TRIGGER IF EXISTS payroll_results_reject_update');
             DB::unprepared('DROP TRIGGER IF EXISTS payroll_results_reject_delete');
@@ -72,5 +74,30 @@ return new class extends Migration
         Schema::table('pay_periods', function (Blueprint $table): void {
             $table->dropColumn(['current_result_generation', 'authorized_result_generation']);
         });
+    }
+
+    private function ensureNoImmutablePayrollHistoryExists(): void
+    {
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('LOCK TABLE pay_periods, payroll_results IN ACCESS EXCLUSIVE MODE');
+        }
+
+        $hasGenerationState = DB::table('pay_periods')
+            ->where('current_result_generation', '<>', 1)
+            ->orWhereNotNull('authorized_result_generation')
+            ->exists();
+        $hasSnapshotState = DB::table('payroll_results')
+            ->where('result_generation', '<>', 1)
+            ->orWhereNotNull('supersedes_id')
+            ->orWhereNotNull('day_snapshot')
+            ->orWhereNotNull('snapshot_hash')
+            ->exists();
+
+        if ($hasGenerationState || $hasSnapshotState) {
+            throw new RuntimeException(
+                'Cannot roll back payroll day snapshots: immutable payroll generation or snapshot history exists. '
+                .'Keep this migration applied and use a forward-only correction.'
+            );
+        }
     }
 };
