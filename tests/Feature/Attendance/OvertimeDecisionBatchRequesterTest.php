@@ -13,6 +13,7 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceDecisionMatcher;
 use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalysis;
@@ -483,6 +484,7 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
     );
     $bulkReview = new PayrollShiftReview(
         $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
+        app(AttendanceDecisionMatcher::class),
     );
     $query = Mockery::mock(AttendanceReviewQuery::class);
     $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));

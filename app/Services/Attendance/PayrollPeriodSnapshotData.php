@@ -131,6 +131,31 @@ final readonly class PayrollPeriodSnapshotData
             ->values();
     }
 
+    public function publication(int $id): ?WorkScheduleProfilePublication
+    {
+        return $this->publications->firstWhere('id', $id);
+    }
+
+    /** @return Collection<int, EmployeeScheduleAssignment> */
+    public function assignmentsEnding(Employee $employee, CarbonImmutable $date): Collection
+    {
+        return $this->assignments
+            ->where('employee_id', $employee->id)
+            ->filter(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_to?->isSameDay($date) === true)
+            ->values();
+    }
+
+    /** @return Collection<int, WorkScheduleProfilePublication> */
+    public function publicationsEnding(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): Collection
+    {
+        return $this->publications
+            ->where('company_id', $assignment->company_id)
+            ->where('profile_id', $assignment->work_schedule_profile_id)
+            ->where('payroll_policy_key', WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1)
+            ->filter(fn (WorkScheduleProfilePublication $publication): bool => $publication->effective_to?->isSameDay($date) === true)
+            ->values();
+    }
+
     /** @return Collection<int, RawMark> */
     public function marks(Employee $employee, CarbonImmutable $start, CarbonImmutable $end): Collection
     {

@@ -22,16 +22,17 @@ readonly class PayrollShiftReview
         public Collection $currentDecisions,
         public Collection $currentExceptions,
         public Collection $variationAcknowledgements,
+        private AttendanceDecisionMatcher $decisionMatcher,
     ) {}
 
     public function decisionFor(AttendanceSegment $candidate): ?OvertimeDecision
     {
-        return $this->currentDecisions->firstWhere('candidate_key', $candidate->key);
+        return $this->decisionMatcher->overtime($this->currentDecisions, $candidate);
     }
 
     public function exceptionFor(AttendanceSegment $deficit): ?AttendanceException
     {
-        return $this->currentExceptions->firstWhere('deficit_key', $deficit->key);
+        return $this->decisionMatcher->exception($this->currentExceptions, $deficit);
     }
 
     public function acknowledgementFor(AttendanceVariation $variation): ?AttendanceVariationAcknowledgement

@@ -343,6 +343,7 @@ function payrollDecision(AttendanceSegment $candidate, string $decision, array $
     return (new OvertimeDecision)->forceFill([
         'candidate_key' => $candidate->key,
         'fingerprint' => $candidate->fingerprint,
+        'segment_kind' => $candidate->kind,
         'starts_at' => $candidate->start,
         'ends_at' => $candidate->end,
         'minutes' => $candidate->minutes,
@@ -364,6 +365,7 @@ function payrollAttendanceException(AttendanceSegment $deficit, string $decision
         'id' => 42,
         'deficit_key' => $deficit->key,
         'fingerprint' => $deficit->fingerprint,
+        'segment_kind' => $deficit->kind,
         'starts_at' => $deficit->start,
         'ends_at' => $deficit->end,
         'minutes' => $deficit->minutes,

@@ -76,13 +76,13 @@ class AttendanceShiftAnalyzer
                 if (! $isHoliday
                     && $occurrence->schedule?->is_working_day
                     && $scheduledMinutes > 0) {
-                    $deficits->push(new AttendanceSegment(
+                    $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                         'full_day_absence',
                         $occurrence->scheduledStart,
                         $occurrence->scheduledEnd,
                         $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
                         $scheduledRates,
-                    ));
+                    ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration)));
                 }
             }
 
@@ -176,6 +176,7 @@ class AttendanceShiftAnalyzer
                 $isHoliday,
             );
             $fingerprint = $this->fingerprint($occurrence, $isHoliday, $calendarGeneration);
+            $legacyFingerprint = $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration);
             $scheduledDuration = $this->minutes($scheduledStart, $scheduledEnd);
             $missingScheduledMinutes = max(0, $scheduledDuration - $scheduledMinutes);
             $lateMinutes = min(
@@ -188,55 +189,55 @@ class AttendanceShiftAnalyzer
 
             if ($lateMinutes > 0) {
                 $deficitEnd = $scheduledStart->addMinutes($lateMinutes);
-                $deficits->push(new AttendanceSegment(
+                $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                     'late_arrival',
                     $scheduledStart,
                     $deficitEnd,
                     $fingerprint,
                     $this->ratesFor($occurrence, $scheduledStart, $deficitEnd, false, $isHoliday),
-                ));
+                ), $legacyFingerprint));
             }
 
             if ($earlyMinutes > 0) {
                 $deficitStart = $scheduledEnd->subMinutes($earlyMinutes);
-                $deficits->push(new AttendanceSegment(
+                $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                     'early_departure',
                     $deficitStart,
                     $scheduledEnd,
                     $fingerprint,
                     $this->ratesFor($occurrence, $deficitStart, $scheduledEnd, false, $isHoliday),
-                ));
+                ), $legacyFingerprint));
             }
 
             if ($preShiftMinutes > 0) {
                 $candidateEnd = $entry->addMinutes($preShiftMinutes);
-                $overtimeCandidates->push(new AttendanceSegment(
+                $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                     'pre_shift',
                     $entry,
                     $candidateEnd,
                     $fingerprint,
                     $this->ratesFor($occurrence, $entry, $candidateEnd, true, $isHoliday),
-                ));
+                ), $legacyFingerprint));
             }
 
             if ($postShiftMinutes > 0) {
                 $candidateStart = $payableEnd->subMinutes($postShiftMinutes);
-                $overtimeCandidates->push(new AttendanceSegment(
+                $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                     'post_shift',
                     $candidateStart,
                     $payableEnd,
                     $fingerprint,
                     $this->ratesFor($occurrence, $candidateStart, $payableEnd, true, $isHoliday),
-                ));
+                ), $legacyFingerprint));
             }
         } elseif ($workedMinutes > 0) {
-            $overtimeCandidates->push(new AttendanceSegment(
+            $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                 'non_working',
                 $entry,
                 $payableEnd,
                 $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
                 $this->ratesFor($occurrence, $entry, $payableEnd, true, $isHoliday),
-            ));
+            ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration)));
         }
 
         return new AttendanceShiftAnalysis(
@@ -417,13 +418,13 @@ class AttendanceShiftAnalyzer
         bool $isHoliday,
         int $calendarGeneration,
     ): AttendanceSegment {
-        return new AttendanceSegment(
+        return $this->withLegacyIdentity(new AttendanceSegment(
             'post_quota_overtime',
             $start,
             $end,
             $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
             $this->bandSplitter->split($start, $end, self::DURATION_FIRST_OVERTIME_BANDS),
-        );
+        ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration));
     }
 
     private function durationFirstShortfall(
@@ -440,14 +441,14 @@ class AttendanceShiftAnalyzer
             return null;
         }
 
-        return new AttendanceSegment(
+        return $this->withLegacyIdentity(new AttendanceSegment(
             kind: 'daily_shortfall',
             start: null,
             end: null,
             fingerprint: $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
             rateMinutes: new BandSplit(ordinaryMinutes: $minutes),
             minutes: $minutes,
-        );
+        ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration));
     }
 
     private function minutes(CarbonImmutable $start, CarbonImmutable $end): int
@@ -457,12 +458,37 @@ class AttendanceShiftAnalyzer
 
     private function fingerprint(ShiftOccurrence $occurrence, bool $isHoliday, int $calendarGeneration): string
     {
+        return $this->fingerprintFor($occurrence, $isHoliday, $calendarGeneration, true);
+    }
+
+    private function legacyFingerprint(ShiftOccurrence $occurrence, bool $isHoliday, int $calendarGeneration): ?string
+    {
+        if ($occurrence->payrollPolicyKey !== WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1) {
+            return null;
+        }
+
+        return $this->fingerprintFor($occurrence, $isHoliday, $calendarGeneration, false);
+    }
+
+    private function withLegacyIdentity(AttendanceSegment $segment, ?string $legacyFingerprint): AttendanceSegment
+    {
+        return $legacyFingerprint === null
+            ? $segment
+            : $segment->withCompatibleFingerprint($legacyFingerprint);
+    }
+
+    private function fingerprintFor(
+        ShiftOccurrence $occurrence,
+        bool $isHoliday,
+        int $calendarGeneration,
+        bool $includePublicationIdentity,
+    ): string {
         $parts = [
             $occurrence->assignment?->id,
             $occurrence->schedule?->id,
         ];
 
-        if ($occurrence->publicationId !== null || $occurrence->payrollPolicyKey !== null) {
+        if ($includePublicationIdentity && ($occurrence->publicationId !== null || $occurrence->payrollPolicyKey !== null)) {
             $parts[] = $occurrence->publicationId;
             $parts[] = $occurrence->payrollPolicyKey;
         }

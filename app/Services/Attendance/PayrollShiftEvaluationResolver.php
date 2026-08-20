@@ -15,9 +15,10 @@ class PayrollShiftEvaluationResolver
 {
     public function __construct(
         private ShiftOccurrenceResolver $occurrenceResolver,
-        private AttendanceShiftAnalyzer $shiftAnalyzer,
+        private AttendanceShiftAnalysisResolver $analysisResolver,
         private PayrollShiftEvaluator $shiftEvaluator,
         private HolidayCalendar $holidayCalendar,
+        private AttendanceDecisionMatcher $decisionMatcher,
     ) {}
 
     public function resolve(
@@ -56,11 +57,7 @@ class PayrollShiftEvaluationResolver
         $occurrence = $snapshot === null
             ? $this->occurrenceResolver->resolve($employee, $date)
             : $this->occurrenceResolver->resolveFromSnapshot($employee, $date, $snapshot);
-        $analysis = $this->shiftAnalyzer->analyze(
-            $occurrence,
-            $calendarContext->isHoliday($date),
-            $calendarContext->generation($date),
-        );
+        $analysis = $this->analysisResolver->resolve($employee, $occurrence, $calendarContext, $snapshot);
         $decisions = $snapshot?->decisions($employee, $date)
             ?? OvertimeDecision::withoutCompanyScope()
                 ->where('company_id', $payPeriod->company_id)
@@ -88,6 +85,14 @@ class PayrollShiftEvaluationResolver
                 ->with('acknowledger')
                 ->get();
 
-        return new PayrollShiftReview($employee, $occurrence, $analysis, $decisions, $exceptions, $variationAcknowledgements);
+        return new PayrollShiftReview(
+            $employee,
+            $occurrence,
+            $analysis,
+            $decisions,
+            $exceptions,
+            $variationAcknowledgements,
+            $this->decisionMatcher,
+        );
     }
 }
