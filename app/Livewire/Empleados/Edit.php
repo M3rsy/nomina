@@ -19,6 +19,8 @@ class Edit extends Component
 
     public string $external_id = '';
 
+    public string $payment_code = '';
+
     public string $first_name = '';
 
     public string $last_name = '';
@@ -54,6 +56,7 @@ class Edit extends Component
         $this->employee = $employee;
         $this->company_id = $employee->company_id;
         $this->external_id = $employee->external_id;
+        $this->payment_code = $employee->payment_code ?? '';
         $this->first_name = $employee->first_name;
         $this->last_name = $employee->last_name;
         $this->dni = $employee->dni ?? '';
@@ -82,6 +85,7 @@ class Edit extends Component
 
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
+            'payment_code' => ['nullable', 'string', 'max:50', Rule::unique('employees', 'payment_code')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'dni' => ['nullable', 'string', 'max:32', 'regex:/^\d*$/'],
@@ -184,6 +188,7 @@ class Edit extends Component
         return [
             'external_id.required' => 'El código de empleado es obligatorio.',
             'external_id.unique' => 'El código de empleado ya existe en esta empresa.',
+            'payment_code.unique' => 'El código de pago ya existe en esta empresa.',
             'first_name.required' => 'El nombre es obligatorio.',
             'last_name.required' => 'El apellido es obligatorio.',
             'dni.regex' => 'La identidad debe contener solo números.',

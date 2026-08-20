@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollRunRequester;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
@@ -111,6 +112,22 @@ test('payroll progress reports status without a percentage and stops polling whe
         ->assertSee('Nómina procesada')
         ->assertDontSeeHtml('wire:poll.3s="poll"')
         ->assertDispatched('payroll-run-terminal', runId: $run->id);
+});
+
+test('a queued run that has not started warns that the worker is delayed', function () {
+    Carbon::setTestNow('2026-08-19 10:00:00');
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create(['status' => 'ready']);
+    $operator = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $run = app(PayrollRunRequester::class)->request($period, $operator, (string) Str::uuid());
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($operator);
+    Carbon::setTestNow('2026-08-19 10:00:16');
+
+    Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $run->id])
+        ->assertSet('delayed', true)
+        ->assertSee('La cola está demorada')
+        ->assertSeeHtml('wire:poll.3s="poll"');
 });
 
 test('a verified completed run redirects review to the existing payroll results', function () {

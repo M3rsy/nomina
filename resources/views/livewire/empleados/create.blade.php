@@ -38,6 +38,14 @@
                         @enderror
                     </label>
 
+                    <label for="payment_code" class="block space-y-1.5">
+                        <span class="text-sm font-semibold text-slate-800">Código de pago</span>
+                        <input id="payment_code" type="text" wire:model="payment_code" maxlength="50" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">
+                        @error('payment_code')
+                            <p id="payment_code-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
+                        @enderror
+                    </label>
+
                     <label for="dni" class="block space-y-1.5">
                         <span class="text-sm font-semibold text-slate-800">Identidad (DNI)</span>
                         <input id="dni" type="text" wire:model="dni" class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30">

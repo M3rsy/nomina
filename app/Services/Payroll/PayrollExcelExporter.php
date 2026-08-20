@@ -4,6 +4,7 @@ namespace App\Services\Payroll;
 
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -33,6 +34,8 @@ class PayrollExcelExporter
         'J' => 17,
         'K' => 15,
         'L' => 13,
+        'AE' => 18,
+        'AF' => 24,
     ];
 
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
@@ -80,7 +83,7 @@ class PayrollExcelExporter
 
     private function writeTitleRows(Worksheet $sheet, PayPeriod $payPeriod): void
     {
-        $lastColumn = 'AD';
+        $lastColumn = 'AF';
 
         $start = $payPeriod->start_date;
         $end = $payPeriod->end_date;
@@ -114,7 +117,7 @@ class PayrollExcelExporter
     private function writeHeaderRow(Worksheet $sheet): void
     {
         $headers = [
-            'A5' => 'Codigo',
+            'A5' => 'Código de empleado',
             'B5' => 'NOMBRE',
             'C5' => 'Entrada',
             'D5' => 'Salida',
@@ -144,6 +147,8 @@ class PayrollExcelExporter
             'AB5' => 'Reconocimiento de variación',
             'AC5' => 'Transferencia excluida',
             'AD5' => 'Versión de reglas',
+            'AE5' => 'Código de pago',
+            'AF5' => 'Cargo',
         ];
 
         foreach ($headers as $coordinate => $label) {
@@ -223,6 +228,10 @@ class PayrollExcelExporter
                 $sheet->setCellValue("{$column}{$row}", $reportingRow[$key]);
             }
 
+            $this->assertPaymentIdentity($reportingRow);
+            $sheet->setCellValueExplicit("AE{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
+            $sheet->setCellValue("AF{$row}", $reportingRow['employee_job_title']);
+
             $this->accumulate($employeeTotals, $reportingRow);
             $this->accumulate($grandTotals, $reportingRow);
 
@@ -286,13 +295,21 @@ class PayrollExcelExporter
 
     private function applyHeaderStyle(Worksheet $sheet): void
     {
-        $range = 'A5:AD5';
+        $range = 'A5:AF5';
         $style = $sheet->getStyle($range);
 
         $style->getFont()->setBold(true);
         $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $style->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new Color('FFE0E0E0'));
         $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+    }
+
+    /** @param array<string, mixed> $row */
+    private function assertPaymentIdentity(array $row): void
+    {
+        if (($row['employee_payment_code'] ?? '') === '' || ($row['employee_job_title'] ?? '') === '') {
+            throw new \LogicException('Payroll result is missing payment code or job title.');
+        }
     }
 
     private function spanishMonthName(int $month): string

@@ -31,6 +31,7 @@ class PayrollResultFactory extends Factory
 
                 return $employee?->external_id ?? (string) fake()->randomNumber(8);
             },
+            'employee_payment_code' => fn (array $attributes) => Employee::find($attributes['employee_id'])?->payment_code,
             'employee_name' => function (array $attributes) {
                 $employee = Employee::find($attributes['employee_id']);
 
@@ -38,6 +39,7 @@ class PayrollResultFactory extends Factory
                     ? trim($employee->first_name.' '.$employee->last_name)
                     : fake()->name();
             },
+            'employee_job_title' => fn (array $attributes) => Employee::find($attributes['employee_id'])?->job_title,
             'worked_hours' => 0.0,
             'ordinary_hours' => 0.0,
             'extra_25_hours' => 0,

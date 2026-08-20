@@ -88,7 +88,7 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
     expect($sheet->getTitle())->toBe('Hoja1')
         ->and($data[1][0])->toMatch('/^REPORTE DEL/')
         ->and($data[2][0])->toMatch('/^SEMANA/')
-        ->and(array_slice($data[4], 0, 10))->toBe(['Codigo', 'NOMBRE', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%'])
+        ->and(array_slice($data[4], 0, 10))->toBe(['Código de empleado', 'NOMBRE', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%'])
         ->and($data[5])->toContain(1, 'Juan Perez')
         ->and($data[5][2])->toContain('2024-01-22')
         ->and($data[5][4])->toBe(9.0)
@@ -178,7 +178,7 @@ test('PayrollStubExporter produces expected sheet structure', function () {
 
     expect($sheet->getTitle())->toBe('Comprobante')
         ->and($data[0][0])->toBe('Comprobante de nómina')
-        ->and($data[7])->toContain('Codigo', 'NOMBRE', 'Entrada', 'Salida')
+        ->and($data[7])->toContain('Código de empleado', 'NOMBRE', 'Entrada', 'Salida')
         ->and($data[8])->toContain('Juan Perez', 1)
         ->and($data[8][6])->toBe(0.5)
         ->and($data[9][6])->toBe(0.5);
@@ -505,4 +505,31 @@ test('payroll exports derive exact hours and totals from canonical minutes', fun
         ->and(round((float) $stubSheet->getCell('E11')->getCalculatedValue() * 60, 8))->toBe(2.0)
         ->and($stubSheet->getCell('O12')->getValue())->toBe(2)
         ->and($stubSheet->getCell('E12')->getValue())->toBe('=O12/60');
+});
+
+test('payroll exports frozen payment code as text and frozen job title', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'exported']);
+    $employee = Employee::factory()->forCompany($company)->create(['payment_code' => '00042', 'job_title' => 'Operador']);
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'employee_payment_code' => '00042', 'employee_job_title' => 'Operador',
+    ]);
+    $employee->update(['payment_code' => '90000', 'job_title' => 'Supervisor']);
+
+    $globalPath = (new PayrollExcelExporter)->export($payPeriod);
+    $global = IOFactory::load($globalPath)->getActiveSheet();
+    expect($global->getCell('AE5')->getValue())->toBe('Código de pago')
+        ->and($global->getCell('AF5')->getValue())->toBe('Cargo')
+        ->and($global->getCell('AE6')->getValue())->toBe('00042')
+        ->and($global->getCell('AF6')->getValue())->toBe('Operador');
+
+    $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
+    $stub = IOFactory::load($stubPath)->getActiveSheet();
+    expect($stub->getCell('AH8')->getValue())->toBe('Código de pago')
+        ->and($stub->getCell('AI8')->getValue())->toBe('Cargo')
+        ->and($stub->getCell('AH9')->getValue())->toBe('00042')
+        ->and($stub->getCell('AI9')->getValue())->toBe('Operador');
+
+    unlink($globalPath);
+    unlink($stubPath);
 });

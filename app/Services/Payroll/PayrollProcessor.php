@@ -55,6 +55,14 @@ class PayrollProcessor
                 $calendarContext = $context->holidayCalendar
                     ?? throw new InvalidArgumentException('Payroll context must include a holiday calendar.');
                 $employees = $context->employees;
+                $missingPaymentIdentity = $employees->first(fn (Employee $employee): bool => blank($employee->payment_code) || blank($employee->job_title));
+                if ($missingPaymentIdentity !== null) {
+                    throw new PayrollProcessingBlocked([[
+                        'employee_id' => $missingPaymentIdentity->id,
+                        'work_date' => $payPeriod->start_date->toDateString(),
+                        'blockers' => [['code' => 'missing_payment_identity']],
+                    ]]);
+                }
                 $snapshot = PayrollPeriodSnapshotData::capture($payPeriod, $employees);
 
                 $rulesVersion = config('payroll.rules_version', '1');
@@ -193,7 +201,9 @@ class PayrollProcessor
             'employee_id' => $employee->id,
             'date' => $date->toDateString(),
             'employee_external_id' => $employee->external_id,
+            'employee_payment_code' => $employee->payment_code,
             'employee_name' => $employee->full_name,
+            'employee_job_title' => $employee->job_title,
             'entry_at' => $result->entryAt,
             'exit_at' => $result->exitAt,
             'worked_hours' => $result->workedMinutes / 60,
