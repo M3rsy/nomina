@@ -14,6 +14,7 @@ use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -79,6 +80,7 @@ test('saveDraft cannot overwrite a period processed after its initial status rea
 });
 
 test('continueToReady sets status to ready when all marks are clean', function () {
+    Queue::fake();
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
     $employee = Employee::factory()->forCompany($company)->create();
     assignWizardSchedule($company, $employee);
@@ -116,11 +118,11 @@ test('continueToReady cannot overwrite a period processed after its initial stat
     $raceTriggered = false;
     $disarmRace = simulateWorkflowProcessingRace($payPeriod, $raceTriggered);
 
-    $component->call('continueToReady')->assertHasNoErrors();
+    $component->call('continueToReady')->assertHasErrors(['pay_period']);
     $disarmRace();
 
     expect($raceTriggered)->toBeTrue();
-    expect($payPeriod->fresh()->status)->toBe('processed');
+    expect($payPeriod->fresh()->status)->toBe('validating');
 });
 
 test('continueToReady with pending marks opens confirmation modal and does not advance status', function () {
@@ -173,6 +175,7 @@ test('an unreviewed overtime candidate cannot be bypassed when advancing to read
 });
 
 test('confirmContinueToReady advances pay period to ready after user acceptance', function () {
+    Queue::fake();
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([

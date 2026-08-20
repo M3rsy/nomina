@@ -14,6 +14,7 @@ use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\PayrollShiftEvaluator;
 use App\Services\Attendance\PayrollShiftReview;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use InvalidArgumentException;
 
 class PayrollProcessor
@@ -54,7 +55,7 @@ class PayrollProcessor
                 $end = CarbonImmutable::parse($payPeriod->end_date);
                 $calendarContext = $context->holidayCalendar
                     ?? throw new InvalidArgumentException('Payroll context must include a holiday calendar.');
-                $employees = $context->employees;
+                $employees = new EloquentCollection($context->employees->all());
                 $missingPaymentIdentity = $employees->first(fn (Employee $employee): bool => blank($employee->payment_code) || blank($employee->job_title));
                 if ($missingPaymentIdentity !== null) {
                     throw new PayrollProcessingBlocked([[
