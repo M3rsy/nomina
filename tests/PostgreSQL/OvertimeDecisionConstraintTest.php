@@ -9,10 +9,14 @@ use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
+use App\Services\Attendance\AttendanceDecisionAppender;
+use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\ShiftOccurrenceResolver;
+use App\Services\Payroll\BandSplit;
+use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +30,47 @@ function overtimeSqlState(Closure $operation): ?string
     }
 
     return null;
+}
+
+/** @return array{parent:OvertimeDecision,current:AttendanceSegment,attributes:array<string,mixed>} */
+function compatibleV1OvertimeTransition(): array
+{
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create();
+    $rates = new BandSplit(ordinaryMinutes: 0, extra25Minutes: 30);
+    $released = new AttendanceSegment(
+        'post_shift', CarbonImmutable::parse('2026-07-20 14:00:00'), CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('2', 64), $rates,
+    );
+    $current = (new AttendanceSegment(
+        'post_shift', CarbonImmutable::parse('2026-07-20 14:00:00'), CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('3', 64), $rates,
+    ))->withCompatibleIdentities($released->identities());
+    $parentId = DB::table('overtime_decisions')->insertGetId([
+        'record_version' => 1, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+        'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $released->key,
+        'fingerprint' => $released->fingerprint, 'segment_kind' => $released->kind,
+        'starts_at' => $released->start, 'ends_at' => $released->end, 'minutes' => 30,
+        'rate_minutes' => json_encode($released->identity->rateMinutes, JSON_THROW_ON_ERROR),
+        'decision' => 'approved', 'reason' => 'Approved released identity', 'decided_by' => $actor->id,
+        'created_at' => now(),
+    ]);
+
+    return [
+        'parent' => OvertimeDecision::withoutCompanyScope()->findOrFail($parentId),
+        'current' => $current,
+        'attributes' => [
+            'record_version' => 1, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+            'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $current->key,
+            'fingerprint' => $current->fingerprint, 'segment_kind' => $current->kind,
+            'starts_at' => $current->start, 'ends_at' => $current->end, 'minutes' => 30,
+            'rate_minutes' => $current->identity->rateMinutes, 'decision' => 'rejected',
+            'reason' => 'Rejected canonical identity', 'decided_by' => $actor->id,
+            'supersedes_id' => $parentId, 'created_at' => now(),
+        ],
+    ];
 }
 
 test('enforces conserved append-only V2 overtime resolutions while preserving valid V1 rows', function () {
@@ -146,4 +191,261 @@ test('records valid V2 whole approval and rejection through the public recorder 
         ->and([$rejected->rejected_before_minutes, $rejected->rejected_after_minutes])->toBe([0, 0])
         ->and($rejected->supersedes_id)->toBe($approved->id)
         ->and(OvertimeDecision::withoutCompanyScope()->current()->sole()->is($rejected))->toBeTrue();
+});
+
+test('rejects a shape-only V2 overtime supersession without verified predecessor authorization', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create();
+    $rates = ['ordinary' => 0, 'extra25' => 30, 'extra50' => 0, 'extra75' => 0, 'extra100' => 0];
+    $zeroRates = array_fill_keys(array_keys($rates), 0);
+    $context = [
+        'company_id' => $company->id,
+        'pay_period_id' => $period->id,
+        'employee_id' => $employee->id,
+        'work_date' => '2026-07-20',
+        'starts_at' => '2026-07-20 14:00:00',
+        'ends_at' => '2026-07-20 14:30:00',
+        'minutes' => 30,
+        'rate_minutes' => json_encode($rates, JSON_THROW_ON_ERROR),
+        'decision' => 'approved',
+        'reason' => 'Approved exact interval',
+        'decided_by' => $actor->id,
+        'created_at' => now(),
+    ];
+    $legacyId = DB::table('overtime_decisions')->insertGetId(array_replace($context, [
+        'record_version' => 1,
+        'candidate_key' => str_repeat('a', 64),
+        'fingerprint' => str_repeat('b', 64),
+        'segment_kind' => 'post_shift',
+    ]));
+
+    $state = overtimeSqlState(fn () => DB::table('overtime_decisions')->insert(array_replace($context, [
+        'record_version' => 2,
+        'candidate_key' => str_repeat('c', 64),
+        'fingerprint' => str_repeat('d', 64),
+        'segment_kind' => 'post_quota_overtime',
+        'supersedes_id' => $legacyId,
+        'resolution_kind' => 'whole_approve',
+        'approved_starts_at' => $context['starts_at'],
+        'approved_ends_at' => $context['ends_at'],
+        'rejected_before_starts_at' => null,
+        'rejected_before_ends_at' => null,
+        'rejected_after_starts_at' => null,
+        'rejected_after_ends_at' => null,
+        'approved_minutes' => 30,
+        'rejected_minutes' => 0,
+        'rejected_before_minutes' => 0,
+        'rejected_after_minutes' => 0,
+        'approved_rate_minutes' => json_encode($rates, JSON_THROW_ON_ERROR),
+        'rejected_rate_minutes' => json_encode($zeroRates, JSON_THROW_ON_ERROR),
+        'resolution_hash' => str_repeat('e', 64),
+    ])));
+
+    expect($state)->toBe('23514')
+        ->and(DB::table('overtime_decisions')->count())->toBe(1);
+});
+
+test('accepts one exact matcher-compatible V1 overtime supersession authorization', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create();
+    $rates = new BandSplit(ordinaryMinutes: 0, extra25Minutes: 30);
+    $legacy = new AttendanceSegment(
+        'post_shift',
+        CarbonImmutable::parse('2026-07-20 14:00:00'),
+        CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('a', 64),
+        $rates,
+    );
+    $current = (new AttendanceSegment(
+        'post_quota_overtime',
+        CarbonImmutable::parse('2026-07-20 14:00:00'),
+        CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('b', 64),
+        $rates,
+    ))->withCompatibleIdentities($legacy->identities());
+    $rateArray = $current->identity->rateMinutes;
+    $zeroRateArray = array_fill_keys(array_keys($rateArray), 0);
+    $rateMinutes = json_encode($rateArray, JSON_THROW_ON_ERROR);
+    $legacyId = DB::table('overtime_decisions')->insertGetId([
+        'record_version' => 1, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+        'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $legacy->key,
+        'fingerprint' => $legacy->fingerprint, 'segment_kind' => $legacy->kind,
+        'starts_at' => $legacy->start, 'ends_at' => $legacy->end, 'minutes' => 30,
+        'rate_minutes' => $rateMinutes, 'decision' => 'approved', 'reason' => 'Approved legacy fact',
+        'decided_by' => $actor->id, 'created_at' => now(),
+    ]);
+    $parent = OvertimeDecision::withoutCompanyScope()->findOrFail($legacyId);
+    $attributes = [
+        'record_version' => 2, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+        'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $current->key,
+        'fingerprint' => $current->fingerprint, 'segment_kind' => $current->kind,
+        'starts_at' => $current->start, 'ends_at' => $current->end, 'minutes' => 30,
+        'rate_minutes' => $rateArray, 'decision' => 'approved', 'reason' => 'Approved canonical fact',
+        'decided_by' => $actor->id, 'supersedes_id' => $legacyId, 'resolution_kind' => 'whole_approve',
+        'approved_starts_at' => $current->start, 'approved_ends_at' => $current->end,
+        'rejected_before_starts_at' => null, 'rejected_before_ends_at' => null,
+        'rejected_after_starts_at' => null, 'rejected_after_ends_at' => null,
+        'approved_minutes' => 30, 'rejected_minutes' => 0,
+        'rejected_before_minutes' => 0, 'rejected_after_minutes' => 0,
+        'approved_rate_minutes' => $rateArray, 'rejected_rate_minutes' => $zeroRateArray,
+        'resolution_hash' => str_repeat('c', 64), 'created_at' => now(),
+    ];
+
+    $canonical = DB::transaction(fn () => app(AttendanceDecisionAppender::class)->append(
+        $parent,
+        $current,
+        fn (): OvertimeDecision => OvertimeDecision::withoutCompanyScope()->create($attributes),
+    ));
+
+    expect($canonical->supersedes_id)->toBe($legacyId)
+        ->and($canonical->candidate_key)->toBe($current->key)
+        ->and($canonical->fingerprint)->toBe($current->fingerprint);
+});
+
+test('rejects wrong and reused V1 overtime supersession authorizations', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create();
+    $rates = new BandSplit(ordinaryMinutes: 0, extra25Minutes: 30);
+    $legacy = new AttendanceSegment(
+        'post_shift', CarbonImmutable::parse('2026-07-20 14:00:00'), CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('d', 64), $rates,
+    );
+    $current = (new AttendanceSegment(
+        'post_quota_overtime', CarbonImmutable::parse('2026-07-20 14:00:00'), CarbonImmutable::parse('2026-07-20 14:30:00'),
+        str_repeat('e', 64), $rates,
+    ))->withCompatibleIdentities($legacy->identities());
+    $rateArray = $current->identity->rateMinutes;
+    $zeroRateArray = array_fill_keys(array_keys($rateArray), 0);
+    $rateMinutes = json_encode($rateArray, JSON_THROW_ON_ERROR);
+    $legacyId = DB::table('overtime_decisions')->insertGetId([
+        'record_version' => 1, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+        'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $legacy->key,
+        'fingerprint' => $legacy->fingerprint, 'segment_kind' => $legacy->kind,
+        'starts_at' => $legacy->start, 'ends_at' => $legacy->end, 'minutes' => 30,
+        'rate_minutes' => $rateMinutes, 'decision' => 'approved', 'reason' => 'Approved legacy fact',
+        'decided_by' => $actor->id, 'created_at' => now(),
+    ]);
+    $parent = OvertimeDecision::withoutCompanyScope()->findOrFail($legacyId);
+    $attributes = [
+        'record_version' => 2, 'company_id' => $company->id, 'pay_period_id' => $period->id,
+        'employee_id' => $employee->id, 'work_date' => '2026-07-20', 'candidate_key' => $current->key,
+        'fingerprint' => $current->fingerprint, 'segment_kind' => $current->kind,
+        'starts_at' => $current->start, 'ends_at' => $current->end, 'minutes' => 30,
+        'rate_minutes' => $rateArray, 'decision' => 'approved', 'reason' => 'Approved canonical fact',
+        'decided_by' => $actor->id, 'supersedes_id' => $legacyId, 'resolution_kind' => 'whole_approve',
+        'approved_starts_at' => $current->start, 'approved_ends_at' => $current->end,
+        'approved_minutes' => 30, 'rejected_minutes' => 0, 'rejected_before_minutes' => 0,
+        'rejected_after_minutes' => 0, 'approved_rate_minutes' => $rateArray,
+        'rejected_rate_minutes' => $zeroRateArray, 'resolution_hash' => str_repeat('f', 64), 'created_at' => now(),
+    ];
+    $wrong = overtimeSqlState(fn () => DB::transaction(fn () => app(AttendanceDecisionAppender::class)->append(
+        $parent,
+        $current,
+        fn (): OvertimeDecision => OvertimeDecision::withoutCompanyScope()->create([
+            ...$attributes,
+            'fingerprint' => str_repeat('0', 64),
+        ]),
+    )));
+    $reused = overtimeSqlState(fn () => DB::transaction(fn () => app(AttendanceDecisionAppender::class)->append(
+        $parent,
+        $current,
+        function () use ($attributes): OvertimeDecision {
+            $first = OvertimeDecision::withoutCompanyScope()->create($attributes);
+            OvertimeDecision::withoutCompanyScope()->create([...$attributes, 'resolution_hash' => str_repeat('1', 64)]);
+
+            return $first;
+        },
+    )));
+
+    expect($wrong)->toBe('23514')
+        ->and($reused)->toBe('23514')
+        ->and(DB::table('overtime_decisions')->count())->toBe(1);
+});
+
+test('rejects a compatible V1 overtime supersession without exact authorization', function () {
+    $transition = compatibleV1OvertimeTransition();
+    $attributes = $transition['attributes'];
+    $attributes['rate_minutes'] = json_encode($attributes['rate_minutes'], JSON_THROW_ON_ERROR);
+
+    $state = overtimeSqlState(fn () => DB::table('overtime_decisions')->insert($attributes));
+
+    expect($state)->toBe('23514')
+        ->and(DB::table('overtime_decisions')->count())->toBe(1);
+});
+
+test('keeps ordinary same-canonical-identity V1 overtime history', function () {
+    $transition = compatibleV1OvertimeTransition();
+    $parent = $transition['parent'];
+
+    $childId = DB::table('overtime_decisions')->insertGetId([
+        'record_version' => 1, 'company_id' => $parent->company_id, 'pay_period_id' => $parent->pay_period_id,
+        'employee_id' => $parent->employee_id, 'work_date' => $parent->work_date,
+        'candidate_key' => $parent->candidate_key, 'fingerprint' => $parent->fingerprint,
+        'segment_kind' => $parent->segment_kind, 'starts_at' => $parent->starts_at, 'ends_at' => $parent->ends_at,
+        'minutes' => $parent->minutes,
+        'rate_minutes' => json_encode($parent->rate_minutes, JSON_THROW_ON_ERROR),
+        'decision' => 'rejected', 'reason' => 'Changed canonical decision',
+        'decided_by' => $parent->decided_by, 'supersedes_id' => $parent->id, 'created_at' => now(),
+    ]);
+
+    expect(DB::table('overtime_decisions')->where('id', $childId)->value('supersedes_id'))->toBe($parent->id);
+});
+
+test('accepts and consumes one exact compatible V1 overtime supersession authorization', function () {
+    $transition = compatibleV1OvertimeTransition();
+
+    $current = DB::transaction(function () use ($transition): OvertimeDecision {
+        $decision = app(AttendanceDecisionAppender::class)->append(
+            $transition['parent'],
+            $transition['current'],
+            fn (): OvertimeDecision => OvertimeDecision::withoutCompanyScope()->create($transition['attributes']),
+        );
+        $capability = DB::selectOne(
+            "select current_setting('nomina.attendance_compatible_supersession', true) as value",
+        );
+        expect($capability->value)->toBe('');
+
+        return $decision;
+    });
+
+    expect($current->record_version)->toBe(1)
+        ->and($current->supersedes_id)->toBe($transition['parent']->id)
+        ->and($current->candidate_key)->toBe($transition['current']->key);
+});
+
+test('rejects wrong and reused compatible V1 overtime authorizations', function () {
+    $wrongTransition = compatibleV1OvertimeTransition();
+    $wrong = overtimeSqlState(fn () => DB::transaction(fn () => app(AttendanceDecisionAppender::class)->append(
+        $wrongTransition['parent'],
+        $wrongTransition['current'],
+        fn (): OvertimeDecision => OvertimeDecision::withoutCompanyScope()->create([
+            ...$wrongTransition['attributes'],
+            'fingerprint' => str_repeat('4', 64),
+        ]),
+    )));
+    $reusedTransition = compatibleV1OvertimeTransition();
+    $reused = overtimeSqlState(fn () => DB::transaction(fn () => app(AttendanceDecisionAppender::class)->append(
+        $reusedTransition['parent'],
+        $reusedTransition['current'],
+        function () use ($reusedTransition): OvertimeDecision {
+            $first = OvertimeDecision::withoutCompanyScope()->create($reusedTransition['attributes']);
+            OvertimeDecision::withoutCompanyScope()->create([
+                ...$reusedTransition['attributes'],
+                'decision' => 'approved',
+                'reason' => 'Attempted capability reuse',
+            ]);
+
+            return $first;
+        },
+    )));
+
+    expect($wrong)->toBe('23514')
+        ->and($reused)->toBe('23514')
+        ->and(DB::table('overtime_decisions')->count())->toBe(2);
 });

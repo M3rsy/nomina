@@ -21,8 +21,10 @@ class AttendanceExceptionRecorder
 {
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
-        private AttendanceShiftAnalyzer $analyzer,
+        private AttendanceShiftAnalysisResolver $analysisResolver,
         private PayrollContextLocker $contextLocker,
+        private AttendanceDecisionMatcher $decisionMatcher,
+        private AttendanceDecisionAppender $decisionAppender,
     ) {}
 
     public function decide(
@@ -70,11 +72,7 @@ class AttendanceExceptionRecorder
                 $this->authorize($currentActor, $company);
 
                 $occurrence = $this->resolver->resolve($lockedEmployee, $date);
-                $analysis = $this->analyzer->analyze(
-                    $occurrence,
-                    $calendarContext->isHoliday($date),
-                    $calendarContext->generation($date),
-                );
+                $analysis = $this->analysisResolver->resolve($lockedEmployee, $occurrence, $calendarContext);
                 $deficit = $analysis->deficits->firstWhere('key', $deficitKey);
 
                 if ($deficit === null || $deficit->rateMinutes->totalMinutes() !== $deficit->minutes) {
@@ -91,15 +89,17 @@ class AttendanceExceptionRecorder
                     ]);
                 }
 
-                $previous = AttendanceException::withoutCompanyScope()
-                    ->where('company_id', $company->id)
-                    ->where('pay_period_id', $lockedPeriod->id)
-                    ->where('employee_id', $lockedEmployee->id)
-                    ->whereDate('work_date', $date->toDateString())
-                    ->where('deficit_key', $deficit->key)
-                    ->current()
-                    ->lockForUpdate()
-                    ->first();
+                $previous = $this->decisionMatcher->exception(
+                    AttendanceException::withoutCompanyScope()
+                        ->where('company_id', $company->id)
+                        ->where('pay_period_id', $lockedPeriod->id)
+                        ->where('employee_id', $lockedEmployee->id)
+                        ->whereDate('work_date', $date->toDateString())
+                        ->current()
+                        ->lockForUpdate()
+                        ->get(),
+                    $deficit,
+                );
 
                 if ($previous?->decision === $decision) {
                     throw ValidationException::withMessages([
@@ -123,26 +123,30 @@ class AttendanceExceptionRecorder
                     ]);
                 }
 
-                return AttendanceException::withoutCompanyScope()->create([
-                    'record_version' => $isDailyShortfall ? 2 : 1,
-                    'company_id' => $company->id,
-                    'pay_period_id' => $lockedPeriod->id,
-                    'employee_id' => $lockedEmployee->id,
-                    'work_date' => $date->toDateString(),
-                    'deficit_key' => $deficit->key,
-                    'fingerprint' => $deficit->fingerprint,
-                    'segment_kind' => $deficit->kind,
-                    'starts_at' => $deficit->start,
-                    'ends_at' => $deficit->end,
-                    'minutes' => $deficit->minutes,
-                    'rate_minutes' => $this->rateMinutes($deficit->rateMinutes),
-                    'decision' => $decision,
-                    'reason' => $reason,
-                    'decided_by' => $currentActor->id,
-                    'supersedes_id' => $decision === AttendanceException::REVOKED || ($isDailyShortfall && $previous !== null)
-                        ? $previous?->id
-                        : null,
-                ]);
+                return $this->decisionAppender->append(
+                    $previous,
+                    $deficit,
+                    fn (): AttendanceException => AttendanceException::withoutCompanyScope()->create([
+                        'record_version' => $isDailyShortfall ? 2 : 1,
+                        'company_id' => $company->id,
+                        'pay_period_id' => $lockedPeriod->id,
+                        'employee_id' => $lockedEmployee->id,
+                        'work_date' => $date->toDateString(),
+                        'deficit_key' => $deficit->key,
+                        'fingerprint' => $deficit->fingerprint,
+                        'segment_kind' => $deficit->kind,
+                        'starts_at' => $deficit->start,
+                        'ends_at' => $deficit->end,
+                        'minutes' => $deficit->minutes,
+                        'rate_minutes' => $this->rateMinutes($deficit->rateMinutes),
+                        'decision' => $decision,
+                        'reason' => $reason,
+                        'decided_by' => $currentActor->id,
+                        'supersedes_id' => $decision === AttendanceException::REVOKED || ($isDailyShortfall && $previous !== null)
+                            ? $previous?->id
+                            : null,
+                    ]),
+                );
             },
         );
     }

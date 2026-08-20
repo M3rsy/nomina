@@ -29,9 +29,11 @@ class OvertimeDecisionRecorder
 
     public function __construct(
         private ShiftOccurrenceResolver $resolver,
-        private AttendanceShiftAnalyzer $analyzer,
+        private AttendanceShiftAnalysisResolver $analysisResolver,
         private PayrollContextLocker $contextLocker,
         private BandSplitter $bandSplitter,
+        private AttendanceDecisionMatcher $decisionMatcher,
+        private AttendanceDecisionAppender $decisionAppender,
     ) {}
 
     public function approvePartial(
@@ -116,11 +118,7 @@ class OvertimeDecisionRecorder
                 }
 
                 $occurrence = $this->resolver->resolve($lockedEmployee, $date);
-                $analysis = $this->analyzer->analyze(
-                    $occurrence,
-                    $calendarContext->isHoliday($date),
-                    $calendarContext->generation($date),
-                );
+                $analysis = $this->analysisResolver->resolve($lockedEmployee, $occurrence, $calendarContext);
                 $candidate = $analysis->overtimeCandidates->firstWhere('key', $candidateKey);
 
                 if ($candidate === null || $candidate->rateMinutes->totalMinutes() !== $candidate->minutes) {
@@ -133,15 +131,17 @@ class OvertimeDecisionRecorder
                     $occurrence, $candidate, $decision, $batchItem, $approvedStartsAt, $approvedEndsAt,
                 );
 
-                $previous = OvertimeDecision::withoutCompanyScope()
-                    ->where('company_id', $company->id)
-                    ->where('pay_period_id', $lockedPeriod->id)
-                    ->where('employee_id', $lockedEmployee->id)
-                    ->whereDate('work_date', $date->toDateString())
-                    ->where('candidate_key', $candidate->key)
-                    ->current()
-                    ->lockForUpdate()
-                    ->first();
+                $previous = $this->decisionMatcher->overtime(
+                    OvertimeDecision::withoutCompanyScope()
+                        ->where('company_id', $company->id)
+                        ->where('pay_period_id', $lockedPeriod->id)
+                        ->where('employee_id', $lockedEmployee->id)
+                        ->whereDate('work_date', $date->toDateString())
+                        ->current()
+                        ->lockForUpdate()
+                        ->get(),
+                    $candidate,
+                );
 
                 if ($previous !== null && (($resolution['record_version'] === 1 && $previous->decision === $decision)
                     || ($resolution['record_version'] === 2 && $previous->resolution_hash === $resolution['resolution_hash']))) {
@@ -150,25 +150,29 @@ class OvertimeDecisionRecorder
                     ]);
                 }
 
-                return OvertimeDecision::withoutCompanyScope()->create([
-                    ...$resolution,
-                    'company_id' => $company->id,
-                    'pay_period_id' => $lockedPeriod->id,
-                    'employee_id' => $lockedEmployee->id,
-                    'work_date' => $date->toDateString(),
-                    'candidate_key' => $candidate->key,
-                    'fingerprint' => $candidate->fingerprint,
-                    'segment_kind' => $candidate->kind,
-                    'starts_at' => $candidate->start,
-                    'ends_at' => $candidate->end,
-                    'minutes' => $candidate->minutes,
-                    'rate_minutes' => $this->rateMinutes($candidate->rateMinutes),
-                    'decision' => $decision,
-                    'reason' => $reason,
-                    'decided_by' => $currentActor->id,
-                    'supersedes_id' => $previous?->id,
-                    'batch_item_id' => $batchItem?->id,
-                ]);
+                return $this->decisionAppender->append(
+                    $previous,
+                    $candidate,
+                    fn (): OvertimeDecision => OvertimeDecision::withoutCompanyScope()->create([
+                        ...$resolution,
+                        'company_id' => $company->id,
+                        'pay_period_id' => $lockedPeriod->id,
+                        'employee_id' => $lockedEmployee->id,
+                        'work_date' => $date->toDateString(),
+                        'candidate_key' => $candidate->key,
+                        'fingerprint' => $candidate->fingerprint,
+                        'segment_kind' => $candidate->kind,
+                        'starts_at' => $candidate->start,
+                        'ends_at' => $candidate->end,
+                        'minutes' => $candidate->minutes,
+                        'rate_minutes' => $this->rateMinutes($candidate->rateMinutes),
+                        'decision' => $decision,
+                        'reason' => $reason,
+                        'decided_by' => $currentActor->id,
+                        'supersedes_id' => $previous?->id,
+                        'batch_item_id' => $batchItem?->id,
+                    ]),
+                );
             },
         );
     }

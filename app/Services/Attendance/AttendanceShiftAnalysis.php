@@ -34,4 +34,28 @@ readonly class AttendanceShiftAnalysis
         public Collection $variations = new Collection,
         public int $excludedTransferMinutes = 0,
     ) {}
+
+    /**
+     * @param  Collection<int, AttendanceSegment>  $deficits
+     * @param  Collection<int, AttendanceSegment>  $overtimeCandidates
+     */
+    public function withDecisionSegments(Collection $deficits, Collection $overtimeCandidates): self
+    {
+        return new self(
+            $this->status,
+            $this->workDate,
+            $this->entryAt,
+            $this->exitAt,
+            $this->workedMinutes,
+            $this->scheduledMinutes,
+            $this->scheduledRates,
+            $deficits,
+            $overtimeCandidates,
+            $this->isHoliday,
+            $this->publicationId,
+            $this->payrollPolicyKey,
+            $this->variations,
+            $this->excludedTransferMinutes,
+        );
+    }
 }

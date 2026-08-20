@@ -5,11 +5,12 @@ namespace App\Services\Attendance;
 use App\Models\AttendanceException;
 use App\Models\OvertimeDecision;
 use App\Services\Payroll\BandSplit;
-use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
 class PayrollShiftEvaluator
 {
+    public function __construct(private AttendanceDecisionMatcher $decisionMatcher) {}
+
     /**
      * @param  Collection<int, OvertimeDecision>  $currentDecisions
      * @param  Collection<int, AttendanceException>  $currentExceptions
@@ -54,15 +55,15 @@ class PayrollShiftEvaluator
             $deficit ??= $analysis->deficits->firstWhere('kind', 'daily_shortfall');
             $exception = $deficit === null
                 ? null
-                : $currentExceptions->keyBy('deficit_key')->get($deficit->key);
+                : $this->decisionMatcher->exception($currentExceptions, $deficit);
             $isJustified = $deficit !== null
-                && $this->matchesException($exception, $deficit)
+                && $exception !== null
                 && $exception->decision === AttendanceException::GRANTED;
             $payableRates = $isJustified
                 ? $deficit->rateMinutes
                 : new BandSplit;
             $pendingDailyShortfall = $deficit?->kind === 'daily_shortfall'
-                && (! $this->matchesException($exception, $deficit)
+                && ($exception === null
                     || $exception->decision === AttendanceException::REVOKED);
 
             return new PayrollShiftEvaluation(
@@ -89,8 +90,6 @@ class PayrollShiftEvaluator
             );
         }
 
-        $decisions = $currentDecisions->keyBy('candidate_key');
-        $exceptions = $currentExceptions->keyBy('deficit_key');
         $blockers = collect();
         $payableRates = $analysis->scheduledRates;
         $approvedMinutes = 0;
@@ -98,10 +97,10 @@ class PayrollShiftEvaluator
         $exceptionIds = [];
 
         foreach ($analysis->deficits as $deficit) {
-            $exception = $exceptions->get($deficit->key);
+            $exception = $this->decisionMatcher->exception($currentExceptions, $deficit);
 
             if ($deficit->kind === 'daily_shortfall') {
-                if (! $this->matchesException($exception, $deficit)
+                if ($exception === null
                     || $exception->decision === AttendanceException::REVOKED) {
                     $blockers->push([
                         'code' => 'pending_daily_shortfall',
@@ -116,8 +115,7 @@ class PayrollShiftEvaluator
                 }
             }
 
-            if (! $this->matchesException($exception, $deficit)
-                || $exception->decision !== AttendanceException::GRANTED) {
+            if ($exception?->decision !== AttendanceException::GRANTED) {
                 continue;
             }
 
@@ -127,9 +125,9 @@ class PayrollShiftEvaluator
         }
 
         foreach ($analysis->overtimeCandidates as $candidate) {
-            $decision = $decisions->get($candidate->key);
+            $decision = $this->decisionMatcher->overtime($currentDecisions, $candidate);
 
-            if (! $this->matches($decision, $candidate)) {
+            if ($decision === null) {
                 $blockers->push([
                     'code' => 'pending_overtime_candidate',
                     'candidate_key' => $candidate->key,
@@ -184,39 +182,6 @@ class PayrollShiftEvaluator
         ];
     }
 
-    private function matches(?OvertimeDecision $decision, AttendanceSegment $candidate): bool
-    {
-        $candidateRates = [
-            'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
-            'extra25' => $candidate->rateMinutes->extra25Minutes,
-            'extra50' => $candidate->rateMinutes->extra50Minutes,
-            'extra75' => $candidate->rateMinutes->extra75Minutes,
-            'extra100' => $candidate->rateMinutes->extra100Minutes,
-        ];
-        $matchesCandidate = $decision !== null
-            && $decision->fingerprint === $candidate->fingerprint
-            && $decision->minutes === $candidate->minutes
-            && $decision->starts_at?->equalTo($candidate->start)
-            && $decision->ends_at?->equalTo($candidate->end)
-            && in_array($decision->decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)
-            && $decision->rate_minutes === $candidateRates;
-        if (! $matchesCandidate || (int) ($decision->record_version ?? 1) === 1) {
-            return $matchesCandidate;
-        }
-
-        $approved = $this->bandSplit($decision->approved_rate_minutes);
-        $rejected = $this->bandSplit($decision->rejected_rate_minutes);
-
-        return in_array($decision->resolution_kind, [
-            OvertimeDecision::WHOLE_APPROVE, OvertimeDecision::WHOLE_REJECT, OvertimeDecision::PARTIAL,
-        ], true)
-            && is_string($decision->resolution_hash) && strlen($decision->resolution_hash) === 64
-            && $approved->totalMinutes() === $decision->approved_minutes
-            && $rejected->totalMinutes() === $decision->rejected_minutes
-            && $decision->approved_minutes + $decision->rejected_minutes === $candidate->minutes
-            && $approved->plus($rejected) == $candidate->rateMinutes;
-    }
-
     private function bandSplit(?array $rates): BandSplit
     {
         return new BandSplit(
@@ -226,28 +191,5 @@ class PayrollShiftEvaluator
             extra75Minutes: (int) ($rates['extra75'] ?? -1),
             extra100Minutes: (int) ($rates['extra100'] ?? -1),
         );
-    }
-
-    private function matchesException(?AttendanceException $exception, AttendanceSegment $deficit): bool
-    {
-        return $exception !== null
-            && $exception->fingerprint === $deficit->fingerprint
-            && $exception->minutes === $deficit->minutes
-            && $this->sameBoundary($exception->starts_at, $deficit->start)
-            && $this->sameBoundary($exception->ends_at, $deficit->end)
-            && in_array($exception->decision, [AttendanceException::GRANTED, AttendanceException::REJECTED, AttendanceException::REVOKED], true)
-            && $exception->rate_minutes === [
-                'ordinary' => $deficit->rateMinutes->ordinaryMinutes,
-                'extra25' => $deficit->rateMinutes->extra25Minutes,
-                'extra50' => $deficit->rateMinutes->extra50Minutes,
-                'extra75' => $deficit->rateMinutes->extra75Minutes,
-                'extra100' => $deficit->rateMinutes->extra100Minutes,
-            ];
-    }
-
-    private function sameBoundary(?CarbonInterface $stored, ?CarbonInterface $current): bool
-    {
-        return ($stored === null && $current === null)
-            || ($stored !== null && $current !== null && $stored->equalTo($current));
     }
 }
