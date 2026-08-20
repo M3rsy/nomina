@@ -9,9 +9,9 @@ use App\Models\OvertimeDecisionBatch;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
 use App\Models\RawMark;
+use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
-use App\Services\Attendance\HolidayCalendar;
 use App\Services\Attendance\HolidayCalendarContext;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
@@ -23,8 +23,10 @@ use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Attendance\VariationAcknowledgementRecorder;
+use App\Services\Payroll\CreateEmployeeFromUnknownMark;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollRunRequester;
+use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -105,6 +107,30 @@ class Revisar extends Component
     public bool $assignApplyAll = false;
 
     public string $assignReason = '';
+
+    public bool $showCreateEmployeeModal = false;
+
+    public ?int $createEmployeeRawMarkId = null;
+
+    public string $createEmployeeExternalId = '';
+
+    public string $createEmployeePaymentCode = '';
+
+    public string $createEmployeeFirstName = '';
+
+    public string $createEmployeeLastName = '';
+
+    public string $createEmployeeDni = '';
+
+    public string $createEmployeeJobTitle = '';
+
+    public string $createEmployeeHiredAt = '';
+
+    public ?int $createEmployeeScheduleProfileId = null;
+
+    public string $createEmployeeReason = '';
+
+    public bool $createEmployeeAssignAll = true;
 
     public bool $showAbsencesModal = false;
 
@@ -236,6 +262,10 @@ class Revisar extends Component
         $employees = Employee::where('company_id', $this->payPeriod->company_id)
             ->orderBy('first_name')
             ->get();
+        $scheduleProfiles = WorkScheduleProfile::where('company_id', $this->payPeriod->company_id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
         $snapshot = $this->periodReviewSnapshot();
         $faltas = $this->detectFaltas($snapshot);
         $summary = $this->summaryCounts($faltas);
@@ -268,6 +298,7 @@ class Revisar extends Component
             'records' => $records,
             'summary' => $summary,
             'employees' => $employees,
+            'scheduleProfiles' => $scheduleProfiles,
             'faltas' => $faltas,
             'isBlocked' => $isBlocked,
             'uploadedFiles' => $uploadedFiles,
@@ -696,6 +727,89 @@ class Revisar extends Component
         $this->resetErrorBag();
     }
 
+    public function openCreateEmployeeModal(int $rawMarkId): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        Gate::authorize('create', Employee::class);
+        $mark = $this->findRawMark($rawMarkId);
+        if ($mark === null || $mark->employee_id !== null || $mark->status !== 'unknown_employee') {
+            return;
+        }
+
+        $this->createEmployeeRawMarkId = $mark->id;
+        $this->createEmployeeExternalId = $mark->employee_external_id;
+        $this->createEmployeeHiredAt = max(
+            $this->payPeriod->start_date->toDateString(),
+            $mark->event_at->toDateString(),
+        );
+        $this->createEmployeeAssignAll = true;
+        $this->showCreateEmployeeModal = true;
+    }
+
+    public function closeCreateEmployeeModal(): void
+    {
+        $this->reset([
+            'showCreateEmployeeModal', 'createEmployeeRawMarkId', 'createEmployeeExternalId',
+            'createEmployeePaymentCode', 'createEmployeeFirstName', 'createEmployeeLastName',
+            'createEmployeeDni', 'createEmployeeJobTitle', 'createEmployeeHiredAt',
+            'createEmployeeScheduleProfileId', 'createEmployeeReason',
+        ]);
+        $this->createEmployeeAssignAll = true;
+        $this->resetErrorBag();
+    }
+
+    public function saveCreatedEmployee(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        Gate::authorize('create', Employee::class);
+        $mark = $this->findRawMark($this->createEmployeeRawMarkId);
+        if ($mark === null) {
+            return;
+        }
+
+        $validated = $this->validate([
+            'createEmployeePaymentCode' => ['required', 'string', 'max:50', Rule::unique('employees', 'payment_code')->where('company_id', $this->payPeriod->company_id)],
+            'createEmployeeFirstName' => ['required', 'string', 'max:100'],
+            'createEmployeeLastName' => ['required', 'string', 'max:100'],
+            'createEmployeeDni' => ['required', 'string', 'max:32'],
+            'createEmployeeJobTitle' => ['required', 'string', 'max:100'],
+            'createEmployeeHiredAt' => ['required', 'date'],
+            'createEmployeeScheduleProfileId' => ['required', 'integer', Rule::exists('work_schedule_profiles', 'id')->where('company_id', $this->payPeriod->company_id)],
+            'createEmployeeReason' => ['required', 'string', 'max:500'],
+            'createEmployeeAssignAll' => ['boolean'],
+        ]);
+        $profile = WorkScheduleProfile::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->where('is_active', true)
+            ->findOrFail((int) $validated['createEmployeeScheduleProfileId']);
+
+        $result = app(CreateEmployeeFromUnknownMark::class)->create(
+            $mark,
+            $profile,
+            Auth::user(),
+            [
+                'payment_code' => $validated['createEmployeePaymentCode'],
+                'first_name' => $validated['createEmployeeFirstName'],
+                'last_name' => $validated['createEmployeeLastName'],
+                'dni' => $validated['createEmployeeDni'],
+                'job_title' => $validated['createEmployeeJobTitle'],
+                'hired_at' => $validated['createEmployeeHiredAt'],
+            ],
+            $validated['createEmployeeReason'],
+            (bool) $validated['createEmployeeAssignAll'],
+        );
+
+        $this->closeCreateEmployeeModal();
+        $this->periodReviewSnapshot = null;
+        session()->flash('success', "Empleado creado y {$result->assignedMarks} marcas asignadas.");
+    }
+
     public function saveAssign(): void
     {
         if ($this->isBlocked()) {
@@ -935,12 +1049,13 @@ class Revisar extends Component
         $this->authorize('view', $this->payPeriod);
         Gate::authorize('payroll.process');
         $this->payrollRunRequestKey = (string) Str::uuid();
-        $run = app(PayrollRunRequester::class)->request(
+        $run = app(StartPayrollProcessing::class)->start(
             $this->payPeriod,
             Auth::user(),
             $this->payrollRunRequestKey,
         );
         $this->activePayrollRunId = $run->id;
+        $this->payPeriod = $this->payPeriod->fresh();
     }
 
     public function openOvertimeDecision(
@@ -1334,7 +1449,7 @@ class Revisar extends Component
             return;
         }
 
-        $this->moveToReady();
+        $this->startProcessing();
     }
 
     public function acknowledgeVariation(
@@ -1380,7 +1495,7 @@ class Revisar extends Component
             return;
         }
 
-        $this->moveToReady();
+        $this->startProcessing();
     }
 
     public function cancelReadyConfirm(): void
@@ -1591,34 +1706,23 @@ class Revisar extends Component
         return null;
     }
 
-    private function moveToReady(): void
+    private function startProcessing(): void
     {
-        $calendarContext = app(HolidayCalendar::class)->capture(
-            $this->payPeriod->company,
-            $this->payPeriod->start_date,
-            $this->payPeriod->end_date,
+        $this->payrollRunRequestKey = $this->payrollRunRequestKey !== ''
+            ? $this->payrollRunRequestKey
+            : (string) Str::uuid();
+        $run = app(StartPayrollProcessing::class)->start(
+            $this->payPeriod,
+            Auth::user(),
+            $this->payrollRunRequestKey,
         );
-        $moved = DB::transaction(function () use ($calendarContext): bool {
-            $payPeriod = $this->lockMutablePayPeriod();
-
-            if ($payPeriod === null || $this->loadReadinessBlockers($payPeriod, $calendarContext)) {
-                return false;
-            }
-
-            $payPeriod->update(['status' => 'ready']);
-            $this->payPeriod = $payPeriod->refresh();
-
-            return true;
-        });
-
-        if (! $moved) {
-            return;
-        }
+        $this->activePayrollRunId = $run->id;
+        $this->payPeriod = $this->payPeriod->fresh();
 
         $this->showReadyConfirm = false;
         $this->readyMessage = null;
 
-        session()->flash('success', 'Período listo para procesar.');
+        session()->flash('success', 'La nómina quedó en cola para procesarse.');
     }
 
     private function loadReadinessBlockers(

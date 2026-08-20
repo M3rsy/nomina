@@ -38,6 +38,7 @@ class Index extends Component
                 $search = '%'.$this->search.'%';
                 $query->where(function ($q) use ($search) {
                     $q->where('external_id', 'like', $search)
+                        ->orWhere('payment_code', 'like', $search)
                         ->orWhere('dni', 'like', $search)
                         ->orWhere('first_name', 'like', $search)
                         ->orWhere('last_name', 'like', $search);

@@ -11,7 +11,11 @@ final class PayrollReportingRowAdapter
     {
         $snapshot = $result->day_snapshot;
         if (is_array($snapshot) && ($snapshot['schema_version'] ?? null) === 2) {
-            return $this->adaptSnapshot($snapshot);
+            return [
+                ...$this->adaptSnapshot($snapshot),
+                'employee_payment_code' => $result->employee_payment_code,
+                'employee_job_title' => $result->employee_job_title,
+            ];
         }
 
         $employee = ($result->employee_external_id === null || $result->employee_name === null)
@@ -21,6 +25,8 @@ final class PayrollReportingRowAdapter
         return [
             'employee_external_id' => $result->employee_external_id ?? $employee?->external_id,
             'employee_name' => $result->employee_name ?? $employee?->full_name,
+            'employee_payment_code' => $result->employee_payment_code ?? $employee?->payment_code,
+            'employee_job_title' => $result->employee_job_title ?? $employee?->job_title,
             'work_date' => $result->date?->toDateString(),
             'status' => 'LEGACY',
             'entry_at' => $result->entry_at,
@@ -67,6 +73,8 @@ final class PayrollReportingRowAdapter
         return [
             'employee_external_id' => $employee['external_id'] ?? null,
             'employee_name' => $employee['name'] ?? null,
+            'employee_payment_code' => null,
+            'employee_job_title' => null,
             'work_date' => $snapshot['work_date'] ?? null,
             'status' => 'CURRENT',
             'entry_at' => $attendance['entry_at'] ?? null,

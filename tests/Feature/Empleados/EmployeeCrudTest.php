@@ -474,3 +474,24 @@ test('employee edit assigns an unassigned employee from date-effective general h
 
     expect($employee->scheduleAssignments()->sole()->work_schedule_profile_id)->toBe($previous->id);
 });
+
+test('payment code is unique within a company and remains text', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->create(['company_id' => $company->id]);
+    $admin->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create(['payment_code' => '00042']);
+
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->set('external_id', 'PAY-2')
+        ->set('payment_code', '00042')
+        ->set('first_name', 'Luis')
+        ->set('last_name', 'Paz')
+        ->set('job_title', 'Operador')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
+        ->call('save')
+        ->assertHasErrors('payment_code');
+});

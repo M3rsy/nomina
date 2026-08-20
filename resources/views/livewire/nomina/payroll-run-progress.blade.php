@@ -14,6 +14,11 @@
                 } }}
             </p>
             <p class="mt-1 text-xs text-indigo-700">Referencia #{{ $runId }}</p>
+            @if ($delayed)
+                <p class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900" role="status">
+                    La cola está demorada. Verificá que el worker esté activo; esta pantalla seguirá comprobando el estado automáticamente.
+                </p>
+            @endif
             @if ($status === \App\Models\PayrollRun::FAILED)
                 <button
                     type="button"

@@ -17,6 +17,8 @@ final class PayrollRunProgress extends Component
 
     public ?string $status = null;
 
+    public bool $delayed = false;
+
     #[Locked]
     public bool $terminalNotified = false;
 
@@ -43,11 +45,14 @@ final class PayrollRunProgress extends Component
         if ($run === null) {
             $this->runId = null;
             $this->status = null;
+            $this->delayed = false;
 
             return;
         }
 
         $this->status = $run->status;
+        $this->delayed = $run->status === PayrollRun::QUEUED
+            && $run->created_at->lte(now()->subSeconds(15));
         if (! $run->isActive() && ! $this->terminalNotified) {
             $this->terminalNotified = true;
             $this->dispatch('payroll-run-terminal', runId: $run->id);

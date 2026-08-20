@@ -661,7 +661,7 @@ function batchRequestFixture(string $periodStatus = 'uploaded'): array
     WorkSchedule::factory()->forProfile($profile)->create([
         'day_of_week' => 1, 'start_time' => '06:00', 'end_time' => '14:00', 'base_ordinary_hours' => 8,
     ]);
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create(['hired_at' => '2026-07-01']);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada diurna');
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20', 'end_date' => '2026-07-20', 'status' => $periodStatus,
@@ -679,7 +679,7 @@ function batchRequestFixture(string $periodStatus = 'uploaded'): array
 }
 function addBatchCandidate(array $context, ?UploadedFile $file = null): array
 {
-    $employee = Employee::factory()->forCompany($context['company'])->create();
+    $employee = Employee::factory()->forCompany($context['company'])->create(['hired_at' => '2026-07-01']);
     app(EmployeeScheduleAssigner::class)->assign($employee, $context['profile'], '2026-07-01', 'Jornada diurna');
     $marks = collect(['2026-07-20 06:00:00', '2026-07-20 15:00:00'])
         ->map(fn (string $eventAt) => RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])

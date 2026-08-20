@@ -52,10 +52,13 @@
                     <button
                         type="button"
                         wire:click="startPayrollRun"
+                        wire:loading.attr="disabled"
+                        wire:target="startPayrollRun"
                         @disabled($activePayrollRunId)
                         class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        Procesar nómina
+                        <span wire:loading.remove wire:target="startPayrollRun">Procesar nómina</span>
+                        <span wire:loading wire:target="startPayrollRun">Iniciando…</span>
                     </button>
                 @elseif ($payPeriod->status === 'processed')
                     <button
@@ -85,9 +88,12 @@
                     <button
                         type="button"
                         wire:click="continueToReady"
+                        wire:loading.attr="disabled"
+                        wire:target="continueToReady"
                         class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                     >
-                        Marcar lista para procesar
+                        <span wire:loading.remove wire:target="continueToReady">Revisar y procesar nómina</span>
+                        <span wire:loading wire:target="continueToReady">Validando…</span>
                     </button>
                 @endif
             </div>
@@ -670,11 +676,28 @@
                                     <button
                                         type="button"
                                         wire:click="openAssignModal({{ $record->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="openAssignModal({{ $record->id }})"
                                         @disabled($isBlocked)
                                         class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Asignar
                                     </button>
+
+                                    @if ($record->status === 'unknown_employee' && $record->employee_id === null)
+                                        @can('create', \App\Models\Employee::class)
+                                            <button
+                                                type="button"
+                                                wire:click="openCreateEmployeeModal({{ $record->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openCreateEmployeeModal({{ $record->id }})"
+                                                @disabled($isBlocked)
+                                                class="rounded-md border border-violet-300 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                                            >
+                                                Crear empleado
+                                            </button>
+                                        @endcan
+                                    @endif
 
                                     <button
                                         type="button"
@@ -1043,6 +1066,30 @@
         </div>
     @endif
 
+    @if ($showCreateEmployeeModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+                <h2 class="text-lg font-bold">Crear empleado desde la marca</h2>
+                <p class="mt-1 text-sm text-slate-600">Código de empleado: <strong>{{ $createEmployeeExternalId }}</strong></p>
+                <form wire:submit.prevent="saveCreatedEmployee" class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label class="text-sm"><span class="font-semibold">Código de pago</span><input wire:model="createEmployeePaymentCode" maxlength="50" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeePaymentCode')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Identidad</span><input wire:model="createEmployeeDni" maxlength="32" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeDni')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Nombre</span><input wire:model="createEmployeeFirstName" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeFirstName')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Apellido</span><input wire:model="createEmployeeLastName" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeLastName')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Cargo</span><input wire:model="createEmployeeJobTitle" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeJobTitle')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Fecha de contratación</span><input type="date" wire:model="createEmployeeHiredAt" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeHiredAt')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm sm:col-span-2"><span class="font-semibold">Jornada</span><select wire:model="createEmployeeScheduleProfileId" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3"><option value="">Seleccionar jornada</option>@foreach($scheduleProfiles as $profile)<option value="{{ $profile->id }}">{{ $profile->name }}</option>@endforeach</select>@error('createEmployeeScheduleProfileId')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm sm:col-span-2"><span class="font-semibold">Motivo</span><textarea wire:model="createEmployeeReason" rows="3" maxlength="500" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>@error('createEmployeeReason')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="inline-flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" wire:model="createEmployeeAssignAll"><span>Asignar todas las marcas de este código</span></label>
+                    <div class="flex justify-end gap-2 sm:col-span-2">
+                        <button type="button" wire:click="closeCreateEmployeeModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="saveCreatedEmployee" class="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><span wire:loading.remove wire:target="saveCreatedEmployee">Crear y asignar</span><span wire:loading wire:target="saveCreatedEmployee">Creando…</span></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
     @if ($showReadyConfirm)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
             <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
@@ -1050,7 +1097,10 @@
                 <p class="mt-2 text-sm text-slate-700">{{ $readyMessage ?? '¿Seguro que desea continuar con el estado listo para procesar?' }}</p>
                 <div class="mt-4 flex justify-end gap-2">
                     <button type="button" wire:click="cancelReadyConfirm" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                    <button type="button" wire:click="confirmContinueToReady" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Confirmar</button>
+                    <button type="button" wire:click="confirmContinueToReady" wire:loading.attr="disabled" wire:target="confirmContinueToReady" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                        <span wire:loading.remove wire:target="confirmContinueToReady">Confirmar y procesar</span>
+                        <span wire:loading wire:target="confirmContinueToReady">Iniciando…</span>
+                    </button>
                 </div>
             </div>
         </div>

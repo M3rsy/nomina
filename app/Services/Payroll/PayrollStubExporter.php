@@ -5,6 +5,7 @@ namespace App\Services\Payroll;
 use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -71,13 +72,15 @@ class PayrollStubExporter
         $sheet->getColumnDimension('J')->setWidth(17);
         $sheet->getColumnDimension('K')->setWidth(14);
         $sheet->getColumnDimension('L')->setWidth(14);
+        $sheet->getColumnDimension('AH')->setWidth(18);
+        $sheet->getColumnDimension('AI')->setWidth(24);
     }
 
     /** @param array<string, string> $identity */
     private function writeHeaderBlock(Worksheet $sheet, PayPeriod $payPeriod, array $identity): void
     {
         $sheet->setCellValue('A1', 'Comprobante de nómina');
-        $sheet->mergeCells('A1:AG1');
+        $sheet->mergeCells('A1:AI1');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
@@ -98,7 +101,7 @@ class PayrollStubExporter
     private function writeTableHeader(Worksheet $sheet): void
     {
         $headers = [
-            'A8' => 'Codigo',
+            'A8' => 'Código de empleado',
             'B8' => 'NOMBRE',
             'C8' => 'Entrada',
             'D8' => 'Salida',
@@ -131,6 +134,8 @@ class PayrollStubExporter
             'AE8' => 'Minutos extra aprobados',
             'AF8' => 'Transferencia excluida',
             'AG8' => 'Versión de reglas',
+            'AH8' => 'Código de pago',
+            'AI8' => 'Cargo',
         ];
 
         foreach ($headers as $coordinate => $label) {
@@ -214,6 +219,10 @@ class PayrollStubExporter
                 $sheet->setCellValue("{$column}{$row}", $reportingRow[$key]);
             }
 
+            $this->assertPaymentIdentity($reportingRow);
+            $sheet->setCellValueExplicit("AH{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
+            $sheet->setCellValue("AI{$row}", $reportingRow['employee_job_title']);
+
             foreach (array_keys($totals) as $key) {
                 $totals[$key] += $reportingRow[$key] ?? 0;
             }
@@ -287,9 +296,17 @@ class PayrollStubExporter
         return $minutes / 60;
     }
 
+    /** @param array<string, mixed> $row */
+    private function assertPaymentIdentity(array $row): void
+    {
+        if (($row['employee_payment_code'] ?? '') === '' || ($row['employee_job_title'] ?? '') === '') {
+            throw new \LogicException('Payroll result is missing payment code or job title.');
+        }
+    }
+
     private function applyHeaderStyle(Worksheet $sheet): void
     {
-        $range = 'A8:AG8';
+        $range = 'A8:AI8';
         $style = $sheet->getStyle($range);
 
         $style->getFont()->setBold(true);

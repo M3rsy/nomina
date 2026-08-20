@@ -18,6 +18,7 @@ class Employee extends Model
     protected $fillable = [
         'company_id',
         'external_id',
+        'payment_code',
         'first_name',
         'last_name',
         'dni',
@@ -41,6 +42,7 @@ class Employee extends Model
         'expected_salary',
         'job_title',
         'external_id',
+        'payment_code',
         'hired_at',
         'is_active',
     ];

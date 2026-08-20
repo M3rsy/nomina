@@ -55,7 +55,8 @@
                 <table class="min-w-[840px] w-full text-sm">
                     <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                         <tr>
-                            <th scope="col" class="px-5 py-3 text-left">Código</th>
+                            <th scope="col" class="px-5 py-3 text-left">Código de empleado</th>
+                            <th scope="col" class="px-5 py-3 text-left">Código de pago</th>
                             <th scope="col" class="px-5 py-3 text-left">Nombre</th>
                             <th scope="col" class="px-5 py-3 text-left">Identidad</th>
                             <th scope="col" class="px-5 py-3 text-left">Cargo</th>
@@ -68,6 +69,7 @@
                         @forelse ($employees as $employee)
                             <tr class="hover:bg-slate-50/80">
                                 <td class="px-5 py-3.5">{{ $employee->external_id }}</td>
+                                <td class="px-5 py-3.5">{{ $employee->payment_code ?? '-' }}</td>
                                 <td class="px-5 py-3.5 font-medium text-slate-900">{{ $employee->full_name }}</td>
                                 <td class="px-5 py-3.5">{{ $employee->dni }}</td>
                                 <td class="px-5 py-3.5">{{ $employee->job_title ?? '-' }}</td>

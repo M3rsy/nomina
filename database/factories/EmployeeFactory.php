@@ -34,6 +34,7 @@ class EmployeeFactory extends Factory
         return [
             'company_id' => Company::factory(),
             'external_id' => (string) fake()->unique()->randomNumber(5, true),
+            'payment_code' => fake()->unique()->numerify('#####'),
             'first_name' => fake()->firstName(),
             'last_name' => fake()->lastName(),
             'dni' => fake()->numerify('#############'),
