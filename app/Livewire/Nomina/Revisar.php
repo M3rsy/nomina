@@ -23,7 +23,8 @@ use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Attendance\VariationAcknowledgementRecorder;
-use App\Services\Payroll\CreateEmployeeFromUnknownMark;
+use App\Services\Payroll\AuditedRawMarkRevision;
+use App\Services\Payroll\CreateEmployeeFromUnknownMarkCommand;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollRunRequester;
 use App\Services\Payroll\StartPayrollProcessing;
@@ -770,6 +771,8 @@ class Revisar extends Component
         Gate::authorize('create', Employee::class);
         $mark = $this->findRawMark($this->createEmployeeRawMarkId);
         if ($mark === null) {
+            $this->addError('createEmployeeRawMarkId', 'La marca ya no está disponible. Actualizá la revisión e intentá nuevamente.');
+
             return;
         }
 
@@ -784,26 +787,36 @@ class Revisar extends Component
             'createEmployeeReason' => ['required', 'string', 'max:500'],
             'createEmployeeAssignAll' => ['boolean'],
         ]);
-        $profile = WorkScheduleProfile::withoutCompanyScope()
-            ->where('company_id', $this->payPeriod->company_id)
-            ->where('is_active', true)
-            ->findOrFail((int) $validated['createEmployeeScheduleProfileId']);
+        try {
+            $result = app(AuditedRawMarkRevision::class)->createEmployee(new CreateEmployeeFromUnknownMarkCommand(
+                rawMarkId: $mark->id,
+                scheduleProfileId: (int) $validated['createEmployeeScheduleProfileId'],
+                actorId: (int) Auth::id(),
+                paymentCode: $validated['createEmployeePaymentCode'],
+                firstName: $validated['createEmployeeFirstName'],
+                lastName: $validated['createEmployeeLastName'],
+                dni: $validated['createEmployeeDni'],
+                jobTitle: $validated['createEmployeeJobTitle'],
+                hiredAt: $validated['createEmployeeHiredAt'],
+                reason: $validated['createEmployeeReason'],
+                assignAll: (bool) $validated['createEmployeeAssignAll'],
+            ));
+        } catch (ValidationException $exception) {
+            $fields = [
+                'raw_mark' => 'createEmployeeRawMarkId',
+                'external_id' => 'createEmployeeRawMarkId',
+                'payment_code' => 'createEmployeePaymentCode',
+                'schedule_profile_id' => 'createEmployeeScheduleProfileId',
+                'hired_at' => 'createEmployeeHiredAt',
+            ];
+            foreach ($exception->errors() as $field => $messages) {
+                foreach ($messages as $message) {
+                    $this->addError($fields[$field] ?? 'createEmployeeRawMarkId', $message);
+                }
+            }
 
-        $result = app(CreateEmployeeFromUnknownMark::class)->create(
-            $mark,
-            $profile,
-            Auth::user(),
-            [
-                'payment_code' => $validated['createEmployeePaymentCode'],
-                'first_name' => $validated['createEmployeeFirstName'],
-                'last_name' => $validated['createEmployeeLastName'],
-                'dni' => $validated['createEmployeeDni'],
-                'job_title' => $validated['createEmployeeJobTitle'],
-                'hired_at' => $validated['createEmployeeHiredAt'],
-            ],
-            $validated['createEmployeeReason'],
-            (bool) $validated['createEmployeeAssignAll'],
-        );
+            return;
+        }
 
         $this->closeCreateEmployeeModal();
         $this->periodReviewSnapshot = null;
