@@ -444,7 +444,7 @@ function absenceEmployeeWithDefaultSchedule(Company $company): Employee
         WorkSchedule::factory()->forProfile($profile)->create($schedule + ['day_of_week' => $day]);
     }
 
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create(['hired_at' => '2020-01-01']);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada general');
 
     return $employee;

@@ -8,6 +8,7 @@ use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Payroll\LockedPayrollContext;
 use App\Services\Payroll\PayrollContextLocker;
 use App\Services\Payroll\PayrollContextTargets;
 use Illuminate\Database\Events\QueryExecuted;
@@ -102,4 +103,46 @@ test('schedule assignment delegates deterministic assignment locks to the payrol
 
     expect($assignmentLock)->toContain('where "id" in')
         ->toContain('order by "id" asc');
+});
+
+test('employee creation stages writes before assignment and raw mark locks', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $mark = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)->create();
+    $sql = [];
+    /** @var ?LockedPayrollContext $escaped */
+    $escaped = null;
+    DB::listen(function (QueryExecuted $query) use (&$sql): void {
+        $sql[] = strtolower($query->sql);
+    });
+
+    app(PayrollContextLocker::class)->withinEmployeeCreation(
+        $company->id,
+        fn () => new PayrollContextTargets(profileIds: [$profile->id], rawMarkIds: [$mark->id]),
+        fn () => Employee::factory()->forCompany($company)->make()->getAttributes(),
+        function ($context): void {
+            EmployeeScheduleAssignment::factory()->create([
+                'company_id' => $context->company->id,
+                'employee_id' => $context->employees->sole()->id,
+                'work_schedule_profile_id' => $context->profiles->sole()->id,
+            ]);
+        },
+        function ($context) use (&$escaped): void {
+            $escaped = $context;
+            $context->rawMarks->sole()->update(['status' => 'corrected']);
+        },
+    );
+
+    $employeeInsert = collect($sql)->search(fn (string $query): bool => str_starts_with($query, 'insert into "employees"'));
+    $assignmentInsert = collect($sql)->search(fn (string $query): bool => str_starts_with($query, 'insert into "employee_schedule_assignments"'));
+    $rawMarkLock = collect($sql)->search(fn (string $query): bool => str_contains($query, 'from "raw_marks"') && str_contains($query, 'for update'));
+
+    expect($employeeInsert)->toBeInt()
+        ->and($assignmentInsert)->toBeInt()
+        ->and($rawMarkLock)->toBeInt()
+        ->and($employeeInsert)->toBeLessThan($assignmentInsert)
+        ->and($assignmentInsert)->toBeLessThan($rawMarkLock)
+        ->and(fn () => $escaped->assertActive())->toThrow(LogicException::class);
 });

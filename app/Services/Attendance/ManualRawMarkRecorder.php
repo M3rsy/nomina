@@ -108,7 +108,7 @@ class ManualRawMarkRecorder
                     ]);
                 }
 
-                $this->factGenerations->advance($lockedEmployee, $date);
+                $this->factGenerations->advanceLocked($context, $lockedEmployee, $date);
 
                 return $mark;
             },

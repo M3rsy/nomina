@@ -12,6 +12,8 @@ use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function (): void {
@@ -105,6 +107,52 @@ test('equivalent activation retries return the existing publication without dupl
         $company, $actor, 'Conflicting retry', '2026-08-02 10:00:00',
     ))->toThrow(ValidationException::class)
         ->and(WorkScheduleProfilePublication::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(2);
+});
+
+test('activation completes profile writes before locking and writing publications', function () {
+    $company = Company::factory()->create();
+    $actor = User::factory()->create(['company_id' => null]);
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $employee = Employee::factory()->forCompany($company)->create();
+    EmployeeScheduleAssignment::factory()->create([
+        'company_id' => $company->id,
+        'employee_id' => $employee->id,
+        'work_schedule_profile_id' => $profile->id,
+        'effective_from' => '2026-07-01',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2027-01-01',
+        'end_date' => '2027-01-15',
+        'status' => 'draft',
+    ]);
+    $sql = [];
+    DB::listen(function (QueryExecuted $query) use (&$sql): void {
+        $sql[] = strtolower($query->sql);
+    });
+
+    app(GeneralWorkSchedulePublisher::class)->activate(
+        $company,
+        $actor,
+        'Canonical profile publication order',
+        '2026-08-02 10:00:00',
+    );
+
+    $profileWrites = collect($sql)->keys()->filter(
+        fn (int $index): bool => preg_match('/^(insert into|update) \"work_schedule_profiles\"/', $sql[$index]) === 1,
+    );
+    $lastProfileWrite = $profileWrites->max();
+    $publicationLock = collect($sql)->keys()->first(
+        fn (int $index): bool => $index > $lastProfileWrite
+            && str_contains($sql[$index], 'from "work_schedule_profile_publications"')
+            && str_contains($sql[$index], 'order by "id" asc'),
+    );
+    $publicationWrite = collect($sql)->keys()->first(
+        fn (int $index): bool => preg_match('/^(insert into|update) \"work_schedule_profile_publications\"/', $sql[$index]) === 1,
+    );
+    expect($profileWrites)->toHaveCount(2)
+        ->and($publicationLock)->not->toBeNull()
+        ->and($lastProfileWrite)->toBeLessThan($publicationLock)
+        ->and($publicationLock)->toBeLessThan($publicationWrite);
 });
 
 test('activation intersecting a locked period leaves publication and assignment history unchanged', function () {

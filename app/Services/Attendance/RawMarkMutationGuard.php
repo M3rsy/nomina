@@ -62,76 +62,96 @@ class RawMarkMutationGuard
                 $targetEmployee,
                 $targetEventAt,
             ),
-            function (LockedPayrollContext $context) use ($mutation, $targetEmployee, $targetEventAt): Collection {
-                $plans = $context->rawMarks->map(function (RawMark $lockedMark) use ($context, $targetEmployee, $targetEventAt): array {
-                    $currentEmployee = $lockedMark->employee_id === null
-                        ? null
-                        : $context->employee($lockedMark->employee_id);
-                    $nextEmployee = $targetEmployee === null
-                        ? $currentEmployee
-                        : $context->employee($targetEmployee->id);
-
-                    if ($targetEmployee !== null
-                        && ($nextEmployee->trashed() || $nextEmployee->company_id !== $lockedMark->company_id)) {
-                        throw ValidationException::withMessages([
-                            'raw_mark' => 'El empleado ya no admite cambios de marcas para esta empresa.',
-                        ]);
-                    }
-
-                    $nextEventAt = $targetEventAt === null
-                        ? CarbonImmutable::instance($lockedMark->event_at)
-                        : CarbonImmutable::parse($targetEventAt);
-
-                    return [
-                        'mark' => $lockedMark,
-                        'next_employee' => $nextEmployee,
-                        'occurrences' => $this->affectedOccurrences(
-                            $lockedMark,
-                            $currentEmployee,
-                            $nextEmployee,
-                            $nextEventAt,
-                        ),
-                    ];
-                });
-
-                if ($context->payPeriods->contains(fn (PayPeriod $period): bool => in_array(
-                    $period->status,
-                    PayPeriod::ATTENDANCE_LOCKED_STATUSES,
-                    true,
-                ))) {
-                    throw ValidationException::withMessages([
-                        'raw_mark' => 'La marca pertenece a una fecha laboral de un período de nómina bloqueado.',
-                    ]);
-                }
-
-                $generationAdvances = $plans->pluck('occurrences')->collapse()
-                    ->groupBy(fn (array $occurrence): string => $this->occurrenceKey($occurrence))
-                    ->sortKeys();
-                $affectedOccurrences = $generationAdvances
-                    ->map(fn (Collection $advances): array => $advances->first())
-                    ->values();
-                $results = $plans->map(fn (array $plan): mixed => $mutation($plan['mark']));
-
-                foreach ($plans as $plan) {
-                    $plan['mark']->refresh();
-                    $this->assertManualPairIntegrity(
-                        $affectedOccurrences,
-                        $plan['mark'],
-                        $plan['next_employee'],
-                    );
-                }
-
-                $generationAdvances->each(function (Collection $advances): void {
-                    $occurrence = $advances->first();
-
-                    foreach ($advances as $_) {
-                        $this->factGenerations->advance($occurrence['employee'], $occurrence['work_date']);
-                    }
-                });
-
-                return $results;
-            },
+            fn (LockedPayrollContext $context): Collection => $this->mutateLocked(
+                $context,
+                $mutation,
+                $targetEmployee,
+                $targetEventAt,
+            ),
         );
+    }
+
+    /** @return Collection<int, mixed> */
+    public function mutateLocked(
+        LockedPayrollContext $context,
+        Closure $mutation,
+        ?Employee $targetEmployee = null,
+        CarbonInterface|string|null $targetEventAt = null,
+    ): Collection {
+        $context->assertStage(PayrollContextLocker::STAGE_RAW_MARKS);
+
+        $plans = $context->rawMarks->map(function (RawMark $lockedMark) use ($context, $targetEmployee, $targetEventAt): array {
+            $context->assertOwns($lockedMark);
+            $currentEmployee = $lockedMark->employee_id === null
+                ? null
+                : $context->employee($lockedMark->employee_id);
+            $nextEmployee = $targetEmployee === null
+                ? $currentEmployee
+                : $context->employee($targetEmployee->id);
+
+            if ($targetEmployee !== null
+                && ($nextEmployee->trashed()
+                    || ! $nextEmployee->exists
+                    || $nextEmployee->company_id !== $lockedMark->company_id)) {
+                throw ValidationException::withMessages([
+                    'raw_mark' => 'El empleado ya no admite cambios de marcas para esta empresa.',
+                ]);
+            }
+
+            $nextEventAt = $targetEventAt === null
+                ? CarbonImmutable::instance($lockedMark->event_at)
+                : CarbonImmutable::parse($targetEventAt);
+
+            return [
+                'mark' => $lockedMark,
+                'next_employee' => $nextEmployee,
+                'occurrences' => $this->affectedOccurrences(
+                    $lockedMark,
+                    $currentEmployee,
+                    $nextEmployee,
+                    $nextEventAt,
+                ),
+            ];
+        });
+
+        if ($context->payPeriods->contains(fn (PayPeriod $period): bool => in_array(
+            $period->status,
+            PayPeriod::ATTENDANCE_LOCKED_STATUSES,
+            true,
+        ))) {
+            throw ValidationException::withMessages([
+                'raw_mark' => 'La marca pertenece a una fecha laboral de un período de nómina bloqueado.',
+            ]);
+        }
+
+        $generationAdvances = $plans->pluck('occurrences')->collapse()
+            ->groupBy(fn (array $occurrence): string => $this->occurrenceKey($occurrence))
+            ->sortKeys();
+        $affectedOccurrences = $generationAdvances
+            ->map(fn (Collection $advances): array => $advances->first())
+            ->values();
+        $results = $plans->map(fn (array $plan): mixed => $mutation($plan['mark']));
+
+        foreach ($plans as $plan) {
+            $plan['mark']->refresh();
+            $this->assertManualPairIntegrity(
+                $affectedOccurrences,
+                $plan['mark'],
+                $plan['next_employee'],
+            );
+        }
+
+        $generationAdvances->each(function (Collection $advances) use ($context): void {
+            $occurrence = $advances->first();
+            $this->factGenerations->advanceLocked(
+                $context,
+                $occurrence['employee'],
+                $occurrence['work_date'],
+                $advances->count(),
+            );
+        });
+
+        return $results;
     }
 
     private function resolveTargets(

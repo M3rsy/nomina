@@ -29,6 +29,19 @@ test('attendance fact generations advance monotonically per employee and work da
         ->and($tracker->current($otherEmployee, '2026-07-20'))->toBe(0);
 });
 
+test('attendance fact generation rejects a non-positive advance count', function () {
+    $employee = Employee::factory()->forCompany()->create();
+
+    expect(fn () => app(AttendanceFactGenerationTracker::class)->advanceBy(
+        $employee,
+        '2026-07-20',
+        0,
+    ))->toThrow(
+        InvalidArgumentException::class,
+        'Attendance fact generation count must be positive.',
+    );
+});
+
 test('resolved occurrences expose their current fact generation in decision identity', function () {
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
