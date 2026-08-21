@@ -17,7 +17,7 @@
         </svg>
         <span>{{ $loadingLabel }}</span>
     </span>
+    <span role="status" aria-live="polite" class="sr-only">
+        <span wire:loading wire:target="{{ $target }}">{{ $loadingLabel }}</span>
+    </span>
 </button>
-<span role="status" aria-live="polite" class="sr-only">
-    <span wire:loading wire:target="{{ $target }}">{{ $loadingLabel }}</span>
-</span>
