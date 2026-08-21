@@ -1,4 +1,6 @@
-<div class="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
+<div class="relative isolate min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
+    <x-ui.loading-overlay target="save,delete" message="Validando y actualizando el calendario…" />
+
     <div
         x-data="{ hideCompanyToastTimer: null }"
         x-show="$wire.showCompanyToast"
@@ -120,12 +122,14 @@
                                     <td class="px-4 py-3.5 text-sm text-slate-600">{{ $holiday->description ?? '-' }}</td>
                                     <td class="px-4 py-3.5 text-sm">
                                         @can('holidays.manage')
-                                            <button
+                                            <x-ui.loading-button
                                                 wire:click="toggle({{ $holiday->id }})"
+                                                target="toggle({{ $holiday->id }})"
+                                                loading-label="Actualizando…"
                                                 class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold {{ $holiday->is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-600' }}"
                                             >
                                                 {{ $holiday->is_active ? 'Activo' : 'Inactivo' }}
-                                            </button>
+                                            </x-ui.loading-button>
                                         @else
                                             <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold {{ $holiday->is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-600' }}">
                                                 {{ $holiday->is_active ? 'Activo' : 'Inactivo' }}
@@ -135,18 +139,22 @@
                                     <td class="px-4 py-3.5">
                                         @can('holidays.manage')
                                             <div class="flex flex-wrap gap-2">
-                                                <button
+                                                <x-ui.loading-button
                                                     wire:click="edit({{ $holiday->id }})"
+                                                    target="edit({{ $holiday->id }})"
+                                                    loading-label="Abriendo…"
                                                     class="inline-flex min-h-9 items-center rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                                                 >
                                                     Editar
-                                                </button>
-                                                <button
+                                                </x-ui.loading-button>
+                                                <x-ui.loading-button
                                                     wire:click="confirmDelete({{ $holiday->id }})"
+                                                    target="confirmDelete({{ $holiday->id }})"
+                                                    loading-label="Abriendo…"
                                                     class="inline-flex min-h-9 items-center rounded-lg border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                                                 >
                                                     Eliminar
-                                                </button>
+                                                </x-ui.loading-button>
                                             </div>
                                         @endcan
                                     </td>
@@ -212,11 +220,13 @@
                         type="button"
                         class="inline-flex min-h-10 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                     >Cancelar</button>
-                    <button
+                    <x-ui.loading-button
                         wire:click="save"
                         type="button"
+                        target="save"
+                        loading-label="Guardando…"
                         class="inline-flex min-h-10 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
-                    >Guardar</button>
+                    >Guardar</x-ui.loading-button>
                 </div>
             </div>
         </div>
@@ -233,11 +243,13 @@
                         type="button"
                         class="inline-flex min-h-10 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                     >Cancelar</button>
-                    <button
+                    <x-ui.loading-button
                         wire:click="delete"
                         type="button"
+                        target="delete"
+                        loading-label="Eliminando…"
                         class="inline-flex min-h-10 items-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
-                    >Eliminar</button>
+                    >Eliminar</x-ui.loading-button>
                 </div>
             </div>
         </div>

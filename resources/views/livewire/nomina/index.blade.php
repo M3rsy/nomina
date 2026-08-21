@@ -104,10 +104,7 @@
                     <button type="button" wire:click="closeCreateForm" class="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">
                         Cancelar
                     </button>
-                    <button type="submit" wire:loading.attr="disabled" wire:target="store" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60">
-                        <span wire:loading.remove wire:target="store">Crear y continuar</span>
-                        <span wire:loading wire:target="store">Creando período...</span>
-                    </button>
+                    <x-ui.loading-button type="submit" target="store" loading-label="Creando período…" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60">Crear y continuar</x-ui.loading-button>
                 </div>
             </form>
         </section>
