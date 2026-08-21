@@ -1,6 +1,8 @@
 @php($canManageSchedules = auth()->user()->can('create', \App\Models\WorkSchedule::class))
 
-<div class="min-h-screen bg-[radial-gradient(circle_at_top,_#e8fbfb_0%,_#f5f3ff_35%,_#fff_70%)] px-4 py-6 sm:px-6 lg:px-8">
+<div class="relative isolate min-h-screen bg-[radial-gradient(circle_at_top,_#e8fbfb_0%,_#f5f3ff_35%,_#fff_70%)] px-4 py-6 sm:px-6 lg:px-8">
+    <x-ui.loading-overlay target="confirmHistoricalSave,createProfile,retireProfile,activateGeneralProfile,save" message="Validando y guardando la jornada…" />
+
     <div class="mx-auto w-full max-w-6xl space-y-5">
         <section class="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm backdrop-blur">
             <div class="flex flex-col gap-2">
@@ -76,13 +78,15 @@
                     </div>
 
                     <div class="mt-2 flex shrink-0 gap-2 md:mt-0">
-                        <button
+                        <x-ui.loading-button
                             type="button"
                             wire:click="confirmHistoricalSave"
+                            target="confirmHistoricalSave"
+                            loading-label="Guardando…"
                             class="inline-flex items-center rounded-full border border-amber-300 bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
                         >
                             Confirmar y crear versión
-                        </button>
+                        </x-ui.loading-button>
 
                         <button
                             type="button"
@@ -115,18 +119,20 @@
                             </select>
                         </label>
                         @if ($canManageSchedules)
-                            <button type="button" wire:click="openCreateProfile" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100" @disabled($requiresProfileMigration)>Nueva plantilla</button>
+                            <x-ui.loading-button type="button" wire:click="openCreateProfile" target="openCreateProfile" loading-label="Abriendo…" :disabled="$requiresProfileMigration" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Nueva plantilla</x-ui.loading-button>
                             @if ($selectedProfileId)
-                                <button
+                                <x-ui.loading-button
                                     type="button"
                                     role="switch"
                                     aria-checked="true"
                                     wire:click="openRetireProfile({{ $selectedProfileId }})"
+                                    target="openRetireProfile({{ $selectedProfileId }})"
+                                    loading-label="Abriendo…"
                                     class="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
                                 >
                                     <span class="h-3 w-3 rounded-full bg-emerald-500"></span>
                                     Disponible
-                                </button>
+                                </x-ui.loading-button>
                             @endif
                             @if ($requiresProfileMigration)
                                 <p class="text-xs text-slate-500">No se puede crear o versionar plantillas hasta aplicar migraciones pendientes.</p>
@@ -141,7 +147,7 @@
                             <input type="text" wire:model="newProfileName" class="mt-1 w-full rounded-xl border-indigo-200" placeholder="Ej. Guardia nocturna" />
                             @error('newProfileName') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
                         </label>
-                        <button type="button" wire:click="createProfile" class="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</button>
+                        <x-ui.loading-button type="button" wire:click="createProfile" target="createProfile" loading-label="Duplicando…" class="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</x-ui.loading-button>
                         <button type="button" wire:click="cancelCreateProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-indigo-700">Cancelar</button>
                     </div>
                 @endif
@@ -175,7 +181,7 @@
 
                         <div class="mt-3 flex justify-end gap-2">
                             <button type="button" wire:click="cancelRetireProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-amber-800">Cancelar</button>
-                            <button type="button" wire:click="retireProfile" class="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">Retirar y reasignar</button>
+                            <x-ui.loading-button type="button" wire:click="retireProfile" target="retireProfile" loading-label="Retirando…" class="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">Retirar y reasignar</x-ui.loading-button>
                         </div>
                     </div>
                 @endif
@@ -268,39 +274,31 @@
                             <input type="text" wire:model="activationReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué se activa la nueva política" />
                             @error('activationReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
                         </label>
-                        <button
+                        <x-ui.loading-button
                             type="button"
                             wire:click="activateGeneralProfile"
-                            wire:loading.attr="disabled"
-                            wire:target="activateGeneralProfile"
+                            target="activateGeneralProfile"
+                            loading-label="Activando…"
                             class="inline-flex items-center rounded-full bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-emerald-800 disabled:opacity-70"
                         >
                             Activar jornada general
-                        </button>
+                        </x-ui.loading-button>
                         @if ($selectedProfileId)
                             <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de la nueva versión
                                 <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué cambia la jornada" />
                                 @error('changeReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
                             </label>
                         @endif
-                         <button
+                         <x-ui.loading-button
                              type="button"
                              wire:click="save"
-                             @disabled($requiresProfileMigration)
-                             wire:loading.attr="disabled"
-                             wire:loading.class="cursor-not-allowed opacity-70"
-                            wire:target="save,confirmHistoricalSave"
+                             target="save"
+                             loading-label="Guardando…"
+                             :disabled="$requiresProfileMigration"
                             class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-slate-800 disabled:opacity-70"
                         >
-                            <span wire:loading.remove wire:target="save">{{ $selectedProfileId ? 'Crear nueva versión' : 'Guardar plantilla inicial' }}</span>
-                            <span wire:loading wire:target="save" class="inline-flex items-center gap-2">
-                                <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 100 8V20A8 8 0 014 12z"></path>
-                                </svg>
-                                Guardando...
-                            </span>
-                        </button>
+                            {{ $selectedProfileId ? 'Crear nueva versión' : 'Guardar plantilla inicial' }}
+                        </x-ui.loading-button>
                     @endif
                 </div>
             </article>
