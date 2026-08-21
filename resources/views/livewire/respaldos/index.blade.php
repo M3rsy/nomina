@@ -1,4 +1,6 @@
-<div class="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
+<div class="relative isolate min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
+    <x-ui.loading-overlay target="generate,restore" message="Procesando el respaldo…" />
+
     <div class="mx-auto max-w-7xl space-y-5">
         <header class="rounded-3xl border border-slate-200/70 bg-white/90 p-5 shadow-sm backdrop-blur sm:p-6">
             <div class="flex flex-wrap items-start justify-between gap-4">
@@ -10,14 +12,15 @@
                     <p class="mt-2 max-w-2xl text-sm text-slate-600">Exportá y descargá snapshots del sistema; restauración por ahora disponible para soporte técnico.</p>
                 </div>
 
-                <button
+                <x-ui.loading-button
                     type="button"
                     wire:click="generate"
-                    wire:loading.attr="disabled"
+                    target="generate"
+                    loading-label="Generando…"
                     class="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 >
                     Generar respaldo
-                </button>
+                </x-ui.loading-button>
             </div>
         </header>
 
@@ -67,13 +70,15 @@
                                             Descargar
                                         </a>
                                         @if ($canRestore)
-                                            <button
+                                            <x-ui.loading-button
                                                 type="button"
                                                 wire:click="confirmRestore('{{ $file['path'] }}')"
+                                                target="confirmRestore('{{ $file['path'] }}')"
+                                                loading-label="Abriendo…"
                                                 class="inline-flex min-h-9 items-center rounded-lg border border-amber-100 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
                                             >
                                                 Restaurar
-                                            </button>
+                                            </x-ui.loading-button>
                                         @endif
                                     </div>
                                 </td>
@@ -102,13 +107,15 @@
                     >
                         Cancelar
                     </button>
-                    <button
+                    <x-ui.loading-button
                         type="button"
                         wire:click="restore"
+                        target="restore"
+                        loading-label="Registrando…"
                         class="inline-flex min-h-10 items-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700"
                     >
                         Entendido
-                    </button>
+                    </x-ui.loading-button>
                 </div>
             </div>
         </div>
