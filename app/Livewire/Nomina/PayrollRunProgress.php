@@ -59,6 +59,16 @@ final class PayrollRunProgress extends Component
         }
     }
 
+    public function retry(): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+
+        if ($this->runId !== null) {
+            $this->dispatch('payroll-run-retry', runId: $this->runId);
+        }
+    }
+
     public function render()
     {
         return view('livewire.nomina.payroll-run-progress');

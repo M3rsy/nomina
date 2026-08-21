@@ -101,21 +101,25 @@
                                             </a>
                                         @endcan
                                         @can('activate', $company)
-                                            <button
+                                            <x-ui.loading-button
                                                 wire:click="toggle({{ $company->id }})"
+                                                target="toggle({{ $company->id }})"
+                                                loading-label="Actualizando…"
                                                 class="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                                             >
                                                 {{ $company->is_active ? 'Desactivar' : 'Activar' }}
-                                            </button>
+                                            </x-ui.loading-button>
                                         @endcan
                                         @can('delete', $company)
-                                            <button
+                                            <x-ui.loading-button
                                                 wire:click="delete({{ $company->id }})"
+                                                target="delete({{ $company->id }})"
+                                                loading-label="Eliminando…"
                                                 class="inline-flex min-h-9 items-center rounded-lg border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                                                 onclick="return confirm('¿Eliminar empresa?')"
                                             >
                                                 Eliminar
-                                            </button>
+                                            </x-ui.loading-button>
                                         @endcan
                                     </div>
                                 </td>

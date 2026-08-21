@@ -168,7 +168,10 @@ test('a failed run stays on review and an explicit retry creates a new run', fun
         ->assertSee('No se pudo procesar la nómina.')
         ->assertSee("Referencia #{$first->id}")
         ->assertSee('Intentar nuevamente')
-        ->assertDontSee('sensitive database credentials');
+        ->assertSeeHtml('wire:target="retry"')
+        ->assertDontSee('sensitive database credentials')
+        ->call('retry')
+        ->assertDispatched('payroll-run-retry', runId: $first->id);
 
     $parent->dispatch('payroll-run-terminal', runId: $first->id)
         ->assertSet('activePayrollRunId', $first->id)

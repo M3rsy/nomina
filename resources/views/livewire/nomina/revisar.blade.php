@@ -1,6 +1,6 @@
 <div class="relative isolate mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
     <x-ui.loading-overlay
-        target="continueToReady,confirmContinueToReady,startPayrollRun"
+        target="continueToReady,confirmContinueToReady,startPayrollRun,saveAttendanceException,saveOvertimeBatch,saveOvertimeDecision,saveManualMark,saveEditRawMark,markCorrected,deleteRawMark,saveAssign,saveCreatedEmployee,reopenProcessedPeriod"
         message="Validando y preparando la nómina…"
     />
 
@@ -65,13 +65,15 @@
                         Procesar nómina
                     </x-ui.loading-button>
                 @elseif ($payPeriod->status === 'processed')
-                    <button
+                    <x-ui.loading-button
                         type="button"
                         wire:click="openReopenModal"
+                        target="openReopenModal"
+                        loading-label="Abriendo…"
                         class="inline-flex min-h-11 items-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
                     >
                         Reabrir para corregir
-                    </button>
+                    </x-ui.loading-button>
                 @elseif ($isBlocked)
                     <button
                         type="button"
@@ -125,13 +127,15 @@
                             <span class="text-rose-700">({{ $blocker['employee_external_id'] }}) · {{ \Carbon\CarbonImmutable::parse($blocker['work_date'])->format('d/m/Y') }}</span>
                             <span class="block text-rose-900">{{ $this->readinessBlockerLabel($blocker['code']) }}</span>
                             @if ($blocker['code'] === 'missing_pair' && ! $isBlocked)
-                                <button
+                                <x-ui.loading-button
                                     type="button"
                                     wire:click="openManualMarkModal({{ $blocker['employee_id'] }}, '{{ $blocker['work_date'] }}')"
+                                    target="openManualMarkModal({{ $blocker['employee_id'] }}, '{{ $blocker['work_date'] }}')"
+                                    loading-label="Abriendo…"
                                     class="mt-2 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
                                 >
                                     Agregar marca faltante
-                                </button>
+                                </x-ui.loading-button>
                             @endif
                         </li>
                     @endforeach
@@ -224,14 +228,16 @@
                         @else
                             <div class="mt-3 flex flex-col gap-2 sm:flex-row">
                                 <input wire:model="variationReason" type="text" maxlength="500" placeholder="Motivo del reconocimiento" class="min-h-11 flex-1 rounded-lg border-slate-300 text-sm">
-                                <button
+                                <x-ui.loading-button
                                     type="button"
                                     wire:click="acknowledgeVariation({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $variation->key }}', '{{ $variation->fingerprint }}')"
-                                    @disabled($isBlocked)
+                                    target="acknowledgeVariation({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $variation->key }}', '{{ $variation->fingerprint }}')"
+                                    loading-label="Guardando…"
+                                    :disabled="$isBlocked"
                                     class="rounded-lg bg-sky-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
                                 >
                                     Reconocer variación
-                                </button>
+                                </x-ui.loading-button>
                             </div>
                             @error('variationReason') <p class="mt-2 text-sm text-rose-700">{{ $message }}</p> @enderror
                         @endif
@@ -402,29 +408,35 @@
                                         @endif
 
                                         <div class="flex flex-wrap gap-2">
-                                             <button
+                                             <x-ui.loading-button
                                                 type="button"
                                                 wire:click="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'approved')"
-                                                @disabled($isBlocked || $decision?->decision === 'approved')
+                                                target="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'approved')"
+                                                loading-label="Abriendo…"
+                                                :disabled="$isBlocked || $decision?->decision === 'approved'"
                                                 class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                                             >
                                                 Aprobar completo
-                                            </button>
-                                            <button
+                                            </x-ui.loading-button>
+                                            <x-ui.loading-button
                                                 type="button"
                                                 wire:click="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'rejected')"
-                                                @disabled($isBlocked || $decision?->decision === 'rejected')
+                                                target="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'rejected')"
+                                                loading-label="Abriendo…"
+                                                :disabled="$isBlocked || $decision?->decision === 'rejected'"
                                                 class="rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
                                             >
                                                  Rechazar completo
-                                             </button>
+                                             </x-ui.loading-button>
                                             @if ($review->analysis->payrollPolicyKey === \App\Models\WorkScheduleProfilePublication::DURATION_FIRST_V2)
-                                                <button
+                                                <x-ui.loading-button
                                                     type="button"
                                                     wire:click="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'partial')"
-                                                    @disabled($isBlocked)
+                                                    target="openOvertimeDecision({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $candidate->key }}', 'partial')"
+                                                    loading-label="Abriendo…"
+                                                    :disabled="$isBlocked"
                                                     class="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-700 disabled:opacity-40"
-                                                >Aprobar parcialmente</button>
+                                                >Aprobar parcialmente</x-ui.loading-button>
                                             @endif
                                         </div>
                                     </div>
@@ -451,8 +463,8 @@
                     {{ $allFilteredOvertimeSelected ? $pendingOvertimeMatchCount : count($selectedOvertimeCandidates) }} seleccionados
                 </p>
                 <div class="flex gap-2">
-                    <button type="button" wire:click="openOvertimeBatch('approved')" @disabled($isBlocked) class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Aprobar</button>
-                    <button type="button" wire:click="openOvertimeBatch('rejected')" @disabled($isBlocked) class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Rechazar</button>
+                    <x-ui.loading-button type="button" wire:click="openOvertimeBatch('approved')" target="openOvertimeBatch('approved')" loading-label="Abriendo…" :disabled="$isBlocked" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Aprobar</x-ui.loading-button>
+                    <x-ui.loading-button type="button" wire:click="openOvertimeBatch('rejected')" target="openOvertimeBatch('rejected')" loading-label="Abriendo…" :disabled="$isBlocked" class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold disabled:opacity-40">Rechazar</x-ui.loading-button>
                 </div>
             </div>
         @endif
@@ -547,32 +559,38 @@
                                         @endif
 
                                         <div class="flex flex-wrap gap-2">
-                                            <button
+                                            <x-ui.loading-button
                                                 type="button"
                                                 wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'granted')"
-                                                @disabled($isBlocked || ($deficit->kind === 'daily_shortfall' ? $exception !== null && $exception->decision !== 'revoked' : $exception?->decision === 'granted'))
+                                                target="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'granted')"
+                                                loading-label="Abriendo…"
+                                                :disabled="$isBlocked || ($deficit->kind === 'daily_shortfall' ? $exception !== null && $exception->decision !== 'revoked' : $exception?->decision === 'granted')"
                                                 class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                                             >
                                                  Conceder excepción
-                                             </button>
+                                             </x-ui.loading-button>
                                              @if ($deficit->kind === 'daily_shortfall')
-                                                 <button
+                                                 <x-ui.loading-button
                                                      type="button"
                                                      wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'rejected')"
-                                                     @disabled($isBlocked || ($exception !== null && $exception->decision !== 'revoked'))
+                                                     target="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'rejected')"
+                                                     loading-label="Abriendo…"
+                                                     :disabled="$isBlocked || ($exception !== null && $exception->decision !== 'revoked')"
                                                      class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
                                                  >
                                                      Rechazar excepción
-                                                 </button>
+                                                 </x-ui.loading-button>
                                              @endif
-                                            <button
+                                            <x-ui.loading-button
                                                 type="button"
                                                 wire:click="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'revoked')"
-                                                @disabled($isBlocked || $exception?->decision !== 'granted')
+                                                target="openAttendanceException({{ $review->employee->id }}, '{{ $review->analysis->workDate->toDateString() }}', '{{ $deficit->key }}', 'revoked')"
+                                                loading-label="Abriendo…"
+                                                :disabled="$isBlocked || $exception?->decision !== 'granted'"
                                                 class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                                             >
                                                 Revocar excepción
-                                            </button>
+                                            </x-ui.loading-button>
                                         </div>
                                     </div>
                                 </div>
@@ -669,58 +687,64 @@
                             </td>
                             <td class="px-4 py-3">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <button
+                                    <x-ui.loading-button
                                         type="button"
                                         wire:click="openEditRawMark({{ $record->id }})"
-                                        @disabled($isBlocked)
+                                        target="openEditRawMark({{ $record->id }})"
+                                        loading-label="Abriendo…"
+                                        :disabled="$isBlocked"
                                         class="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Editar
-                                    </button>
+                                    </x-ui.loading-button>
 
-                                    <button
+                                    <x-ui.loading-button
                                         type="button"
                                         wire:click="openAssignModal({{ $record->id }})"
-                                        wire:loading.attr="disabled"
-                                        wire:target="openAssignModal({{ $record->id }})"
-                                        @disabled($isBlocked)
+                                        target="openAssignModal({{ $record->id }})"
+                                        loading-label="Abriendo…"
+                                        :disabled="$isBlocked"
                                         class="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Asignar
-                                    </button>
+                                    </x-ui.loading-button>
 
                                     @if ($record->status === 'unknown_employee' && $record->employee_id === null)
                                         @can('create', \App\Models\Employee::class)
-                                            <button
+                                            <x-ui.loading-button
                                                 type="button"
                                                 wire:click="openCreateEmployeeModal({{ $record->id }})"
-                                                wire:loading.attr="disabled"
-                                                wire:target="openCreateEmployeeModal({{ $record->id }})"
-                                                @disabled($isBlocked)
+                                                target="openCreateEmployeeModal({{ $record->id }})"
+                                                loading-label="Abriendo…"
+                                                :disabled="$isBlocked"
                                                 class="rounded-md border border-violet-300 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
                                             >
                                                 Crear empleado
-                                            </button>
+                                            </x-ui.loading-button>
                                         @endcan
                                     @endif
 
-                                    <button
+                                    <x-ui.loading-button
                                         type="button"
                                         wire:click="openCorrectRawMark({{ $record->id }})"
-                                        @disabled($isBlocked)
+                                        target="openCorrectRawMark({{ $record->id }})"
+                                        loading-label="Abriendo…"
+                                        :disabled="$isBlocked"
                                         class="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Corregir
-                                    </button>
+                                    </x-ui.loading-button>
 
-                                    <button
+                                    <x-ui.loading-button
                                         type="button"
                                         wire:click="openDeleteRawMark({{ $record->id }})"
-                                        @disabled($isBlocked)
+                                        target="openDeleteRawMark({{ $record->id }})"
+                                        loading-label="Abriendo…"
+                                        :disabled="$isBlocked"
                                         class="rounded-md border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Eliminar
-                                    </button>
+                                    </x-ui.loading-button>
                                 </div>
                             </td>
                         </tr>
@@ -802,7 +826,7 @@
 
                     <div class="flex justify-end gap-2 sm:col-span-2">
                         <button type="button" wire:click="closeManualMarkModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Registrar marca real</button>
+                        <x-ui.loading-button type="submit" target="saveManualMark" loading-label="Registrando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Registrar marca real</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -839,9 +863,9 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeAttendanceExceptionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : ($attendanceExceptionDecision === 'rejected' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-700 hover:bg-slate-800') }}">
+                        <x-ui.loading-button type="submit" target="saveAttendanceException" loading-label="Guardando…" :disabled="$isBlocked" class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $attendanceExceptionDecision === 'granted' ? 'bg-emerald-600 hover:bg-emerald-700' : ($attendanceExceptionDecision === 'rejected' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-700 hover:bg-slate-800') }}">
                             {{ match ($attendanceExceptionDecision) { 'granted' => 'Conceder excepción', 'rejected' => 'Rechazar excepción', default => 'Revocar excepción' } }}
-                        </button>
+                        </x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -876,10 +900,7 @@
                     @error('selectedOvertimeCandidates') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeOvertimeBatchModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) wire:loading.attr="disabled" wire:target="saveOvertimeBatch" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
-                            <span wire:loading.remove wire:target="saveOvertimeBatch">Confirmar lote</span>
-                            <span wire:loading wire:target="saveOvertimeBatch">Enviando…</span>
-                        </button>
+                        <x-ui.loading-button type="submit" target="saveOvertimeBatch" loading-label="Enviando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Confirmar lote</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -925,9 +946,9 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeOvertimeDecisionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $overtimeDecision === 'rejected' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700' }}">
+                        <x-ui.loading-button type="submit" target="saveOvertimeDecision" loading-label="Guardando…" :disabled="$isBlocked" class="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 {{ $overtimeDecision === 'rejected' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700' }}">
                             {{ match ($overtimeDecision) { 'approved' => 'Aprobar completo', 'rejected' => 'Rechazar completo', default => 'Aprobar subintervalo' } }}
-                        </button>
+                        </x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -968,7 +989,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeEditModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</button>
+                        <x-ui.loading-button type="submit" target="saveEditRawMark" loading-label="Guardando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -995,7 +1016,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeCorrectModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar corrección</button>
+                        <x-ui.loading-button type="submit" target="markCorrected" loading-label="Corrigiendo…" :disabled="$isBlocked" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar corrección</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -1022,7 +1043,7 @@
 
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeDeleteModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Eliminar</button>
+                        <x-ui.loading-button type="submit" target="deleteRawMark" loading-label="Eliminando…" :disabled="$isBlocked" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Eliminar</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -1064,7 +1085,7 @@
 
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" @disabled($isBlocked) class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</button>
+                        <x-ui.loading-button type="submit" target="saveAssign" loading-label="Asignando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -1088,7 +1109,7 @@
                     <label class="inline-flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" wire:model="createEmployeeAssignAll"><span>Asignar todas las marcas de este código</span></label>
                     <div class="flex justify-end gap-2 sm:col-span-2">
                         <button type="button" wire:click="closeCreateEmployeeModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" wire:loading.attr="disabled" wire:target="saveCreatedEmployee" class="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><span wire:loading.remove wire:target="saveCreatedEmployee">Crear y asignar</span><span wire:loading wire:target="saveCreatedEmployee">Creando…</span></button>
+                        <x-ui.loading-button type="submit" target="saveCreatedEmployee" loading-label="Creando…" class="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Crear y asignar</x-ui.loading-button>
                     </div>
                 </form>
             </div>
@@ -1123,7 +1144,7 @@
                     @error('reopenReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
                     <div class="flex justify-end gap-2">
                         <button type="button" wire:click="closeReopenModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <button type="submit" class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">Invalidar y reabrir</button>
+                        <x-ui.loading-button type="submit" target="reopenProcessedPeriod" loading-label="Reabriendo…" class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">Invalidar y reabrir</x-ui.loading-button>
                     </div>
                 </form>
             </div>
