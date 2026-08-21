@@ -195,7 +195,10 @@ test('upload form relates validation errors and exposes loading feedback', funct
         ->assertSeeHtml('id="upload-error" role="alert"')
         ->assertSeeHtml('wire:loading wire:target="upload"')
         ->assertSeeHtml('wire:loading.attr="disabled"')
-        ->assertSeeHtml('wire:loading wire:target="store"');
+        ->assertSeeHtml('wire:loading.attr="aria-busy"')
+        ->assertSeeHtml('wire:target="upload,store"')
+        ->assertSeeHtml('wire:loading.delay.short.flex')
+        ->assertSee('Validando el archivo de asistencia…');
 
     expect($component->html())
         ->toMatch('/aria-describedby="[^"]*pay-period-help[^"]*pay-period-error[^"]*"/')

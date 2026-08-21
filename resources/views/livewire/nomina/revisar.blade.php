@@ -1,4 +1,9 @@
-<div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+<div class="relative isolate mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <x-ui.loading-overlay
+        target="continueToReady,confirmContinueToReady,startPayrollRun"
+        message="Validando y preparando la nómina…"
+    />
+
     @if (session('success'))
         <div class="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status">
             {{ session('success') }}
@@ -49,17 +54,16 @@
                 </a>
 
                 @if ($payPeriod->status === 'ready')
-                    <button
+                    <x-ui.loading-button
                         type="button"
                         wire:click="startPayrollRun"
-                        wire:loading.attr="disabled"
-                        wire:target="startPayrollRun"
-                        @disabled($activePayrollRunId)
+                        target="startPayrollRun"
+                        loading-label="Iniciando…"
+                        :disabled="(bool) $activePayrollRunId"
                         class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        <span wire:loading.remove wire:target="startPayrollRun">Procesar nómina</span>
-                        <span wire:loading wire:target="startPayrollRun">Iniciando…</span>
-                    </button>
+                        Procesar nómina
+                    </x-ui.loading-button>
                 @elseif ($payPeriod->status === 'processed')
                     <button
                         type="button"
@@ -77,24 +81,25 @@
                         Guardar borrador
                     </button>
                 @else
-                    <button
+                    <x-ui.loading-button
                         type="button"
                         wire:click="saveDraft"
+                        target="saveDraft"
+                        loading-label="Guardando…"
                         class="inline-flex min-h-11 items-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
                     >
                         Guardar borrador
-                    </button>
+                    </x-ui.loading-button>
 
-                    <button
+                    <x-ui.loading-button
                         type="button"
                         wire:click="continueToReady"
-                        wire:loading.attr="disabled"
-                        wire:target="continueToReady"
+                        target="continueToReady"
+                        loading-label="Validando…"
                         class="inline-flex min-h-11 items-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                     >
-                        <span wire:loading.remove wire:target="continueToReady">Revisar y procesar nómina</span>
-                        <span wire:loading wire:target="continueToReady">Validando…</span>
-                    </button>
+                        Revisar y procesar nómina
+                    </x-ui.loading-button>
                 @endif
             </div>
         </div>
@@ -1097,10 +1102,9 @@
                 <p class="mt-2 text-sm text-slate-700">{{ $readyMessage ?? '¿Seguro que desea continuar con el estado listo para procesar?' }}</p>
                 <div class="mt-4 flex justify-end gap-2">
                     <button type="button" wire:click="cancelReadyConfirm" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                    <button type="button" wire:click="confirmContinueToReady" wire:loading.attr="disabled" wire:target="confirmContinueToReady" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
-                        <span wire:loading.remove wire:target="confirmContinueToReady">Confirmar y procesar</span>
-                        <span wire:loading wire:target="confirmContinueToReady">Iniciando…</span>
-                    </button>
+                    <x-ui.loading-button type="button" wire:click="confirmContinueToReady" target="confirmContinueToReady" loading-label="Iniciando…" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+                        Confirmar y procesar
+                    </x-ui.loading-button>
                 </div>
             </div>
         </div>
