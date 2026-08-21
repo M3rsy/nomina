@@ -54,17 +54,13 @@
             <p id="new-password-error" role="alert" class="text-red-600 text-sm">{{ $message }}</p>
         @enderror
 
-        <button
+        <x-ui.loading-button
             type="submit"
-            wire:loading.attr="disabled"
-            wire:target="save"
+            target="save"
+            loading-label="Guardando contraseña..."
             class="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition disabled:cursor-wait disabled:bg-indigo-400"
         >
-            <span wire:loading.remove wire:target="save">Guardar contraseña</span>
-            <span wire:loading wire:target="save">Guardando contraseña...</span>
-        </button>
-        <p role="status" aria-live="polite" class="sr-only">
-            <span wire:loading wire:target="save">Guardando contraseña...</span>
-        </p>
+            Guardar contraseña
+        </x-ui.loading-button>
     </form>
 </div>
