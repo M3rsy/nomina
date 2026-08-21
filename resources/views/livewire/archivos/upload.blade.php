@@ -1,4 +1,6 @@
-<div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+<div class="relative isolate mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <x-ui.loading-overlay target="upload,store" message="Validando el archivo de asistencia…" />
+
     <header class="mb-7 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div class="max-w-3xl">
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Marcas de asistencia</p>
@@ -139,17 +141,16 @@
                     </p>
                     <p class="mt-2 text-sm font-medium text-slate-800">Este paso valida las marcas; no procesa la nómina.</p>
 
-                    <button
+                    <x-ui.loading-button
                         id="upload-submit"
                         type="submit"
-                        @disabled(! $pay_period_id || ! $upload)
-                        wire:loading.attr="disabled"
-                        wire:target="upload,store"
+                        target="upload,store"
+                        loading-label="Validando archivo…"
+                        :disabled="! $pay_period_id || ! $upload"
                         class="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 sm:w-auto"
                     >
-                        <span wire:loading.remove wire:target="store">Subir y validar</span>
-                        <span wire:loading wire:target="store">Validando archivo...</span>
-                    </button>
+                        Subir y validar
+                    </x-ui.loading-button>
                 </div>
             </div>
         </section>
