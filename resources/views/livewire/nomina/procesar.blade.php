@@ -1,4 +1,6 @@
-<div class="max-w-7xl mx-auto py-8 px-4">
+<div class="relative isolate max-w-7xl mx-auto py-8 px-4">
+    <x-ui.loading-overlay target="approve" message="Validando y aprobando la nómina…" />
+
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-bold">Procesar nómina</h1>
         <div class="flex gap-2">
@@ -11,9 +13,9 @@
                 </span>
             @else
                 @if ($canApprove)
-                    <button wire:click="openApproveConfirm" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+                    <x-ui.loading-button wire:click="openApproveConfirm" target="openApproveConfirm" loading-label="Abriendo…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
                         Aprobar
-                    </button>
+                    </x-ui.loading-button>
                 @endif
                 @if ($canExport)
                     <a href="{{ route('nomina.excel', ['payPeriod' => $payPeriod]) }}" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
@@ -133,9 +135,9 @@
                     <button wire:click="closeApproveConfirm" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
                         Cancelar
                     </button>
-                    <button wire:click="approve" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+                    <x-ui.loading-button wire:click="approve" target="approve" loading-label="Aprobando…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
                         Confirmar aprobación
-                    </button>
+                    </x-ui.loading-button>
                 </div>
             </div>
         </div>
