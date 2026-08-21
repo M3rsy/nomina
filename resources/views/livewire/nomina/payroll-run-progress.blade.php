@@ -20,13 +20,15 @@
                 </p>
             @endif
             @if ($status === \App\Models\PayrollRun::FAILED)
-                <button
+                <x-ui.loading-button
                     type="button"
-                    wire:click="$dispatch('payroll-run-retry', { runId: {{ $runId }} })"
+                    wire:click="retry"
+                    target="retry"
+                    loading-label="Reintentando…"
                     class="mt-3 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
                 >
                     Intentar nuevamente
-                </button>
+                </x-ui.loading-button>
             @endif
         </div>
     @endif

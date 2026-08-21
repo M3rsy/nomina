@@ -58,7 +58,7 @@ test('review renders action-scoped feedback and a delayed processing overlay', f
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->assertSeeHtml('wire:target="saveDraft"')
         ->assertSeeHtml('wire:loading.attr="aria-busy"')
-        ->assertSeeHtml('wire:target="continueToReady,confirmContinueToReady,startPayrollRun"')
+        ->assertSeeHtml('wire:target="continueToReady,confirmContinueToReady,startPayrollRun,saveAttendanceException,saveOvertimeBatch,saveOvertimeDecision"')
         ->assertSeeHtml('wire:loading.delay.short.flex')
         ->assertSee('Validando y preparando la nómina…');
 });
