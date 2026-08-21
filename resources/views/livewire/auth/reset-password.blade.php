@@ -82,18 +82,14 @@
             <p id="reset-password-error" role="alert" class="text-sm font-medium text-red-700">{{ $message }}</p>
         @enderror
 
-        <button
+        <x-ui.loading-button
             type="submit"
-            wire:loading.attr="disabled"
-            wire:target="resetPassword"
+            target="resetPassword"
+            loading-label="Restableciendo..."
             class="min-h-12 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200 disabled:cursor-wait disabled:bg-indigo-400 motion-reduce:transition-none"
         >
-            <span wire:loading.remove wire:target="resetPassword">Restablecer contraseña</span>
-            <span wire:loading wire:target="resetPassword">Restableciendo...</span>
-        </button>
-        <p role="status" aria-live="polite" class="sr-only">
-            <span wire:loading wire:target="resetPassword">Restableciendo...</span>
-        </p>
+            Restablecer contraseña
+        </x-ui.loading-button>
     </form>
 
     <div class="mt-5 text-center">
