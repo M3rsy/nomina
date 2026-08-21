@@ -10,6 +10,7 @@ use App\Models\RawMark;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\HolidayCalendarContext;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use LogicException;
 
@@ -32,42 +33,89 @@ final readonly class LockedPayrollContext
         public Collection $assignments,
         public Collection $rawMarks,
         public ?HolidayCalendarContext $holidayCalendar,
+        private string $stage,
+        private string $lease,
     ) {}
+
+    public function assertActive(): void
+    {
+        PayrollContextLocker::assertActive($this->lease);
+    }
+
+    public function assertOwns(Model $model): void
+    {
+        PayrollContextLocker::assertOwns($this->lease, $model);
+    }
+
+    public function assertStage(string $stage): void
+    {
+        if ($this->stage !== $stage) {
+            throw new LogicException("Locked payroll context was not issued for the {$stage} mutation stage.");
+        }
+
+        PayrollContextLocker::assertStage($this->lease, $stage);
+    }
+
+    /** @param  array<string, mixed>  $attributes */
+    public function createOwnedProfile(array $attributes): WorkScheduleProfile
+    {
+        $this->assertStage(PayrollContextLocker::STAGE_PROFILES);
+
+        return PayrollContextLocker::createOwnedProfile($this->lease, $this->company, $attributes);
+    }
 
     public function payPeriod(int $id): PayPeriod
     {
-        return $this->payPeriods->get($id)
+        $model = $this->payPeriods->get($id)
             ?? throw new LogicException("PayPeriod [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function employee(int $id): Employee
     {
-        return $this->employees->get($id)
+        $model = $this->employees->get($id)
             ?? throw new LogicException("Employee [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function profile(int $id): WorkScheduleProfile
     {
-        return $this->profiles->get($id)
+        $model = $this->profiles->get($id)
             ?? throw new LogicException("WorkScheduleProfile [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function publication(int $id): WorkScheduleProfilePublication
     {
-        return $this->publications->get($id)
+        $model = $this->publications->get($id)
             ?? throw new LogicException("WorkScheduleProfilePublication [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function assignment(int $id): EmployeeScheduleAssignment
     {
-        return $this->assignments->get($id)
+        $model = $this->assignments->get($id)
             ?? throw new LogicException("EmployeeScheduleAssignment [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function rawMark(int $id): RawMark
     {
-        return $this->rawMarks->get($id)
+        $model = $this->rawMarks->get($id)
             ?? throw new LogicException("RawMark [{$id}] was not requested for this payroll context.");
+        $this->assertOwns($model);
+
+        return $model;
     }
 
     public function withHolidayCalendar(HolidayCalendarContext $holidayCalendar): self
@@ -81,6 +129,8 @@ final readonly class LockedPayrollContext
             $this->assignments,
             $this->rawMarks,
             $holidayCalendar,
+            $this->stage,
+            $this->lease,
         );
     }
 }

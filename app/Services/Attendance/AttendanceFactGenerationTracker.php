@@ -4,11 +4,14 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceFactGeneration;
 use App\Models\Employee;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use LogicException;
 
 class AttendanceFactGenerationTracker
 {
@@ -43,32 +46,49 @@ class AttendanceFactGenerationTracker
 
     public function advanceBy(Employee $employee, CarbonInterface|string $workDate, int $count): int
     {
+        return DB::transaction(fn (): int => $this->advanceWithinTransaction($employee, $workDate, $count));
+    }
+
+    public function advanceLocked(
+        LockedPayrollContext $context,
+        Employee $employee,
+        CarbonInterface|string $workDate,
+        int $count = 1,
+    ): int {
+        $context->assertStage(PayrollContextLocker::STAGE_RAW_MARKS);
+        $context->assertOwns($employee);
+
+        return $this->advanceWithinTransaction($employee, $workDate, $count);
+    }
+
+    private function advanceWithinTransaction(Employee $employee, CarbonInterface|string $workDate, int $count): int
+    {
         if ($count < 1) {
             throw new InvalidArgumentException('Attendance fact generation count must be positive.');
         }
 
         $date = CarbonImmutable::parse($workDate)->toDateString();
+        DB::table('attendance_fact_generations')->insertOrIgnore([
+            'company_id' => $employee->company_id,
+            'employee_id' => $employee->id,
+            'work_date' => $date,
+            'generation' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
-        return DB::transaction(function () use ($employee, $date, $count): int {
-            DB::table('attendance_fact_generations')->insertOrIgnore([
-                'company_id' => $employee->company_id,
-                'employee_id' => $employee->id,
-                'work_date' => $date,
-                'generation' => 0,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+        $generation = AttendanceFactGeneration::withoutCompanyScope()
+            ->where('company_id', $employee->company_id)
+            ->where('employee_id', $employee->id)
+            ->whereDate('work_date', $date)
+            ->lockForUpdate()
+            ->firstOrFail();
+        if (! $generation instanceof AttendanceFactGeneration) {
+            throw new LogicException('Attendance fact generation lock returned an unexpected model.');
+        }
 
-            $generation = AttendanceFactGeneration::withoutCompanyScope()
-                ->where('company_id', $employee->company_id)
-                ->where('employee_id', $employee->id)
-                ->whereDate('work_date', $date)
-                ->lockForUpdate()
-                ->firstOrFail();
+        $generation->increment('generation', $count);
 
-            $generation->increment('generation', $count);
-
-            return $generation->refresh()->generation;
-        });
+        return $generation->refresh()->generation;
     }
 }

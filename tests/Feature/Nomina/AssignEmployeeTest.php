@@ -12,6 +12,7 @@ use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -139,6 +140,8 @@ test('batch assignment resolves once and mutates deduplicated marks in canonical
     );
     $resolutions = 0;
     $mutatedIds = [];
+    DB::flushQueryLog();
+    DB::enableQueryLog();
 
     app(RawMarkMutationGuard::class)->mutateBatch(
         $company->id,
@@ -154,8 +157,17 @@ test('batch assignment resolves once and mutates deduplicated marks in canonical
         targetEmployee: $employee,
     );
 
+    $generationAttempts = collect(DB::getQueryLog())->filter(
+        fn (array $query): bool => str_starts_with(
+            $query['query'],
+            'insert or ignore into "attendance_fact_generations"',
+        ),
+    )->count();
+    DB::disableQueryLog();
+
     expect($resolutions)->toBe(1)
         ->and($mutatedIds)->toBe($marks->pluck('id')->sort()->values()->all())
+        ->and($generationAttempts)->toBe(1)
         ->and($marks->map->fresh()->pluck('employee_id')->all())->toBe([$employee->id, $employee->id])
         ->and(app(AttendanceFactGenerationTracker::class)->current($employee, '2026-01-05'))->toBe(2);
 });

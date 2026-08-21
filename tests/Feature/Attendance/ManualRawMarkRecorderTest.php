@@ -14,6 +14,8 @@ use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 beforeEach(function () {
@@ -49,6 +51,29 @@ test('completes an observed incomplete pair with one audited manual fact', funct
             'event_at' => '2026-07-20 14:00:00',
             'reason' => 'El reloj no registró la salida',
         ]);
+});
+
+test('advances attendance facts inside the locker transaction without a nested savepoint', function () {
+    $context = manualMarkContext();
+    observedMark($context, '2026-07-20 06:00:00');
+    $harnessTransactionLevel = DB::transactionLevel();
+    $generationTransactionLevel = null;
+
+    DB::listen(function (QueryExecuted $query) use (&$generationTransactionLevel): void {
+        $sql = strtolower($query->sql);
+
+        if ($generationTransactionLevel === null
+            && str_contains($sql, 'insert or ignore into "attendance_fact_generations"')) {
+            $generationTransactionLevel = DB::transactionLevel();
+        }
+    });
+
+    app(ManualRawMarkRecorder::class)->record(
+        $context['period'], $context['employee'], '2026-07-20', '2026-07-20 14:00:00',
+        'El reloj no registró la salida', $context['actor'],
+    );
+
+    expect($generationTransactionLevel)->toBe($harnessTransactionLevel + 1);
 });
 
 test('rejects constructing a shift from manual facts without an observed mark', function () {

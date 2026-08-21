@@ -7,8 +7,13 @@ use App\Models\PayPeriod;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
+use App\Services\Attendance\AttendanceFactGenerationTracker;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkSchedulePublisher;
+use App\Services\Attendance\RawMarkMutationGuard;
+use App\Services\Payroll\LockedPayrollContext;
+use App\Services\Payroll\PayrollContextLocker;
+use App\Services\Payroll\PayrollContextTargets;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -88,6 +93,163 @@ test('creates an employee and initial assigned schedule inside one payroll conte
     expect($assignment->employee->company_id)->toBe($company->id)
         ->and($assignment->employee->external_id)->toBe($attributes['external_id'])
         ->and($assignment->effective_from->toDateString())->toBe('2026-07-01');
+});
+
+test('locked assignment rejects models injected into its mutable collections', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    app(PayrollContextLocker::class)->withinAssignmentStage(
+        $company->id,
+        fn () => new PayrollContextTargets(profileIds: [$profile->id]),
+        function (LockedPayrollContext $context) use ($employee, $profile): void {
+            $context->employees->put($employee->id, $employee);
+
+            expect(fn () => app(EmployeeScheduleAssigner::class)->assignLocked(
+                $context, $employee, $profile, '2026-07-01', 'Injected context model',
+            ))->toThrow(
+                LogicException::class,
+                'Model is not owned by the active locked payroll context.',
+            );
+        },
+    );
+});
+
+test('active lease retains exact owned model instances until the transaction ends', function () {
+    $company = Company::factory()->create();
+    $employeeId = Employee::factory()->forCompany($company)->create()->id;
+    $ownedReference = null;
+
+    app(PayrollContextLocker::class)->withinAssignmentStage(
+        $company->id,
+        fn () => new PayrollContextTargets(employeeIds: [$employeeId]),
+        function (LockedPayrollContext $context) use ($employeeId, &$ownedReference): void {
+            $employee = $context->employee($employeeId);
+            $ownedReference = WeakReference::create($employee);
+            $context->employees->forget($employeeId);
+            unset($employee);
+            gc_collect_cycles();
+
+            expect($ownedReference->get())->toBeInstanceOf(Employee::class);
+        },
+    );
+
+    gc_collect_cycles();
+
+    expect($ownedReference)->toBeInstanceOf(WeakReference::class)
+        ->and($ownedReference->get())->toBeNull();
+});
+
+test('employee creation stage requires attributes instead of a persisted model', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+
+    expect(fn () => app(PayrollContextLocker::class)->withinEmployeeCreation(
+        $company->id,
+        fn () => new PayrollContextTargets,
+        fn () => $employee,
+        fn () => null,
+        fn () => null,
+    ))->toThrow(
+        LogicException::class,
+        'The employee-creation stage must return attributes for the locked company.',
+    );
+});
+
+test('staged mutation authority expires when the locker advances', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $attributes = Employee::factory()->forCompany($company)->make()->getAttributes();
+    /** @var ?LockedPayrollContext $assignmentContext */
+    $assignmentContext = null;
+
+    app(PayrollContextLocker::class)->withinEmployeeCreation(
+        $company->id,
+        fn () => new PayrollContextTargets(profileIds: [$profile->id]),
+        fn () => $attributes,
+        function ($context, Employee $employee) use (&$assignmentContext): void {
+            $assignmentContext = $context;
+
+            expect(fn () => app(RawMarkMutationGuard::class)->mutateLocked(
+                $context,
+                fn () => null,
+            ))->toThrow(LogicException::class)
+                ->and(fn () => app(AttendanceFactGenerationTracker::class)->advanceLocked(
+                    $context,
+                    $employee,
+                    '2026-07-01',
+                ))->toThrow(LogicException::class);
+        },
+        function ($context, Employee $employee) use (&$assignmentContext, $profile): void {
+            expect(fn () => app(EmployeeScheduleAssigner::class)->assignLocked(
+                $assignmentContext, $employee, $profile, '2026-07-01', 'Expired assignment stage',
+            ))->toThrow(LogicException::class)
+                ->and(fn () => $context->createOwnedProfile([
+                    'company_id' => $context->company->id,
+                    'profile_key' => 'general',
+                    'name' => 'Too late',
+                    'version' => 99,
+                ]))->toThrow(LogicException::class);
+        },
+    );
+});
+
+test('a captured profile context cannot gain assignment authority when the locker advances', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    /** @var ?LockedPayrollContext $profileContext */
+    $profileContext = null;
+    /** @var ?LockedPayrollContext $publicationContext */
+    $publicationContext = null;
+
+    $assignment = app(PayrollContextLocker::class)->withinProfilePublication(
+        $company->id,
+        fn () => new PayrollContextTargets(
+            profileIds: [$profile->id],
+            employeeIds: [$employee->id],
+        ),
+        function (LockedPayrollContext $context) use (&$profileContext): void {
+            $profileContext = $context;
+        },
+        function (LockedPayrollContext $context) use (&$profileContext, &$publicationContext): void {
+            $publicationContext = $context;
+
+            expect(fn () => $profileContext->assertStage(
+                PayrollContextLocker::STAGE_PUBLICATIONS,
+            ))->toThrow(LogicException::class);
+        },
+        function (LockedPayrollContext $context) use (&$profileContext, &$publicationContext, $employee, $profile): EmployeeScheduleAssignment {
+            $lockedEmployee = $context->employee($employee->id);
+            $lockedProfile = $context->profile($profile->id);
+
+            expect(fn () => app(EmployeeScheduleAssigner::class)->assignLocked(
+                $profileContext,
+                $lockedEmployee,
+                $lockedProfile,
+                '2026-07-01',
+                'Captured profile context',
+            ))->toThrow(LogicException::class);
+            expect(fn () => app(EmployeeScheduleAssigner::class)->assignLocked(
+                $publicationContext,
+                $lockedEmployee,
+                $lockedProfile,
+                '2026-07-01',
+                'Captured publication context',
+            ))->toThrow(LogicException::class);
+
+            return app(EmployeeScheduleAssigner::class)->assignLocked(
+                $context,
+                $lockedEmployee,
+                $lockedProfile,
+                '2026-07-01',
+                'Current assignment context',
+            );
+        },
+    );
+
+    expect($assignment->employee_id)->toBe($employee->id);
 });
 
 test('updates an employee inside the same payroll context as a new assigned schedule', function () {
