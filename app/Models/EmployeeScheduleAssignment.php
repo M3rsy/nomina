@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -27,6 +28,11 @@ class EmployeeScheduleAssignment extends Model
             'effective_from' => 'date',
             'effective_to' => 'date',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::created(fn (self $assignment) => app(AuditEntryProjector::class)->project($assignment));
     }
 
     public function employee(): BelongsTo

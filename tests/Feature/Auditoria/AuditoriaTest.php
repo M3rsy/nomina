@@ -2,6 +2,7 @@
 
 use App\Livewire\Auditoria\Index;
 use App\Models\AttendanceException;
+use App\Models\AuditLogEntry;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\EmployeeRevision;
@@ -14,6 +15,7 @@ use App\Models\RawMark;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 
@@ -196,6 +198,113 @@ test('pagination returns 25 items per page', function () {
         ->assertViewHas('entries', function ($entries) {
             return $entries->count() === 25 && $entries->total() === 30;
         });
+});
+
+test('projected selected query backed type paginates from audit entries', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->create(['company_id' => $company->id]);
+    $admin->assignRole('company_admin');
+
+    LoginAttempt::factory()->count(550)->create([
+        'company_id' => $company->id,
+        'email' => $admin->email,
+        'success' => true,
+    ]);
+
+    Livewire::actingAs($admin)
+        ->test(Index::class)
+        ->set('type', 'login_attempt')
+        ->assertViewHas('entries', function ($entries) {
+            return $entries->count() === 25 && $entries->total() === 550;
+        });
+});
+
+test('audit screen reads projected entries with tenant type date and user filters', function () {
+    $company = Company::factory()->create();
+    $foreignCompany = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create(['email' => 'auditor@example.com'])->assignRole('company_admin');
+
+    AuditLogEntry::query()->create([
+        'company_id' => $company->id,
+        'type' => 'login_attempt',
+        'occurred_at' => now()->subDay(),
+        'actor_id' => $admin->id,
+        'user_identifier' => $admin->email,
+        'description' => 'Projected successful login',
+        'metadata' => ['ip' => '127.0.0.1', 'success' => true],
+        'source_type' => 'manual-test',
+        'source_id' => 1,
+        'source_revision' => 'created',
+    ]);
+    AuditLogEntry::query()->create([
+        'company_id' => $foreignCompany->id,
+        'type' => 'login_attempt',
+        'occurred_at' => now()->subDay(),
+        'user_identifier' => 'foreign@example.com',
+        'description' => 'Foreign projected login',
+        'source_type' => 'manual-test',
+        'source_id' => 2,
+        'source_revision' => 'created',
+    ]);
+    AuditLogEntry::query()->create([
+        'company_id' => $company->id,
+        'type' => 'employee_revision',
+        'occurred_at' => now()->subDay(),
+        'user_identifier' => $admin->email,
+        'description' => 'Other projected type',
+        'source_type' => 'manual-test',
+        'source_id' => 3,
+        'source_revision' => 'created',
+    ]);
+    AuditLogEntry::query()->create([
+        'company_id' => $company->id,
+        'type' => 'login_attempt',
+        'occurred_at' => now()->subDays(30),
+        'user_identifier' => $admin->email,
+        'description' => 'Old projected login',
+        'source_type' => 'manual-test',
+        'source_id' => 4,
+        'source_revision' => 'created',
+    ]);
+
+    Livewire::actingAs($admin)
+        ->test(Index::class)
+        ->set('type', 'login_attempt')
+        ->set('from', now()->subDays(10)->format('Y-m-d'))
+        ->set('to', now()->format('Y-m-d'))
+        ->set('user', 'auditor')
+        ->assertSee('Projected successful login')
+        ->assertDontSee('Foreign projected login')
+        ->assertDontSee('Other projected type')
+        ->assertDontSee('Old projected login')
+        ->assertViewHas('entries', fn ($entries) => $entries->total() === 1);
+});
+
+test('selected projected type falls back to legacy source when projection has no rows', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    LoginAttempt::factory()->create(['company_id' => $company->id, 'email' => $admin->email, 'success' => true]);
+    AuditLogEntry::query()->delete();
+
+    Livewire::actingAs($admin)
+        ->test(Index::class)
+        ->set('type', 'login_attempt')
+        ->assertSee($admin->email)
+        ->assertViewHas('entries', fn ($entries) => $entries->total() === 1);
+});
+
+test('audit backfill command is idempotent for projected source tables', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create();
+
+    LoginAttempt::factory()->create(['company_id' => $company->id, 'user_id' => $admin->id, 'email' => $admin->email, 'success' => true]);
+    AuditLogEntry::query()->delete();
+
+    Artisan::call('audit:backfill', ['--company-id' => $company->id]);
+    Artisan::call('audit:backfill', ['--company-id' => $company->id]);
+
+    expect(AuditLogEntry::query()->where('type', 'login_attempt')->count())->toBe(1);
 });
 
 test('raw mark revisions appear in audit feed', function () {

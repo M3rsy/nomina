@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -87,6 +88,7 @@ class OvertimeDecision extends Model
 
     protected static function booted(): void
     {
+        static::created(fn (self $decision) => app(AuditEntryProjector::class)->project($decision));
         static::updating(fn () => throw new LogicException('Overtime decisions are append-only.'));
         static::deleting(fn () => throw new LogicException('Overtime decisions are append-only.'));
     }

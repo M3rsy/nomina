@@ -28,6 +28,7 @@ final class PayrollPeriodReviewSnapshot
     public function forPeriod(
         PayPeriod $period,
         ?HolidayCalendarContext $calendarContext = null,
+        bool $includeBlockers = true,
     ): array {
         $employees = Employee::withoutCompanyScope()
             ->where('company_id', $period->company_id)
@@ -36,7 +37,7 @@ final class PayrollPeriodReviewSnapshot
             ->orderBy('id')
             ->get();
 
-        return $this->forEmployees($period, $employees, $calendarContext);
+        return $this->forEmployees($period, $employees, $calendarContext, $includeBlockers);
     }
 
     /**
@@ -53,6 +54,7 @@ final class PayrollPeriodReviewSnapshot
         PayPeriod $period,
         Collection $employees,
         ?HolidayCalendarContext $calendarContext = null,
+        bool $includeBlockers = true,
     ): array {
         if ($employees->contains(
             fn (mixed $employee): bool => ! $employee instanceof Employee
@@ -84,21 +86,23 @@ final class PayrollPeriodReviewSnapshot
                     $data,
                 );
                 $reviews->push($review);
-                $evaluation = $this->shiftEvaluator->evaluate(
-                    $review->occurrence,
-                    $review->analysis,
-                    $review->currentDecisions,
-                    $review->currentExceptions,
-                );
+                if ($includeBlockers) {
+                    $evaluation = $this->shiftEvaluator->evaluate(
+                        $review->occurrence,
+                        $review->analysis,
+                        $review->currentDecisions,
+                        $review->currentExceptions,
+                    );
 
-                foreach ($evaluation->blockers as $blocker) {
-                    $blockers->push([
-                        'employee_id' => $employee->id,
-                        'employee_name' => $employee->full_name,
-                        'employee_external_id' => $employee->external_id,
-                        'work_date' => $date->toDateString(),
-                        ...$blocker,
-                    ]);
+                    foreach ($evaluation->blockers as $blocker) {
+                        $blockers->push([
+                            'employee_id' => $employee->id,
+                            'employee_name' => $employee->full_name,
+                            'employee_external_id' => $employee->external_id,
+                            'work_date' => $date->toDateString(),
+                            ...$blocker,
+                        ]);
+                    }
                 }
 
                 if ($calendarContext->isHoliday($date)

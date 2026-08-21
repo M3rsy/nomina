@@ -18,6 +18,24 @@ use Illuminate\Support\Collection;
 
 final readonly class PayrollPeriodSnapshotData
 {
+    private Collection $assignmentsByEmployee;
+
+    private Collection $schedulesByProfileAndDay;
+
+    private Collection $publicationsByProfile;
+
+    private Collection $publicationsById;
+
+    private Collection $marksByEmployee;
+
+    private Collection $factGenerationsByEmployee;
+
+    private Collection $decisionsByEmployeeAndDate;
+
+    private Collection $exceptionsByEmployeeAndDate;
+
+    private Collection $variationAcknowledgementsByEmployeeAndDate;
+
     public function __construct(
         private Collection $assignments,
         private Collection $schedules,
@@ -27,7 +45,28 @@ final readonly class PayrollPeriodSnapshotData
         private Collection $decisions,
         private Collection $exceptions,
         private Collection $variationAcknowledgements,
-    ) {}
+    ) {
+        $this->assignmentsByEmployee = $assignments->groupBy('employee_id');
+        $this->schedulesByProfileAndDay = $schedules->groupBy(
+            fn (WorkSchedule $schedule): string => $this->profileDayKey(
+                $schedule->work_schedule_profile_id,
+                $schedule->day_of_week,
+            ),
+        );
+        $this->publicationsByProfile = $publications->groupBy('profile_id');
+        $this->publicationsById = $publications->keyBy('id');
+        $this->marksByEmployee = $marks->groupBy('employee_id');
+        $this->factGenerationsByEmployee = $factGenerations->groupBy('employee_id');
+        $this->decisionsByEmployeeAndDate = $decisions->groupBy(
+            fn (OvertimeDecision $decision): string => $this->employeeDateKey($decision->employee_id, $decision->work_date),
+        );
+        $this->exceptionsByEmployeeAndDate = $exceptions->groupBy(
+            fn (AttendanceException $exception): string => $this->employeeDateKey($exception->employee_id, $exception->work_date),
+        );
+        $this->variationAcknowledgementsByEmployeeAndDate = $variationAcknowledgements->groupBy(
+            fn (AttendanceVariationAcknowledgement $acknowledgement): string => $this->employeeDateKey($acknowledgement->employee_id, $acknowledgement->work_date),
+        );
+    }
 
     /** @param Collection<int, Employee> $employees */
     public static function capture(PayPeriod $period, Collection $employees): self
@@ -106,8 +145,7 @@ final readonly class PayrollPeriodSnapshotData
     /** @return Collection<int, EmployeeScheduleAssignment> */
     public function assignments(Employee $employee, CarbonImmutable $date): Collection
     {
-        return $this->assignments
-            ->where('employee_id', $employee->id)
+        return $this->assignmentsByEmployee->get($employee->id, collect())
             ->filter(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_from->lte($date)
                 && ($assignment->effective_to === null || $assignment->effective_to->gte($date)))
             ->values();
@@ -115,17 +153,17 @@ final readonly class PayrollPeriodSnapshotData
 
     public function schedule(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): ?WorkSchedule
     {
-        return $this->schedules->first(fn (WorkSchedule $schedule): bool => $schedule->work_schedule_profile_id === $assignment->work_schedule_profile_id
-            && $schedule->day_of_week === $date->dayOfWeek
-        );
+        return $this->schedulesByProfileAndDay->get(
+            $this->profileDayKey($assignment->work_schedule_profile_id, $date->dayOfWeek),
+            collect(),
+        )->first();
     }
 
     /** @return Collection<int, WorkScheduleProfilePublication> */
     public function publications(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): Collection
     {
-        return $this->publications
+        return $this->publicationsByProfile->get($assignment->work_schedule_profile_id, collect())
             ->where('company_id', $assignment->company_id)
-            ->where('profile_id', $assignment->work_schedule_profile_id)
             ->filter(fn (WorkScheduleProfilePublication $publication): bool => $publication->effective_from->lte($date)
                 && ($publication->effective_to === null || $publication->effective_to->gt($date)))
             ->values();
@@ -133,14 +171,13 @@ final readonly class PayrollPeriodSnapshotData
 
     public function publication(int $id): ?WorkScheduleProfilePublication
     {
-        return $this->publications->firstWhere('id', $id);
+        return $this->publicationsById->get($id);
     }
 
     /** @return Collection<int, EmployeeScheduleAssignment> */
     public function assignmentsEnding(Employee $employee, CarbonImmutable $date): Collection
     {
-        return $this->assignments
-            ->where('employee_id', $employee->id)
+        return $this->assignmentsByEmployee->get($employee->id, collect())
             ->filter(fn (EmployeeScheduleAssignment $assignment): bool => $assignment->effective_to?->isSameDay($date) === true)
             ->values();
     }
@@ -148,9 +185,8 @@ final readonly class PayrollPeriodSnapshotData
     /** @return Collection<int, WorkScheduleProfilePublication> */
     public function publicationsEnding(EmployeeScheduleAssignment $assignment, CarbonImmutable $date): Collection
     {
-        return $this->publications
+        return $this->publicationsByProfile->get($assignment->work_schedule_profile_id, collect())
             ->where('company_id', $assignment->company_id)
-            ->where('profile_id', $assignment->work_schedule_profile_id)
             ->where('payroll_policy_key', WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1)
             ->filter(fn (WorkScheduleProfilePublication $publication): bool => $publication->effective_to?->isSameDay($date) === true)
             ->values();
@@ -159,8 +195,7 @@ final readonly class PayrollPeriodSnapshotData
     /** @return Collection<int, RawMark> */
     public function marks(Employee $employee, CarbonImmutable $start, CarbonImmutable $end): Collection
     {
-        return $this->marks
-            ->where('employee_id', $employee->id)
+        return $this->marksByEmployee->get($employee->id, collect())
             ->filter(fn (RawMark $mark): bool => $mark->event_at->gte($start) && $mark->event_at->lt($end))
             ->values();
     }
@@ -171,8 +206,7 @@ final readonly class PayrollPeriodSnapshotData
         $keys = Collection::make($dates)
             ->map(fn (CarbonInterface|string $date): string => CarbonImmutable::parse($date)->toDateString());
 
-        return (int) $this->factGenerations
-            ->where('employee_id', $employee->id)
+        return (int) $this->factGenerationsByEmployee->get($employee->id, collect())
             ->filter(fn (AttendanceFactGeneration $generation): bool => $keys->contains($generation->work_date->toDateString())
             )
             ->sum('generation');
@@ -180,22 +214,32 @@ final readonly class PayrollPeriodSnapshotData
 
     public function decisions(Employee $employee, CarbonImmutable $date): Collection
     {
-        return $this->decisions->where('employee_id', $employee->id)
-            ->filter(fn (OvertimeDecision $decision): bool => $decision->work_date->isSameDay($date))
+        return $this->decisionsByEmployeeAndDate
+            ->get($this->employeeDateKey($employee->id, $date), collect())
             ->values();
     }
 
     public function exceptions(Employee $employee, CarbonImmutable $date): Collection
     {
-        return $this->exceptions->where('employee_id', $employee->id)
-            ->filter(fn (AttendanceException $exception): bool => $exception->work_date->isSameDay($date))
+        return $this->exceptionsByEmployeeAndDate
+            ->get($this->employeeDateKey($employee->id, $date), collect())
             ->values();
     }
 
     public function variationAcknowledgements(Employee $employee, CarbonImmutable $date): Collection
     {
-        return $this->variationAcknowledgements->where('employee_id', $employee->id)
-            ->filter(fn (AttendanceVariationAcknowledgement $acknowledgement): bool => $acknowledgement->work_date->isSameDay($date))
+        return $this->variationAcknowledgementsByEmployeeAndDate
+            ->get($this->employeeDateKey($employee->id, $date), collect())
             ->values();
+    }
+
+    private function profileDayKey(int $profileId, int $dayOfWeek): string
+    {
+        return $profileId.'|'.$dayOfWeek;
+    }
+
+    private function employeeDateKey(int $employeeId, CarbonInterface|string $date): string
+    {
+        return $employeeId.'|'.CarbonImmutable::parse($date)->toDateString();
     }
 }

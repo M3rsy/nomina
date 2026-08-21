@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -56,6 +57,7 @@ class AttendanceException extends Model
 
     protected static function booted(): void
     {
+        static::created(fn (self $exception) => app(AuditEntryProjector::class)->project($exception));
         static::updating(fn () => throw new LogicException('Attendance exceptions are append-only.'));
         static::deleting(fn () => throw new LogicException('Attendance exceptions are append-only.'));
     }

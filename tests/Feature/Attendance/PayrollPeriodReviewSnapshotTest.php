@@ -57,6 +57,31 @@ test('employee scoped review evaluates only the supplied period employees', func
         ->and($snapshot['reviews']->sole()->employee->is($included))->toBeTrue();
 });
 
+test('period review can skip blockers for read only screens', function () {
+    $company = Company::factory()->create();
+    $employee = Employee::factory()->forCompany($company)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+        'base_ordinary_hours' => 8,
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-01-05', 'Initial schedule');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-05',
+        'end_date' => '2026-01-05',
+        'status' => 'uploaded',
+    ]);
+    app(CurrentCompany::class)->set($company);
+
+    $snapshot = app(PayrollPeriodReviewSnapshot::class)->forPeriod($period, includeBlockers: false);
+
+    expect($snapshot['reviews'])->toHaveCount(1)
+        ->and($snapshot['absences'])->toHaveCount(1)
+        ->and($snapshot['blockers'])->toBeEmpty();
+});
+
 test('employee scoped review rejects employees from another company', function () {
     $company = Company::factory()->create();
     $period = PayPeriod::factory()->forCompany($company)->create([

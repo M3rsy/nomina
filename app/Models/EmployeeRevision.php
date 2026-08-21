@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,6 +25,11 @@ class EmployeeRevision extends Model
         return [
             'created_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::created(fn (self $revision) => app(AuditEntryProjector::class)->project($revision));
     }
 
     public function employee(): BelongsTo

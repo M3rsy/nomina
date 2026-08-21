@@ -3,6 +3,7 @@
 namespace App\Livewire\Auditoria;
 
 use App\Models\AttendanceException;
+use App\Models\AuditLogEntry;
 use App\Models\EmployeeRevision;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\JustifiedAbsence;
@@ -11,6 +12,7 @@ use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\User;
+use App\Services\Auditoria\AuditEntryProjector;
 use Carbon\Carbon;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Schema;
@@ -36,6 +38,8 @@ class Index extends Component
         'payroll_state' => 'Estados de nómina',
     ];
 
+    private const PROJECTED_TYPES = AuditEntryProjector::PROJECTED_TYPES;
+
     #[Url]
     public string $type = 'all';
 
@@ -60,11 +64,56 @@ class Index extends Component
             ? [$currentCompanyId]
             : (auth()->user()->hasRole('super_admin') ? null : []);
 
+        $page = $this->getPage();
+        $perPage = 25;
+
+        if ($this->hasAuditEntriesTable()) {
+            if (in_array($this->type, self::PROJECTED_TYPES, true)) {
+                $paginator = $this->paginateProjectedEntries($companyIds, $page, $perPage);
+
+                if ($paginator !== null) {
+                    return view('livewire.auditoria.index', [
+                        'entries' => $paginator,
+                        'types' => self::TYPES,
+                        'hasScheduleAssignmentTable' => $this->hasEmployeeScheduleAssignmentsTable(),
+                    ]);
+                }
+            }
+
+            if ($this->type === 'all') {
+                $entries = array_merge(
+                    $this->collectProjectedEntries($companyIds),
+                    $this->collectEntries($companyIds, $this->legacyOnlyTypes()),
+                );
+                $entries = $this->applyFilters($entries);
+                usort($entries, fn (AuditEntry $a, AuditEntry $b) => $b->createdAt <=> $a->createdAt);
+
+                if ($entries !== []) {
+                    return $this->renderEntries($entries, $page, $perPage);
+                }
+            }
+        }
+
+        if ($this->user === null || trim($this->user) === '') {
+            $paginator = $this->paginateSelectedType($companyIds, $page, $perPage);
+
+            if ($paginator !== null) {
+                return view('livewire.auditoria.index', [
+                    'entries' => $paginator,
+                    'types' => self::TYPES,
+                    'hasScheduleAssignmentTable' => $this->hasEmployeeScheduleAssignmentsTable(),
+                ]);
+            }
+        }
+
         $entries = $this->collectEntries($companyIds);
         $entries = $this->applyFilters($entries);
 
-        $page = $this->getPage();
-        $perPage = 25;
+        return $this->renderEntries($entries, $page, $perPage);
+    }
+
+    private function renderEntries(array $entries, int $page, int $perPage)
+    {
         $total = count($entries);
         $items = array_slice($entries, ($page - 1) * $perPage, $perPage);
 
@@ -83,10 +132,231 @@ class Index extends Component
         ]);
     }
 
-    private function collectEntries(?array $companyIds): array
+    private function paginateProjectedEntries(?array $companyIds, int $page, int $perPage): ?LengthAwarePaginator
+    {
+        $query = AuditLogEntry::query()
+            ->with(['company', 'actor'])
+            ->where('type', $this->type)
+            ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+            ->when($this->from, fn ($q) => $q->whereDate('occurred_at', '>=', $this->from))
+            ->when($this->to, fn ($q) => $q->whereDate('occurred_at', '<=', $this->to))
+            ->when($this->user, fn ($q) => $q->where('user_identifier', 'like', '%'.trim($this->user).'%'))
+            ->latest('occurred_at');
+
+        $total = (clone $query)->count();
+
+        if ($total === 0) {
+            return null;
+        }
+
+        $items = $query
+            ->limit($perPage)
+            ->offset(($page - 1) * $perPage)
+            ->get()
+            ->map(fn (AuditLogEntry $entry) => $this->entryFromProjectedEntry($entry))
+            ->all();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $perPage,
+            $page,
+            ['path' => request()->url(), 'pageName' => 'page']
+        );
+    }
+
+    private function collectProjectedEntries(?array $companyIds): array
+    {
+        return AuditLogEntry::query()
+            ->with(['company', 'actor'])
+            ->whereIn('type', self::PROJECTED_TYPES)
+            ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+            ->when($this->from, fn ($q) => $q->whereDate('occurred_at', '>=', $this->from))
+            ->when($this->to, fn ($q) => $q->whereDate('occurred_at', '<=', $this->to))
+            ->when($this->user, fn ($q) => $q->where('user_identifier', 'like', '%'.trim($this->user).'%'))
+            ->latest('occurred_at')
+            ->limit(500)
+            ->get()
+            ->map(fn (AuditLogEntry $entry) => $this->entryFromProjectedEntry($entry))
+            ->all();
+    }
+
+    private function entryFromProjectedEntry(AuditLogEntry $entry): AuditEntry
+    {
+        return new AuditEntry(
+            $entry->type,
+            $this->typeLabel($entry->type),
+            Carbon::parse($entry->occurred_at),
+            $entry->company_id,
+            $entry->company?->name ?? ($entry->company_id === null ? 'Sistema' : 'Desconocida'),
+            $entry->actor_id,
+            $entry->user_identifier ?? $entry->actor?->email,
+            $entry->description,
+            $entry->metadata ?? [],
+        );
+    }
+
+    private function typeLabel(string $type): string
+    {
+        return match ($type) {
+            'login_attempt' => 'Intento de inicio de sesión',
+            'employee_revision' => 'Cambio en empleado',
+            'schedule_assignment' => 'Asignación de jornada',
+            'overtime_decision' => 'Autorización de hora extra',
+            'attendance_exception' => 'Excepción de asistencia',
+            default => self::TYPES[$type] ?? $type,
+        };
+    }
+
+    private function paginateSelectedType(?array $companyIds, int $page, int $perPage): ?LengthAwarePaginator
+    {
+        $query = match ($this->type) {
+            'login_attempt' => LoginAttempt::query()
+                ->with(['user', 'company'])
+                ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
+                ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
+                ->latest('created_at'),
+            'employee_revision' => EmployeeRevision::query()
+                ->with(['user', 'employee.company'])
+                ->when($companyIds !== null, function ($q) use ($companyIds): void {
+                    $q->whereHas('employee', fn ($sq) => $sq->withoutGlobalScope('company')->whereIn('company_id', $companyIds));
+                })
+                ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
+                ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
+                ->latest('created_at'),
+            'schedule_assignment' => $this->hasEmployeeScheduleAssignmentsTable()
+                ? EmployeeScheduleAssignment::withoutCompanyScope()
+                    ->with(['company', 'employee', 'profile', 'assigner'])
+                    ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                    ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
+                    ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
+                    ->latest('created_at')
+                : null,
+            'overtime_decision' => OvertimeDecision::withoutCompanyScope()
+                ->with(['company', 'employee', 'decider'])
+                ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
+                ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
+                ->latest('created_at'),
+            'attendance_exception' => AttendanceException::withoutCompanyScope()
+                ->with(['company', 'employee', 'decider'])
+                ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                ->when($this->from, fn ($q) => $q->whereDate('created_at', '>=', $this->from))
+                ->when($this->to, fn ($q) => $q->whereDate('created_at', '<=', $this->to))
+                ->latest('created_at'),
+            default => null,
+        };
+
+        if ($query === null) {
+            return null;
+        }
+
+        $offset = ($page - 1) * $perPage;
+        $total = min((clone $query)->count(), 500);
+        $items = $offset >= 500
+            ? []
+            : $query
+                ->limit(min($perPage, 500 - $offset))
+                ->offset($offset)
+                ->get()
+                ->map(fn ($model) => $this->entryFromModel($model))
+                ->all();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $perPage,
+            $page,
+            ['path' => request()->url(), 'pageName' => 'page']
+        );
+    }
+
+    private function entryFromModel(object $model): AuditEntry
+    {
+        if ($model instanceof LoginAttempt) {
+            return new AuditEntry(
+                'login_attempt',
+                'Intento de inicio de sesión',
+                $model->created_at,
+                $model->company_id,
+                $model->company?->name ?? 'Sistema',
+                $model->user_id,
+                $model->email,
+                ($model->success ? 'Éxito' : 'Fallido').' desde IP '.$model->ip,
+                ['ip' => $model->ip, 'success' => $model->success]
+            );
+        }
+
+        if ($model instanceof EmployeeRevision) {
+            return new AuditEntry(
+                'employee_revision',
+                'Cambio en empleado',
+                $model->created_at,
+                $model->employee?->company_id,
+                $model->employee?->company?->name ?? 'Desconocida',
+                $model->user_id,
+                $model->user?->email,
+                "Empleado #{$model->employee_id}: campo {$model->field} de '{$model->old_value}' a '{$model->new_value}'".($model->reason ? " ({$model->reason})" : ''),
+                ['employee_id' => $model->employee_id, 'field' => $model->field]
+            );
+        }
+
+        if ($model instanceof EmployeeScheduleAssignment) {
+            $until = $model->effective_to?->format('d/m/Y') ?? 'sin fecha de fin';
+
+            return new AuditEntry(
+                'schedule_assignment',
+                'Asignación de jornada',
+                Carbon::parse($model->created_at),
+                $model->company_id,
+                $model->company?->name ?? 'Desconocida',
+                $model->assigned_by,
+                $model->assigner?->email,
+                "{$model->employee?->full_name}: {$model->profile?->name} v{$model->profile?->version} desde {$model->effective_from->format('d/m/Y')} hasta {$until}. Motivo: {$model->reason}",
+                ['assignment_id' => $model->id, 'employee_id' => $model->employee_id]
+            );
+        }
+
+        if ($model instanceof OvertimeDecision) {
+            $label = $model->decision === OvertimeDecision::APPROVED ? 'aprobó' : 'rechazó';
+
+            return new AuditEntry(
+                'overtime_decision',
+                'Autorización de hora extra',
+                Carbon::parse($model->created_at),
+                $model->company_id,
+                $model->company?->name ?? 'Desconocida',
+                $model->decided_by,
+                $model->decider?->email,
+                "{$model->employee?->full_name}: {$label} {$model->minutes} min del {$model->work_date->format('d/m/Y')} ({$model->starts_at->format('H:i')}–{$model->ends_at->format('H:i')}). Motivo: {$model->reason}",
+                ['decision_id' => $model->id, 'candidate_key' => $model->candidate_key]
+            );
+        }
+
+        if ($model instanceof AttendanceException) {
+            $label = $model->decision === AttendanceException::GRANTED ? 'concedió' : 'revocó';
+
+            return new AuditEntry(
+                'attendance_exception',
+                'Excepción de asistencia',
+                Carbon::parse($model->created_at),
+                $model->company_id,
+                $model->company?->name ?? 'Desconocida',
+                $model->decided_by,
+                $model->decider?->email,
+                "{$model->employee?->full_name}: {$label} {$model->minutes} min del {$model->work_date->format('d/m/Y')} ({$model->starts_at->format('H:i')}–{$model->ends_at->format('H:i')}). Motivo: {$model->reason}",
+                ['exception_id' => $model->id, 'deficit_key' => $model->deficit_key]
+            );
+        }
+
+        throw new \InvalidArgumentException('Unsupported audit entry model: '.$model::class);
+    }
+
+    private function collectEntries(?array $companyIds, ?array $types = null): array
     {
         $entries = [];
-        $types = $this->type === 'all' ? array_keys(self::TYPES) : [$this->type];
+        $types ??= $this->type === 'all' ? array_keys(self::TYPES) : [$this->type];
 
         if (in_array('login_attempt', $types, true)) {
             LoginAttempt::query()
@@ -214,13 +484,17 @@ class Index extends Component
         }
 
         if (in_array('full_day_absence', $types, true)) {
-            JustifiedAbsence::withoutCompanyScope()
+            $absences = JustifiedAbsence::withoutCompanyScope()
                 ->with(['company', 'employee'])
                 ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
                 ->whereNotNull('metadata')
                 ->limit(500)
-                ->get()
-                ->each(function (JustifiedAbsence $absence) use (&$entries): void {
+                ->get();
+            $usersById = $this->usersById($absences->flatMap(
+                fn (JustifiedAbsence $absence) => collect($absence->metadata['revisions'] ?? [])->pluck('user_id')
+            )->all());
+
+            $absences->each(function (JustifiedAbsence $absence) use (&$entries, $usersById): void {
                     foreach ($absence->metadata['revisions'] ?? [] as $revision) {
                         $at = $revision['at'] ?? null;
 
@@ -235,7 +509,7 @@ class Index extends Component
                         }
 
                         $userId = $revision['user_id'] ?? null;
-                        $user = $userId ? User::find($userId) : null;
+                        $user = $userId ? $usersById->get($userId) : null;
                         $entries[] = new AuditEntry(
                             'full_day_absence',
                             'Justificación de jornada completa',
@@ -258,13 +532,23 @@ class Index extends Component
         }
 
         if (in_array('payroll_state', $types, true)) {
-            PayPeriod::withoutCompanyScope()
+            $payPeriods = PayPeriod::withoutCompanyScope()
                 ->with('company')
                 ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
                 ->whereNotNull('metadata')
                 ->limit(500)
-                ->get()
-                ->each(function (PayPeriod $payPeriod) use (&$entries): void {
+                ->get();
+            $usersById = $this->usersById($payPeriods->flatMap(function (PayPeriod $payPeriod) {
+                $metadata = $payPeriod->metadata ?? [];
+
+                return collect([
+                    $metadata['approved_by'] ?? null,
+                    $metadata['exported_by'] ?? null,
+                    $metadata['processed_by'] ?? null,
+                ])->merge(collect($metadata['reopenings'] ?? [])->pluck('user_id'));
+            })->all());
+
+            $payPeriods->each(function (PayPeriod $payPeriod) use (&$entries, $usersById): void {
                     $metadata = $payPeriod->metadata ?? [];
                     foreach (['approved', 'exported', 'processed'] as $action) {
                         $at = $metadata[$action.'_at'] ?? null;
@@ -281,7 +565,7 @@ class Index extends Component
                         }
 
                         $userId = $metadata[$action.'_by'] ?? null;
-                        $user = $userId ? User::find($userId) : null;
+                        $user = $userId ? $usersById->get($userId) : null;
 
                         $entries[] = new AuditEntry(
                             'payroll_state',
@@ -303,7 +587,7 @@ class Index extends Component
                         }
 
                         $userId = $reopening['user_id'] ?? null;
-                        $user = $userId ? User::find($userId) : null;
+                        $user = $userId ? $usersById->get($userId) : null;
                         $invalidated = (int) ($reopening['invalidated_results'] ?? 0);
                         $reason = $reopening['reason'] ?? 'Sin motivo registrado';
                         $entries[] = new AuditEntry(
@@ -322,13 +606,17 @@ class Index extends Component
         }
 
         if (in_array('mark_revision', $types, true)) {
-            RawMark::withoutCompanyScope()
+            $rawMarks = RawMark::withoutCompanyScope()
                 ->with('company')
                 ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
                 ->whereNotNull('metadata')
                 ->limit(500)
-                ->get()
-                ->each(function (RawMark $rawMark) use (&$entries): void {
+                ->get();
+            $usersById = $this->usersById($rawMarks->flatMap(
+                fn (RawMark $rawMark) => collect($rawMark->metadata['revisions'] ?? [])->pluck('user_id')
+            )->all());
+
+            $rawMarks->each(function (RawMark $rawMark) use (&$entries, $usersById): void {
                     foreach ($rawMark->metadata['revisions'] ?? [] as $rev) {
                         $at = $rev['at'] ?? null;
                         if (! $at) {
@@ -344,7 +632,7 @@ class Index extends Component
                         }
 
                         $userId = $rev['user_id'] ?? null;
-                        $user = $userId ? User::find($userId) : null;
+                        $user = $userId ? $usersById->get($userId) : null;
 
                         $description = $this->describeMarkRevision($rawMark, $rev);
                         $entries[] = new AuditEntry(
@@ -365,6 +653,17 @@ class Index extends Component
         usort($entries, fn (AuditEntry $a, AuditEntry $b) => $b->createdAt <=> $a->createdAt);
 
         return $entries;
+    }
+
+    private function usersById(array $ids)
+    {
+        $ids = array_values(array_unique(array_filter($ids)));
+
+        if ($ids === []) {
+            return collect();
+        }
+
+        return User::query()->whereIn('id', $ids)->get()->keyBy('id');
     }
 
     private function describeMarkRevision(RawMark $rawMark, array $revision): string
@@ -449,6 +748,16 @@ class Index extends Component
     private function hasEmployeeScheduleAssignmentsTable(): bool
     {
         return Schema::hasTable('employee_schedule_assignments');
+    }
+
+    private function hasAuditEntriesTable(): bool
+    {
+        return Schema::hasTable('audit_entries');
+    }
+
+    private function legacyOnlyTypes(): array
+    {
+        return array_values(array_diff(array_keys(self::TYPES), ['all'], self::PROJECTED_TYPES));
     }
 
     private function applyFilters(array $entries): array
