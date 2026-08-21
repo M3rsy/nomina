@@ -37,13 +37,14 @@ class RawMarkMutationGuard
         )->first();
     }
 
+    /** @return Collection<int, mixed> */
     public function mutateBatch(
         int $companyId,
         Closure $resolveRawMarkIds,
         Closure $mutation,
         ?Employee $targetEmployee = null,
-    ): void {
-        $this->mutateResolved($companyId, $resolveRawMarkIds, $mutation, $targetEmployee);
+    ): Collection {
+        return $this->mutateResolved($companyId, $resolveRawMarkIds, $mutation, $targetEmployee);
     }
 
     /** @return Collection<int, mixed> */
@@ -92,6 +93,7 @@ class RawMarkMutationGuard
             if ($targetEmployee !== null
                 && ($nextEmployee->trashed()
                     || ! $nextEmployee->exists
+                    || ! $nextEmployee->is_active
                     || $nextEmployee->company_id !== $lockedMark->company_id)) {
                 throw ValidationException::withMessages([
                     'raw_mark' => 'El empleado ya no admite cambios de marcas para esta empresa.',
@@ -114,7 +116,7 @@ class RawMarkMutationGuard
             ];
         });
 
-        if ($context->payPeriods->contains(fn (PayPeriod $period): bool => in_array(
+        if ($context->payPeriods->contains(fn (PayPeriod $period): bool => $period->trashed() || in_array(
             $period->status,
             PayPeriod::ATTENDANCE_LOCKED_STATUSES,
             true,

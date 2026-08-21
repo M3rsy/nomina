@@ -23,8 +23,10 @@ use App\Services\Attendance\RawMarkMutationGuard;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Attendance\VariationAcknowledgementRecorder;
+use App\Services\Payroll\AssignRawMarkEmployeeCommand;
 use App\Services\Payroll\AuditedRawMarkRevision;
 use App\Services\Payroll\CreateEmployeeFromUnknownMarkCommand;
+use App\Services\Payroll\MarkRawMarkCorrectedCommand;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollRunRequester;
 use App\Services\Payroll\StartPayrollProcessing;
@@ -847,40 +849,24 @@ class Revisar extends Component
             'assignReason' => ['required', 'string', 'max:500'],
         ]);
 
-        $employeeId = (int) $validated['assignEmployeeId'];
-        $applyAll = (bool) $validated['assignApplyAll'];
-        $reason = $validated['assignReason'];
-        $employee = $this->findPeriodEmployee($employeeId);
-
-        if ($employee === null) {
-            $this->addError('assignEmployeeId', 'El empleado ya no está disponible.');
+        try {
+            app(AuditedRawMarkRevision::class)->assignEmployee(new AssignRawMarkEmployeeCommand(
+                payPeriodId: $this->payPeriod->id,
+                rawMarkId: $rawMark->id,
+                employeeId: (int) $validated['assignEmployeeId'],
+                actorId: (int) Auth::id(),
+                reason: $validated['assignReason'],
+                assignAll: (bool) $validated['assignApplyAll'],
+            ));
+        } catch (ValidationException $exception) {
+            foreach ($exception->errors() as $field => $messages) {
+                foreach ($messages as $message) {
+                    $this->addError($field === 'employee_id' ? 'assignEmployeeId' : $field, $message);
+                }
+            }
 
             return;
         }
-
-        app(RawMarkMutationGuard::class)->mutateBatch(
-            $rawMark->company_id,
-            function () use ($rawMark, $applyAll): array {
-                if (! $applyAll) {
-                    return [$rawMark->id];
-                }
-
-                return RawMark::withoutCompanyScope()
-                    ->where('company_id', $this->payPeriod->company_id)
-                    ->where('pay_period_id', $this->payPeriod->id)
-                    ->where(function ($query) use ($rawMark): void {
-                        $query->whereKey($rawMark->id)
-                            ->orWhere(function ($matching) use ($rawMark): void {
-                                $matching->where('employee_external_id', $rawMark->employee_external_id)
-                                    ->whereNull('employee_id');
-                            });
-                    })
-                    ->pluck('id')
-                    ->all();
-            },
-            fn (RawMark $lockedMark) => $this->assignEmployeeToRawMark($lockedMark, $employee, $reason),
-            targetEmployee: $employee,
-        );
 
         $this->closeAssignModal();
     }
@@ -931,22 +917,22 @@ class Revisar extends Component
             'correctReason' => ['required', 'string', 'max:500'],
         ]);
 
-        app(RawMarkMutationGuard::class)->mutate($rawMark, function (RawMark $lockedMark) use ($validated): void {
-            $revisions = $lockedMark->metadata['revisions'] ?? [];
-            $revisions[] = [
-                'action' => 'mark_corrected',
-                'user_id' => Auth::id(),
-                'reason' => $validated['correctReason'],
-                'previous_status' => $lockedMark->status,
-                'new_status' => 'corrected',
-                'at' => now()->toDateTimeString(),
-            ];
+        try {
+            app(AuditedRawMarkRevision::class)->markCorrected(new MarkRawMarkCorrectedCommand(
+                payPeriodId: $this->payPeriod->id,
+                rawMarkId: $rawMark->id,
+                actorId: (int) Auth::id(),
+                reason: $validated['correctReason'],
+            ));
+        } catch (ValidationException $exception) {
+            foreach ($exception->errors() as $field => $messages) {
+                foreach ($messages as $message) {
+                    $this->addError($field, $message);
+                }
+            }
 
-            $lockedMark->update([
-                'status' => 'corrected',
-                'metadata' => array_merge($lockedMark->metadata ?? [], ['revisions' => $revisions]),
-            ]);
-        });
+            return;
+        }
 
         $this->closeCorrectModal();
     }
@@ -1682,27 +1668,6 @@ class Revisar extends Component
         return Employee::withoutCompanyScope()
             ->where('company_id', $this->payPeriod->company_id)
             ->find($id);
-    }
-
-    private function assignEmployeeToRawMark(RawMark $rawMark, Employee $employee, string $reason): void
-    {
-        $revisions = $rawMark->metadata['revisions'] ?? [];
-        $revisions[] = [
-            'action' => 'assign_employee',
-            'user_id' => Auth::id(),
-            'reason' => $reason,
-            'previous_employee_id' => $rawMark->employee_id,
-            'new_employee_id' => $employee->id,
-            'at' => now()->toDateTimeString(),
-        ];
-
-        $newStatus = $rawMark->status === 'unknown_employee' ? 'corrected' : $rawMark->status;
-
-        $rawMark->update([
-            'employee_id' => $employee->id,
-            'status' => $newStatus,
-            'metadata' => array_merge($rawMark->metadata ?? [], ['revisions' => $revisions]),
-        ]);
     }
 
     private function readinessMessage(): ?string
