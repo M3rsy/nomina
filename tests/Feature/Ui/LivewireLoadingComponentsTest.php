@@ -31,7 +31,7 @@ test('loading button scopes accessible feedback to its action', function () {
         ->toContain('aria-hidden="true"');
 });
 
-test('loading overlay is delayed accessible and scoped to blocking actions', function () {
+test('loading overlay starts hidden and is revealed only for scoped blocking actions', function () {
     $html = Blade::render(<<<'BLADE'
         <x-ui.loading-overlay
             target="validate,process"
@@ -40,6 +40,7 @@ test('loading overlay is delayed accessible and scoped to blocking actions', fun
     BLADE);
 
     expect($html)
+        ->toContain('style="display: none;"')
         ->toContain('wire:loading.delay.short')
         ->toContain('wire:target="validate,process"')
         ->toContain('role="status"')
