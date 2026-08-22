@@ -135,7 +135,7 @@
             <div class="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
                 <button
                     type="button"
-                    x-on:click="$dispatch('open-company-selector')"
+                    x-on:click.stop="$dispatch('open-company-selector')"
                     class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 >
                     Seleccionar empresa

@@ -108,7 +108,7 @@ test('super admin without active company receives a guided payroll state', funct
         ->assertSeeText('Seleccioná una empresa para continuar')
         ->assertSeeText('La nómina siempre corresponde a una empresa activa.')
         ->assertSeeText('Seleccionar empresa')
-        ->assertSee('x-on:click="$dispatch(\'open-company-selector\')"', escape: false)
+        ->assertSee('x-on:click.stop="$dispatch(\'open-company-selector\')"', escape: false)
         ->assertSee('@open-company-selector.window="if (window.innerWidth >= 1280) { open = true; $nextTick(() => $refs.companyTrigger.focus()) }"', escape: false)
         ->assertSee('@open-company-selector.window="if (window.innerWidth < 1280) { mobileOpen = true; $nextTick(() => $refs.mobileCompanyHeading.focus()) }"', escape: false)
         ->assertSee('x-ref="mobileCompanyHeading"', escape: false)
