@@ -7,10 +7,9 @@ uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('guest sees welcome page', function () {
+test('guest is redirected from root to login', function () {
     $this->get('/')
-        ->assertOk()
-        ->assertViewIs('welcome');
+        ->assertRedirect(route('login'));
 });
 
 test('authenticated user with super_admin role is redirected to dashboard', function () {
@@ -64,23 +63,14 @@ test('authenticated non-admin users follow a stable dashboard entry path', funct
     $this->assertSame(route('login'), $dashboardResponse->headers->get('Location'));
 });
 
-test('guest sees landing hero and login call-to-action', function () {
-    $this->get('/')
+test('login is a complete asset-backed page with a size-safe brand mark', function () {
+    $this->get(route('login'))
         ->assertOk()
-        ->assertSeeText('Gestioná asistencia y nómina desde un solo ingreso')
-        ->assertSeeText('Iniciar sesión')
-        ->assertSee(route('login'));
-});
-
-test('guest sees operational modules cards', function () {
-    $this->get('/')
-        ->assertOk()
-        ->assertSee('Asistencia y jornadas')
-        ->assertSee('Nómina')
-        ->assertSee('Feriados')
-        ->assertSee('Respaldos')
-        ->assertSee('Usuarios/Empresa')
-        ->assertSee('Estado del sistema');
+        ->assertSee('<!DOCTYPE html>', escape: false)
+        ->assertSee('<link rel="stylesheet"', escape: false)
+        ->assertSee('<script type="module"', escape: false)
+        ->assertSee('data-auth-shell', escape: false)
+        ->assertSee('<svg class="size-6" width="24" height="24"', escape: false);
 });
 
 test('guest accessing dashboard is redirected to login', function () {
