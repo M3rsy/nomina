@@ -24,6 +24,7 @@
                 class="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur"
                 x-data="{ mobileOpen: false }"
                 @resize.window="if (window.innerWidth >= 1280) { mobileOpen = false }"
+                @open-company-selector.window="if (window.innerWidth < 1280) { mobileOpen = true; $nextTick(() => $refs.mobileCompanyHeading.focus()) }"
                 @keydown.escape.window="if (mobileOpen) { mobileOpen = false; $nextTick(() => $refs.mobileTrigger.focus()) }"
             >
                 <div class="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
@@ -95,6 +96,7 @@
                                     class="relative"
                                     x-data="{ open: false }"
                                     @resize.window="if (window.innerWidth < 1280) { open = false }"
+                                    @open-company-selector.window="if (window.innerWidth >= 1280) { open = true; $nextTick(() => $refs.companyTrigger.focus()) }"
                                     @click.outside="open = false"
                                     @focusout="if (open && !$el.contains($event.relatedTarget)) { open = false }"
                                     @keydown.escape="if (open) { $event.stopPropagation(); open = false; $nextTick(() => $refs.companyTrigger.focus()) }"
@@ -245,7 +247,7 @@
 
                         @if ($isSuperAdmin)
                             <section class="border-t border-slate-100 pt-4" aria-labelledby="mobile-company-heading">
-                                <h2 id="mobile-company-heading" class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Empresa activa</h2>
+                                <h2 id="mobile-company-heading" x-ref="mobileCompanyHeading" tabindex="-1" class="mb-2 rounded text-xs font-semibold uppercase tracking-wider text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Empresa activa</h2>
                                 <div class="flex gap-2 overflow-x-auto pb-1" aria-label="Seleccionar empresa">
                                     <form method="POST" action="{{ route('current-company.update') }}" class="shrink-0">
                                         @csrf
