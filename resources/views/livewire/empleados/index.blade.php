@@ -80,7 +80,7 @@
                                     </span>
                                 </td>
                                 <td class="px-5 py-3.5">
-                                    <div class="flex flex-wrap items-center gap-2">
+                                    <div data-employee-actions class="flex min-w-max flex-nowrap items-center gap-2">
                                         @can('update', $employee)
                                             <a href="/empleados/{{ $employee->id }}/editar" class="inline-flex min-h-9 items-center rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">Editar</a>
                                         @endcan
