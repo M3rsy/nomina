@@ -1097,6 +1097,7 @@
             <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
                 <h2 class="text-lg font-bold">Crear empleado desde la marca</h2>
                 <p class="mt-1 text-sm text-slate-600">Código de empleado: <strong>{{ $createEmployeeExternalId }}</strong></p>
+                @error('createEmployeeRawMarkId')<p class="mt-2 text-sm text-rose-600">{{ $message }}</p>@enderror
                 <form wire:submit.prevent="saveCreatedEmployee" class="mt-4 grid gap-4 sm:grid-cols-2">
                     <label class="text-sm"><span class="font-semibold">Código de pago</span><input wire:model="createEmployeePaymentCode" maxlength="50" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeePaymentCode')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Identidad</span><input wire:model="createEmployeeDni" maxlength="32" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeDni')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
