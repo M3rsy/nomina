@@ -17,7 +17,7 @@ class PayPeriodPolicy
     public function viewAny(User $user): bool
     {
         return $user->can('pay_periods.view')
-            && app(CurrentCompany::class)->get() !== null;
+            && (app(CurrentCompany::class)->get() !== null || $user->hasRole('super_admin'));
     }
 
     public function view(User $user, PayPeriod $payPeriod): bool
