@@ -25,7 +25,6 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Attendance\VariationAcknowledgementRecorder;
 use App\Services\Payroll\CreateEmployeeFromUnknownMark;
 use App\Services\Payroll\PayPeriodReopener;
-use App\Services\Payroll\PayrollRunRequester;
 use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -506,24 +505,29 @@ class Revisar extends Component
         $this->redirectRoute('nomina.procesar', ['payPeriod' => $period]);
     }
 
-    #[On('payroll-run-retry')]
-    public function retryPayrollRun(int $runId): void
+    #[On('payroll-run-retried')]
+    public function syncRetriedPayrollRun(int $failedRunId, int $runId): void
     {
         $this->authorize('view', $this->payPeriod);
         Gate::authorize('payroll.process');
 
-        if ($this->activePayrollRunId !== $runId
-            || $this->payrollRuns()->where('status', PayrollRun::FAILED)->find($runId) === null) {
+        if ($this->activePayrollRunId !== $failedRunId) {
             return;
         }
 
-        $this->payrollRunRequestKey = (string) Str::uuid();
-        $run = app(PayrollRunRequester::class)->request(
-            $this->payPeriod->fresh(),
-            Auth::user(),
-            $this->payrollRunRequestKey,
-        );
+        $failedRun = $this->payrollRuns()->where('status', PayrollRun::FAILED)->find($failedRunId);
+        $run = $this->payrollRuns()->find($runId);
+        $latestRunId = $this->payrollRuns()->latest('id')->value('id');
+
+        if ($failedRun === null
+            || $run === null
+            || $run->id <= $failedRun->id
+            || $latestRunId !== $run->id) {
+            return;
+        }
+
         $this->activePayrollRunId = $run->id;
+        $this->payrollRunRequestKey = $run->request_key;
     }
 
     public function openEditRawMark(int $id): void

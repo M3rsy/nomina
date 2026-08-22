@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ProcessPayrollRun;
 use App\Livewire\Nomina\PayrollRunProgress;
 use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
@@ -146,7 +147,7 @@ test('a verified completed run redirects review to the existing payroll results'
         ->assertRedirectToRoute('nomina.procesar', ['payPeriod' => $period]);
 });
 
-test('a failed run stays on review and an explicit retry creates a new run', function () {
+test('one progress retry action creates and follows the replacement run', function () {
     $company = Company::factory()->create();
     $period = PayPeriod::factory()->forCompany($company)->create(['status' => 'ready']);
     $operator = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -164,26 +165,53 @@ test('a failed run stays on review and an explicit retry creates a new run', fun
         ->assertSee("Referencia #{$first->id}")
         ->assertSee('Intentar nuevamente');
 
-    Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $first->id])
+    $progress = Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $first->id])
         ->assertSee('No se pudo procesar la nómina.')
         ->assertSee("Referencia #{$first->id}")
         ->assertSee('Intentar nuevamente')
         ->assertSeeHtml('wire:target="retry"')
         ->assertDontSee('sensitive database credentials')
-        ->call('retry')
-        ->assertDispatched('payroll-run-retry', runId: $first->id);
+        ->call('retry');
+
+    $replacement = PayrollRun::withoutCompanyScope()->latest('id')->firstOrFail();
+
+    $progress
+        ->assertSet('runId', $replacement->id)
+        ->assertSet('status', PayrollRun::QUEUED)
+        ->assertDispatched(
+            'payroll-run-retried',
+            failedRunId: $first->id,
+            runId: $replacement->id,
+        )
+        ->assertSee("Referencia #{$replacement->id}")
+        ->assertDontSee('Intentar nuevamente');
 
     $parent->dispatch('payroll-run-terminal', runId: $first->id)
         ->assertSet('activePayrollRunId', $first->id)
-        ->dispatch('payroll-run-retry', runId: $first->id)
-        ->assertSet('activePayrollRunId', fn (?int $id): bool => $id !== null && $id !== $first->id)
+        ->dispatch('payroll-run-retried', failedRunId: $first->id, runId: $replacement->id)
+        ->assertSet('activePayrollRunId', $replacement->id)
         ->assertSet('search', 'Ana')
         ->assertSet('status', 'valid')
         ->assertSet('overtimeStatus', 'rejected');
 
     expect(PayrollRun::withoutCompanyScope()->count())->toBe(2)
-        ->and(PayrollRun::withoutCompanyScope()->latest('id')->first()->request_key)
+        ->and($replacement->request_key)
         ->not->toBe($first->request_key);
+
+    Queue::assertPushed(
+        ProcessPayrollRun::class,
+        fn (ProcessPayrollRun $job): bool => $job->runId === $replacement->id,
+    );
+
+    $replacement->markFailed('worker stopped after accepting the retry');
+
+    Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $first->id])
+        ->call('retry')
+        ->assertSet('runId', $replacement->id)
+        ->assertSet('status', PayrollRun::FAILED);
+
+    expect(PayrollRun::withoutCompanyScope()->count())->toBe(2);
+    Queue::assertPushed(ProcessPayrollRun::class, 2);
 });
 
 test('forged stale and cross-tenant terminal events cannot redirect or leak a run', function () {
