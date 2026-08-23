@@ -7,10 +7,9 @@ uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('guest sees welcome page', function () {
+test('guest is redirected from root to login', function () {
     $this->get('/')
-        ->assertOk()
-        ->assertViewIs('welcome');
+        ->assertRedirect(route('login'));
 });
 
 test('authenticated user with super_admin role is redirected to dashboard', function () {
@@ -64,23 +63,14 @@ test('authenticated non-admin users follow a stable dashboard entry path', funct
     $this->assertSame(route('login'), $dashboardResponse->headers->get('Location'));
 });
 
-test('guest sees landing hero and login call-to-action', function () {
+test('guest can reach the login call-to-action through root redirect', function () {
     $this->get('/')
-        ->assertOk()
-        ->assertSeeText('Gestioná asistencia y nómina desde un solo ingreso')
-        ->assertSeeText('Iniciar sesión')
-        ->assertSee(route('login'));
+        ->assertRedirect(route('login'));
 });
 
-test('guest sees operational modules cards', function () {
+test('guest root no longer renders the unauthenticated landing modules', function () {
     $this->get('/')
-        ->assertOk()
-        ->assertSee('Asistencia y jornadas')
-        ->assertSee('Nómina')
-        ->assertSee('Feriados')
-        ->assertSee('Respaldos')
-        ->assertSee('Usuarios/Empresa')
-        ->assertSee('Estado del sistema');
+        ->assertRedirect(route('login'));
 });
 
 test('guest accessing dashboard is redirected to login', function () {

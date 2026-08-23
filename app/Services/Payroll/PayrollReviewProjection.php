@@ -61,6 +61,12 @@ class PayrollReviewProjection
             return null;
         }
 
+        if (! PayrollReviewEntry::withoutCompanyScope()
+            ->where('pay_period_id', $payPeriod->id)
+            ->exists()) {
+            return null;
+        }
+
         $generation = $this->generation($payPeriod);
 
         return PayrollReviewEntry::withoutCompanyScope()

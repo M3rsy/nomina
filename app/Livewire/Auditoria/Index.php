@@ -683,7 +683,7 @@ class Index extends Component
         };
 
         return match ($revision['action'] ?? null) {
-            'manual_create' => "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para {$revision['work_date']} a {$revision['event_at']}. Motivo: {$reason}",
+            'manual_create' => "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para ".($revision['work_date'] ?? 'fecha no registrada').' a '.($revision['event_at'] ?? $rawMark->event_at?->toDateTimeString() ?? 'hora no registrada').". Motivo: {$reason}",
             'edit_event_at' => "{$prefix}: fecha/hora de {$oldEventAt} a {$newEventAt}. Motivo: {$reason}",
             'mark_corrected' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",
             'delete' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",

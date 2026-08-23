@@ -52,18 +52,35 @@ class AuditEntryProjector
             return null;
         }
 
-        return AuditLogEntry::query()->updateOrCreate(
+        $now = now();
+        AuditLogEntry::query()->upsert(
+            [[
+                ...$payload,
+                'metadata' => is_array($payload['metadata'] ?? null)
+                    ? json_encode($payload['metadata'], JSON_THROW_ON_ERROR)
+                    : ($payload['metadata'] ?? null),
+                'source_type' => $source::class,
+                'source_id' => $source->getKey(),
+                'source_revision' => 'created',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]],
+            ['source_type', 'source_id', 'source_revision'],
             [
-                'source_type' => $source::class,
-                'source_id' => $source->getKey(),
-                'source_revision' => 'created',
-            ],
-            $payload + [
-                'source_type' => $source::class,
-                'source_id' => $source->getKey(),
-                'source_revision' => 'created',
+                'company_id',
+                'type',
+                'occurred_at',
+                'actor_id',
+                'user_identifier',
+                'description',
+                'metadata',
+                'subject_type',
+                'subject_id',
+                'updated_at',
             ],
         );
+
+        return null;
     }
 
     public function projectMetadata(Model $source): int
@@ -176,6 +193,9 @@ class AuditEntryProjector
     {
         $exception->loadMissing(['company', 'employee', 'decider']);
         $label = $exception->decision === AttendanceException::GRANTED ? 'concedió' : 'revocó';
+        $interval = $exception->starts_at !== null && $exception->ends_at !== null
+            ? " ({$exception->starts_at->format('H:i')}–{$exception->ends_at->format('H:i')})"
+            : '';
 
         return [
             'company_id' => $exception->company_id,
@@ -183,7 +203,7 @@ class AuditEntryProjector
             'occurred_at' => $exception->created_at,
             'actor_id' => $exception->decided_by,
             'user_identifier' => $exception->decider?->email,
-            'description' => "{$exception->employee?->full_name}: {$label} {$exception->minutes} min del {$exception->work_date->format('d/m/Y')} ({$exception->starts_at->format('H:i')}–{$exception->ends_at->format('H:i')}). Motivo: {$exception->reason}",
+            'description' => "{$exception->employee?->full_name}: {$label} {$exception->minutes} min del {$exception->work_date->format('d/m/Y')}{$interval}. Motivo: {$exception->reason}",
             'metadata' => ['exception_id' => $exception->id, 'deficit_key' => $exception->deficit_key],
             'subject_type' => Employee::class,
             'subject_id' => $exception->employee_id,
@@ -361,7 +381,7 @@ class AuditEntryProjector
         };
 
         return match ($revision['action'] ?? null) {
-            'manual_create' => "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para {$revision['work_date']} a {$revision['event_at']}. Motivo: {$reason}",
+            'manual_create' => "Marca manual #{$rawMark->id} (empleado {$rawMark->employee_external_id}) creada para ".($revision['work_date'] ?? 'fecha no registrada').' a '.($revision['event_at'] ?? $rawMark->event_at?->toDateTimeString() ?? 'hora no registrada').". Motivo: {$reason}",
             'edit_event_at' => "{$prefix}: fecha/hora de {$oldEventAt} a {$newEventAt}. Motivo: {$reason}",
             'assign_employee' => "{$prefix}: empleado de ".($revision['previous_employee_id'] ?? 'desconocido').' a '.($revision['new_employee_id'] ?? 'desconocido').". Motivo: {$reason}",
             'mark_corrected' => "{$prefix}: estado de {$previousStatus} a {$newStatus}. Motivo: {$reason}",
