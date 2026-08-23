@@ -63,14 +63,14 @@ test('authenticated non-admin users follow a stable dashboard entry path', funct
     $this->assertSame(route('login'), $dashboardResponse->headers->get('Location'));
 });
 
-test('guest can reach the login call-to-action through root redirect', function () {
-    $this->get('/')
-        ->assertRedirect(route('login'));
-});
-
-test('guest root no longer renders the unauthenticated landing modules', function () {
-    $this->get('/')
-        ->assertRedirect(route('login'));
+test('login is a complete asset-backed page with a size-safe brand mark', function () {
+    $this->get(route('login'))
+        ->assertOk()
+        ->assertSee('<!DOCTYPE html>', escape: false)
+        ->assertSee('<link rel="stylesheet"', escape: false)
+        ->assertSee('<script type="module"', escape: false)
+        ->assertSee('data-auth-shell', escape: false)
+        ->assertSee('<svg class="size-6" width="24" height="24"', escape: false);
 });
 
 test('guest accessing dashboard is redirected to login', function () {

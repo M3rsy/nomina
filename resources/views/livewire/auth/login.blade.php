@@ -56,18 +56,14 @@
             @enderror
         </div>
 
-        <button
+        <x-ui.loading-button
             type="submit"
-            wire:loading.attr="disabled"
-            wire:target="login"
+            target="login"
+            loading-label="Ingresando..."
             class="min-h-12 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-200 disabled:cursor-wait disabled:bg-indigo-400 motion-reduce:transition-none"
         >
-            <span wire:loading.remove wire:target="login">Ingresar</span>
-            <span wire:loading wire:target="login">Ingresando...</span>
-        </button>
-        <p role="status" aria-live="polite" class="sr-only">
-            <span wire:loading wire:target="login">Ingresando...</span>
-        </p>
+            Ingresar
+        </x-ui.loading-button>
     </form>
 
     <div class="mt-5 text-center">

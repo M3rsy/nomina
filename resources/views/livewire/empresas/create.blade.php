@@ -50,12 +50,14 @@
             </div>
 
             <div class="mt-6 flex items-center justify-end gap-3">
-                <button
+                <x-ui.loading-button
                     type="submit"
+                    target="save"
+                    loading-label="Guardando…"
                     class="inline-flex min-h-11 items-center rounded-xl bg-slate-900 px-6 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 >
                     Guardar
-                </button>
+                </x-ui.loading-button>
             </div>
         </form>
     </div>

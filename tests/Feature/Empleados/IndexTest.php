@@ -72,3 +72,22 @@ test('company employee filters reset page two and remain tenant scoped', functio
         ->assertSee('INACTIVE-EMPLOYEE')
         ->assertDontSee('OTHER-COMPANY');
 });
+
+test('employee row actions stay together in one ordered action bar', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $html = Livewire::test(Index::class)
+        ->assertSeeInOrder(['Editar', 'Desactivar', 'Eliminar'])
+        ->html();
+
+    preg_match('/<div\b[^>]*data-employee-actions[^>]*>/', $html, $actionBar);
+
+    expect($actionBar)->toHaveCount(1)
+        ->and($actionBar[0])->toContain('flex-nowrap')
+        ->and($actionBar[0])->not->toContain('flex-wrap');
+});

@@ -4,9 +4,12 @@ namespace App\Livewire\Nomina;
 
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
+use App\Services\Payroll\PayrollRunRequester;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
+use Ramsey\Uuid\Uuid;
 
 final class PayrollRunProgress extends Component
 {
@@ -57,6 +60,51 @@ final class PayrollRunProgress extends Component
             $this->terminalNotified = true;
             $this->dispatch('payroll-run-terminal', runId: $run->id);
         }
+    }
+
+    public function retry(): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+
+        $failedRunId = $this->runId;
+        $failedRun = $failedRunId === null ? null : PayrollRun::withoutCompanyScope()
+            ->where('company_id', $this->payPeriod->company_id)
+            ->where('pay_period_id', $this->payPeriod->id)
+            ->where('status', PayrollRun::FAILED)
+            ->find($failedRunId);
+
+        if ($failedRun === null) {
+            $this->poll();
+
+            return;
+        }
+
+        $run = app(PayrollRunRequester::class)->request(
+            $this->payPeriod->fresh(),
+            Auth::user(),
+            $this->retryRequestKey($failedRun),
+        );
+
+        $this->runId = $run->id;
+        $this->status = $run->status;
+        $this->delayed = false;
+        $this->terminalNotified = false;
+        $this->dispatch('payroll-run-retried', failedRunId: $failedRunId, runId: $run->id);
+    }
+
+    private function retryRequestKey(PayrollRun $failedRun): string
+    {
+        return Uuid::uuid5(
+            Uuid::NAMESPACE_URL,
+            implode(':', [
+                'nomina-payroll-run-retry',
+                $failedRun->company_id,
+                $failedRun->pay_period_id,
+                $failedRun->id,
+                $failedRun->request_key,
+            ]),
+        )->toString();
     }
 
     public function render()

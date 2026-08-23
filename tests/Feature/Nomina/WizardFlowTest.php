@@ -49,6 +49,20 @@ function assignWizardSchedule(Company $company, Employee $employee): void
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada inicial');
 }
 
+test('review renders action-scoped feedback and a delayed processing overlay', function () {
+    [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
+        ->assertSeeHtml('wire:target="saveDraft"')
+        ->assertSeeHtml('wire:loading.attr="aria-busy"')
+        ->assertSeeHtml('wire:target="continueToReady,confirmContinueToReady,startPayrollRun,saveAttendanceException,saveOvertimeBatch,saveOvertimeDecision,saveManualMark,saveEditRawMark,markCorrected,deleteRawMark,saveAssign,saveCreatedEmployee,reopenProcessedPeriod"')
+        ->assertSeeHtml('wire:loading.delay.short.flex')
+        ->assertSee('Validando y preparando la nómina…');
+});
+
 test('saveDraft sets pay period status to validating', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('uploaded');
 

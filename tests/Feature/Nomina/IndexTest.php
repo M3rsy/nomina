@@ -95,12 +95,49 @@ test('company admin cannot view nomina index of other company', function () {
         ->assertDontSee('Empresa B');
 });
 
-test('super admin without active company cannot view nomina index', function () {
+test('super admin without active company receives a guided payroll state', function () {
+    $company = Company::factory()->create();
+    PayPeriod::factory()->forCompany($company)->create(['name' => 'Private payroll period']);
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     app(CurrentCompany::class)->set(null);
 
     $this->actingAs($superAdmin)
+        ->get('/nomina')
+        ->assertOk()
+        ->assertSeeText('Seleccioná una empresa para continuar')
+        ->assertSeeText('La nómina siempre corresponde a una empresa activa.')
+        ->assertSeeText('Seleccionar empresa')
+        ->assertSee('x-on:click.stop="$dispatch(\'open-company-selector\')"', escape: false)
+        ->assertSee('@open-company-selector.window="if (window.innerWidth >= 1280) { open = true; $nextTick(() => $refs.companyTrigger.focus()) }"', escape: false)
+        ->assertSee('@open-company-selector.window="if (window.innerWidth < 1280) { mobileOpen = true; $nextTick(() => $refs.mobileCompanyHeading.focus()) }"', escape: false)
+        ->assertSee('x-ref="mobileCompanyHeading"', escape: false)
+        ->assertSee('href="'.route('dashboard').'"', escape: false)
+        ->assertDontSee('id="create-period-trigger"', escape: false)
+        ->assertDontSee('aria-label="Etapas del flujo de nómina"', escape: false)
+        ->assertDontSeeText('Períodos existentes')
+        ->assertDontSeeText('Private payroll period');
+});
+
+test('invalid active company context falls back to the guided payroll state', function (string $context) {
+    $companyId = $context === 'inactive'
+        ? Company::factory()->inactive()->create()->id
+        : 999999;
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->withSession(['active_company_id' => $companyId])
+        ->actingAs($superAdmin)
+        ->get('/nomina')
+        ->assertOk()
+        ->assertSeeText('Seleccioná una empresa para continuar')
+        ->assertSessionMissing('active_company_id');
+})->with(['missing', 'inactive']);
+
+test('company-scoped user without a resolvable company remains forbidden', function () {
+    $admin = User::factory()->create(['company_id' => null]);
+    $admin->givePermissionTo('pay_periods.view');
+
+    $this->actingAs($admin)
         ->get('/nomina')
         ->assertForbidden();
 });
@@ -207,7 +244,15 @@ test('super admin without an active company cannot access period creation', func
     app(CurrentCompany::class)->set(null);
 
     $this->get('/nomina')
-        ->assertForbidden();
+        ->assertOk()
+        ->assertDontSee('id="create-period-trigger"', escape: false);
+
+    Livewire::test(Index::class)
+        ->set('name', 'Período sin empresa')
+        ->set('start_date', '2026-09-01')
+        ->set('end_date', '2026-09-30')
+        ->call('store')
+        ->assertStatus(403);
 
     expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
 });

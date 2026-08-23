@@ -191,14 +191,14 @@
                 </label>
 
                 <div class="border-t border-slate-100 pt-3">
-                    <button
+                    <x-ui.loading-button
                         type="submit"
-                        wire:loading.attr="disabled"
+                        target="save"
+                        loading-label="Guardando…"
                         class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
                     >
-                        <span wire:loading.remove>Guardar cambios</span>
-                        <span wire:loading>Guardando...</span>
-                    </button>
+                        Guardar cambios
+                    </x-ui.loading-button>
                 </div>
             </div>
         </form>

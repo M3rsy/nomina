@@ -23,23 +23,25 @@
             @endcan
         </div>
 
-        <div class="mt-7 border-t border-slate-100 pt-5" aria-label="Etapas del flujo de nómina">
-            <p class="mb-3 text-sm font-medium text-slate-700">Estás en: <span class="font-semibold text-indigo-700">1. Períodos</span></p>
-            <ol class="grid gap-3 text-sm sm:grid-cols-3">
-                <li class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-indigo-600">Paso 1</span>
-                    Crear o elegir período
-                </li>
-                <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 2</span>
-                    Cargar y validar marcas
-                </li>
-                <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 3</span>
-                    Revisar el resultado
-                </li>
-            </ol>
-        </div>
+        @if ($hasCompany)
+            <div class="mt-7 border-t border-slate-100 pt-5" aria-label="Etapas del flujo de nómina">
+                <p class="mb-3 text-sm font-medium text-slate-700">Estás en: <span class="font-semibold text-indigo-700">1. Períodos</span></p>
+                <ol class="grid gap-3 text-sm sm:grid-cols-3">
+                    <li class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900">
+                        <span class="block text-xs font-semibold uppercase tracking-wide text-indigo-600">Paso 1</span>
+                        Crear o elegir período
+                    </li>
+                    <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
+                        <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 2</span>
+                        Cargar y validar marcas
+                    </li>
+                    <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
+                        <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 3</span>
+                        Revisar el resultado
+                    </li>
+                </ol>
+            </div>
+        @endif
     </header>
 
     @if ($showCreateForm)
@@ -104,19 +106,49 @@
                     <button type="button" wire:click="closeCreateForm" class="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">
                         Cancelar
                     </button>
-                    <button type="submit" wire:loading.attr="disabled" wire:target="store" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60">
-                        <span wire:loading.remove wire:target="store">Crear y continuar</span>
-                        <span wire:loading wire:target="store">Creando período...</span>
-                    </button>
+                    <x-ui.loading-button type="submit" target="store" loading-label="Creando período…" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60">Crear y continuar</x-ui.loading-button>
                 </div>
             </form>
         </section>
     @endif
 
     @if (! $hasCompany)
-        <div role="status" class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
-            Seleccioná una empresa activa para ver o crear sus períodos de nómina.
-        </div>
+        <section
+            data-payroll-company-context
+            role="status"
+            aria-labelledby="payroll-company-context-heading"
+            class="mx-auto mt-8 max-w-2xl rounded-3xl border border-indigo-200 bg-gradient-to-br from-white via-indigo-50/70 to-amber-50 p-6 text-center shadow-sm sm:p-10"
+        >
+            <span class="mx-auto grid size-14 place-items-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-200" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.75 20.25h14.5M6.75 20.25V5.5A1.75 1.75 0 0 1 8.5 3.75h7A1.75 1.75 0 0 1 17.25 5.5v14.75M9.25 7.5h1.5m2.5 0h1.5m-5.5 3.5h1.5m2.5 0h1.5m-5.5 3.5h1.5m2.5 0h1.5" />
+                </svg>
+            </span>
+
+            <h2 id="payroll-company-context-heading" class="mt-5 text-2xl font-bold tracking-tight text-slate-950">
+                Seleccioná una empresa para continuar
+            </h2>
+            <p class="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600 sm:text-base">
+                La nómina siempre corresponde a una empresa activa. Elegí una para consultar períodos, cargar marcas y procesar resultados sin mezclar información entre empresas.
+            </p>
+
+            <div class="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
+                <button
+                    type="button"
+                    x-on:click.stop="$dispatch('open-company-selector')"
+                    class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                >
+                    Seleccionar empresa
+                </button>
+                <a
+                    href="{{ route('dashboard') }}"
+                    wire:navigate
+                    class="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                >
+                    Volver al panel
+                </a>
+            </div>
+        </section>
     @else
         <section aria-labelledby="period-list-heading" class="mt-8">
             <div class="mb-4">
