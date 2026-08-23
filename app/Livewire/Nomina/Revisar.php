@@ -28,6 +28,7 @@ use App\Services\Payroll\AuditedRawMarkRevision;
 use App\Services\Payroll\CreateEmployeeFromUnknownMarkCommand;
 use App\Services\Payroll\MarkRawMarkCorrectedCommand;
 use App\Services\Payroll\PayPeriodReopener;
+use App\Services\Payroll\PayrollReviewProjection;
 use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -275,26 +276,13 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $filteredOvertimeRows = $this->filteredOvertimeRows($attendanceReviews);
-        $overtimePage = $this->getPage('overtimePage');
-        $overtimeRows = new LengthAwarePaginator(
-            $filteredOvertimeRows->forPage($overtimePage, 25)->values(),
-            $filteredOvertimeRows->count(),
-            25,
-            $overtimePage,
-            ['path' => request()->url(), 'pageName' => 'overtimePage'],
+        $reviewProjection = $this->projectedReviewData();
+        $overtimeRenderData = $reviewProjection['overtime'] ?? $this->overtimeRenderData(
+            $this->filteredOvertimeRows($attendanceReviews),
+            $this->getPage('overtimePage'),
         );
-        $overtimeGroups = collect($overtimeRows->items())
-            ->groupBy(fn (array $row) => $row['review']->employee->id)
-            ->map(fn (Collection $rows) => [
-                'employee' => $rows->first()['review']->employee,
-                'rows' => $rows,
-                'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
-            ])
-            ->values();
-        $pendingOvertimeMatchCount = $filteredOvertimeRows
-            ->filter(fn (array $row): bool => $row['decision'] === null)
-            ->count();
+        $deficitReviews = $reviewProjection['deficits'] ?? $attendanceReviews
+            ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty());
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -304,13 +292,12 @@ class Revisar extends Component
             'faltas' => $faltas,
             'isBlocked' => $isBlocked,
             'uploadedFiles' => $uploadedFiles,
-            'overtimeGroups' => $overtimeGroups,
-            'overtimeRows' => $overtimeRows,
-            'pendingOvertimeMatchCount' => $pendingOvertimeMatchCount,
+            'overtimeGroups' => $overtimeRenderData['groups'],
+            'overtimeRows' => $overtimeRenderData['rows'],
+            'pendingOvertimeMatchCount' => $overtimeRenderData['pendingCount'],
             'variationReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->variations->isNotEmpty()),
-            'deficitReviews' => $attendanceReviews
-                ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()),
+            'deficitReviews' => $deficitReviews,
         ]);
     }
 
@@ -1730,7 +1717,7 @@ class Revisar extends Component
     private function periodReviewSnapshot(): array
     {
         return $this->periodReviewSnapshot ??= app(PayrollPeriodReviewSnapshot::class)
-            ->forPeriod($this->payPeriod);
+            ->forPeriod($this->payPeriod, includeBlockers: false);
     }
 
     private function authoritativeSelectedOvertimeTargets(): Collection
@@ -1805,6 +1792,73 @@ class Revisar extends Component
                     && $rateMinutes > 0;
             })
             ->values();
+    }
+
+    private function overtimeRenderData(Collection $filteredOvertimeRows, int $page): array
+    {
+        $perPage = 25;
+        $offset = max(0, ($page - 1) * $perPage);
+        $pageRows = [];
+        $pendingCount = 0;
+
+        foreach ($filteredOvertimeRows as $index => $row) {
+            if ($row['decision'] === null) {
+                $pendingCount++;
+            }
+
+            if ($index >= $offset && $index < $offset + $perPage) {
+                $pageRows[] = $row;
+            }
+        }
+
+        $pageRows = collect($pageRows);
+        $rows = new LengthAwarePaginator(
+            $pageRows,
+            $filteredOvertimeRows->count(),
+            $perPage,
+            $page,
+            ['path' => request()->url(), 'pageName' => 'overtimePage'],
+        );
+        $groups = $pageRows
+            ->groupBy(fn (array $row) => $row['review']->employee->id)
+            ->map(fn (Collection $rows) => [
+                'employee' => $rows->first()['review']->employee,
+                'rows' => $rows,
+                'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
+            ])
+            ->values();
+
+        return [
+            'rows' => $rows,
+            'groups' => $groups,
+            'pendingCount' => $pendingCount,
+        ];
+    }
+
+    private function projectedReviewData(): ?array
+    {
+        if ($this->uploaded_file_id !== null) {
+            return null;
+        }
+
+        $projection = app(PayrollReviewProjection::class);
+        $generation = $projection->freshGeneration($this->payPeriod);
+
+        if ($generation === null) {
+            return null;
+        }
+
+        $search = mb_strtolower(trim($this->overtimeSearch));
+
+        return [
+            'overtime' => $projection->overtimeRows($this->payPeriod, $generation, [
+                'search' => $search,
+                'status' => $this->overtimeStatus,
+                'date' => $this->overtimeDate,
+                'rate' => $this->overtimeRate,
+            ], $this->getPage('overtimePage')),
+            'deficits' => $projection->deficitReviews($this->payPeriod, $generation),
+        ];
     }
 
     private function recoverOvertimeBatch(): void

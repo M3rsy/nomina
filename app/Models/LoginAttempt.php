@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,6 +25,11 @@ class LoginAttempt extends Model
         return [
             'success' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::created(fn (self $attempt) => app(AuditEntryProjector::class)->project($attempt));
     }
 
     public function user(): BelongsTo
