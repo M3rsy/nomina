@@ -83,7 +83,7 @@ class Index extends Component
             if ($this->type === 'all') {
                 $entries = array_merge(
                     $this->collectProjectedEntries($companyIds),
-                    $this->collectEntries($companyIds, $this->legacyOnlyTypes()),
+                    $this->collectEntries($companyIds, $this->legacySupplementTypes($companyIds)),
                 );
                 $entries = $this->applyFilters($entries);
                 usort($entries, fn (AuditEntry $a, AuditEntry $b) => $b->createdAt <=> $a->createdAt);
@@ -202,8 +202,11 @@ class Index extends Component
             'login_attempt' => 'Intento de inicio de sesión',
             'employee_revision' => 'Cambio en empleado',
             'schedule_assignment' => 'Asignación de jornada',
+            'mark_revision' => 'Revisión de marca',
             'overtime_decision' => 'Autorización de hora extra',
             'attendance_exception' => 'Excepción de asistencia',
+            'full_day_absence' => 'Justificación de jornada completa',
+            'payroll_state' => 'Estado de nómina',
             default => self::TYPES[$type] ?? $type,
         };
     }
@@ -755,9 +758,22 @@ class Index extends Component
         return Schema::hasTable('audit_entries');
     }
 
-    private function legacyOnlyTypes(): array
+    private function legacySupplementTypes(?array $companyIds): array
     {
-        return array_values(array_diff(array_keys(self::TYPES), ['all'], self::PROJECTED_TYPES));
+        $types = array_values(array_diff(array_keys(self::TYPES), ['all'], self::PROJECTED_TYPES));
+
+        foreach (self::PROJECTED_TYPES as $type) {
+            $hasProjection = AuditLogEntry::query()
+                ->where('type', $type)
+                ->when($companyIds !== null, fn ($q) => $q->whereIn('company_id', $companyIds))
+                ->exists();
+
+            if (! $hasProjection) {
+                $types[] = $type;
+            }
+        }
+
+        return $types;
     }
 
     private function applyFilters(array $entries): array

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Services\Auditoria\AuditEntryProjector;
 use Database\Factories\JustifiedAbsenceFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -39,6 +40,11 @@ class JustifiedAbsence extends Model
             'rate_minutes' => 'array',
             'metadata' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(fn (self $absence) => app(AuditEntryProjector::class)->projectMetadata($absence));
     }
 
     public function company(): BelongsTo

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -49,6 +50,8 @@ class RawMark extends Model
 
     protected static function booted(): void
     {
+        static::saved(fn (self $rawMark) => app(AuditEntryProjector::class)->projectMetadata($rawMark));
+
         static::updating(function (self $rawMark): void {
             if ($rawMark->isDirty(self::IMMUTABLE_EVIDENCE_FIELDS)) {
                 throw new LogicException('Attendance source evidence is immutable after creation.');

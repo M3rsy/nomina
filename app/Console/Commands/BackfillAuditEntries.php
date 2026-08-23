@@ -5,8 +5,11 @@ namespace App\Console\Commands;
 use App\Models\AttendanceException;
 use App\Models\EmployeeRevision;
 use App\Models\EmployeeScheduleAssignment;
+use App\Models\JustifiedAbsence;
 use App\Models\LoginAttempt;
 use App\Models\OvertimeDecision;
+use App\Models\PayPeriod;
+use App\Models\RawMark;
 use App\Services\Auditoria\AuditEntryProjector;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
@@ -75,6 +78,36 @@ class BackfillAuditEntries extends Command
                 foreach ($exceptions as $exception) {
                     $projector->project($exception);
                     $count++;
+                }
+            });
+
+        RawMark::withoutCompanyScope()
+            ->when($companyId !== null, fn ($query) => $query->where('company_id', $companyId))
+            ->whereNotNull('metadata')
+            ->orderBy('id')
+            ->chunkById(500, function ($rawMarks) use ($projector, &$count): void {
+                foreach ($rawMarks as $rawMark) {
+                    $count += $projector->projectMetadata($rawMark);
+                }
+            });
+
+        JustifiedAbsence::withoutCompanyScope()
+            ->when($companyId !== null, fn ($query) => $query->where('company_id', $companyId))
+            ->whereNotNull('metadata')
+            ->orderBy('id')
+            ->chunkById(500, function ($absences) use ($projector, &$count): void {
+                foreach ($absences as $absence) {
+                    $count += $projector->projectMetadata($absence);
+                }
+            });
+
+        PayPeriod::withoutCompanyScope()
+            ->when($companyId !== null, fn ($query) => $query->where('company_id', $companyId))
+            ->whereNotNull('metadata')
+            ->orderBy('id')
+            ->chunkById(500, function ($payPeriods) use ($projector, &$count): void {
+                foreach ($payPeriods as $payPeriod) {
+                    $count += $projector->projectMetadata($payPeriod);
                 }
             });
 

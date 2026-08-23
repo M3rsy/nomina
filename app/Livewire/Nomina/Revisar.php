@@ -25,6 +25,7 @@ use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Attendance\VariationAcknowledgementRecorder;
 use App\Services\Payroll\CreateEmployeeFromUnknownMark;
 use App\Services\Payroll\PayPeriodReopener;
+use App\Services\Payroll\PayrollReviewProjection;
 use App\Services\Payroll\PayrollRunRequester;
 use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
@@ -273,8 +274,13 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $filteredOvertimeRows = $this->filteredOvertimeRows($attendanceReviews);
-        $overtimeRenderData = $this->overtimeRenderData($filteredOvertimeRows, $this->getPage('overtimePage'));
+        $reviewProjection = $this->projectedReviewData();
+        $overtimeRenderData = $reviewProjection['overtime'] ?? $this->overtimeRenderData(
+            $this->filteredOvertimeRows($attendanceReviews),
+            $this->getPage('overtimePage'),
+        );
+        $deficitReviews = $reviewProjection['deficits'] ?? $attendanceReviews
+            ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty());
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -289,8 +295,7 @@ class Revisar extends Component
             'pendingOvertimeMatchCount' => $overtimeRenderData['pendingCount'],
             'variationReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->variations->isNotEmpty()),
-            'deficitReviews' => $attendanceReviews
-                ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()),
+            'deficitReviews' => $deficitReviews,
         ]);
     }
 
@@ -1845,6 +1850,32 @@ class Revisar extends Component
             'rows' => $rows,
             'groups' => $groups,
             'pendingCount' => $pendingCount,
+        ];
+    }
+
+    private function projectedReviewData(): ?array
+    {
+        if ($this->uploaded_file_id !== null) {
+            return null;
+        }
+
+        $projection = app(PayrollReviewProjection::class);
+        $generation = $projection->freshGeneration($this->payPeriod);
+
+        if ($generation === null) {
+            return null;
+        }
+
+        $search = mb_strtolower(trim($this->overtimeSearch));
+
+        return [
+            'overtime' => $projection->overtimeRows($this->payPeriod, $generation, [
+                'search' => $search,
+                'status' => $this->overtimeStatus,
+                'date' => $this->overtimeDate,
+                'rate' => $this->overtimeRate,
+            ], $this->getPage('overtimePage')),
+            'deficits' => $projection->deficitReviews($this->payPeriod, $generation),
         ];
     }
 

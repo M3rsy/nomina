@@ -307,6 +307,34 @@ test('audit backfill command is idempotent for projected source tables', functio
     expect(AuditLogEntry::query()->where('type', 'login_attempt')->count())->toBe(1);
 });
 
+test('audit backfill command is idempotent for metadata backed audit events', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create();
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'metadata' => [
+            'approved_at' => '2026-08-01 12:00:00',
+            'approved_by' => $admin->id,
+        ],
+    ]);
+    RawMark::factory()->forCompany($company)->forPayPeriod($period)->create([
+        'metadata' => ['revisions' => [[
+            'action' => 'edit_event_at',
+            'user_id' => $admin->id,
+            'old_event_at' => '2026-08-01 06:00:00',
+            'new_event_at' => '2026-08-01 06:10:00',
+            'reason' => 'Clock drift',
+            'at' => '2026-08-01 12:30:00',
+        ]]],
+    ]);
+    AuditLogEntry::query()->delete();
+
+    Artisan::call('audit:backfill', ['--company-id' => $company->id]);
+    Artisan::call('audit:backfill', ['--company-id' => $company->id]);
+
+    expect(AuditLogEntry::query()->whereIn('type', ['mark_revision', 'payroll_state'])->count())->toBe(2)
+        ->and(AuditLogEntry::query()->where('type', 'mark_revision')->sole()->source_revision)->toHaveLength(64);
+});
+
 test('raw mark revisions appear in audit feed', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->create(['company_id' => $company->id]);
