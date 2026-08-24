@@ -44,29 +44,30 @@
             <div class="text-xl font-bold">{{ $summary['total_employees'] }}</div>
         </div>
         <div class="bg-white p-4 rounded shadow">
-            <div class="text-sm text-gray-500">Registros</div>
-            <div class="text-xl font-bold">{{ $summary['total_records'] }}</div>
+            <div class="text-sm text-gray-500">Días</div>
+            <div class="text-xl font-bold">{{ $summary['total_days'] }}</div>
         </div>
         <div class="bg-white p-4 rounded shadow">
             <div class="text-sm text-gray-500">Horas ordinarias</div>
-            <div class="text-xl font-bold">{{ number_format($summary['ordinary_hours'], 2) }}</div>
+            <div class="text-xl font-bold">{{ number_format($summary['ordinary_minutes'] / 60, 2) }}</div>
         </div>
         <div class="bg-white p-4 rounded shadow">
             <div class="text-sm text-gray-500">Horas extras</div>
             <div class="text-xl font-bold">
-                {{ number_format($summary['extra_25_hours'] + $summary['extra_50_hours'] + $summary['extra_75_hours'] + $summary['extra_100_hours'], 2) }}
+                {{ number_format(($summary['extra_25_minutes'] + $summary['extra_50_minutes'] + $summary['extra_75_minutes'] + $summary['extra_100_minutes']) / 60, 2) }}
             </div>
         </div>
     </div>
 
-    <div class="mb-4">
-        <label for="employee_id" class="block text-sm font-medium text-gray-700">Filtrar por empleado</label>
-        <select wire:model.live="employee_id" id="employee_id" class="mt-1 block w-full md:w-1/3 rounded border-gray-300 shadow-sm">
-            <option value="">Todos</option>
-            @foreach ($employees as $employee)
-                <option value="{{ $employee->id }}">{{ $employee->full_name }} ({{ $employee->external_id }})</option>
-            @endforeach
-        </select>
+    <div class="mb-4 flex gap-4">
+        <label class="block text-sm font-medium text-gray-700">Empleado
+            <input wire:model.live="employee_id" type="number" min="1" class="mt-1 block rounded border-gray-300 shadow-sm" />
+        </label>
+        <label class="block text-sm font-medium text-gray-700">Estado
+            <select wire:model.live="absence" class="mt-1 block rounded border-gray-300 shadow-sm">
+                <option value="">Todos</option><option value="worked">Con jornada</option><option value="absence">Ausencias</option>
+            </select>
+        </label>
     </div>
 
     <div class="overflow-x-auto bg-white rounded shadow">
@@ -90,8 +91,8 @@
             <tbody class="divide-y divide-gray-200">
                 @foreach ($results as $result)
                     <tr>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->employee?->external_id }}</td>
-                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->employee?->full_name }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->employee_external_id }}</td>
+                        <td class="px-4 py-2 whitespace-nowrap">{{ $result->employee_name }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->date->format('d/m/Y') }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->entry_at?->format('d/m/Y h:i A') }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ $result->exit_at?->format('d/m/Y h:i A') }}</td>
@@ -114,11 +115,18 @@
                                 <span class="text-green-600">Normal</span>
                             @endif
                         </td>
+                        <td class="px-4 py-2"><button wire:click="showEvidence({{ $result->id }})" class="text-indigo-700 underline">Evidencia</button></td>
                     </tr>
                 @endforeach
             </tbody>
         </table>
     </div>
+
+    @if ($evidence)
+        <section class="mt-4 rounded bg-white p-4 shadow"><h2 class="font-bold">Evidencia congelada</h2>
+            <pre class="mt-2 overflow-auto text-xs">{{ json_encode($evidence->day_snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+        </section>
+    @endif
 
     <div class="mt-4">
         {{ $results->links() }}

@@ -22,12 +22,15 @@ function setupPayPeriodForApproval(): array
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
         'status' => 'processed',
+        'current_result_generation' => 1,
     ]);
     $employee = Employee::factory()->forCompany($company)->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
     PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
         'date' => '2026-01-05',
+        'day_snapshot' => ['evidence' => 'frozen'],
+        'employee_name' => 'Frozen result',
     ]);
 
     return [$company, $payPeriod, $employee, $admin];
@@ -91,6 +94,26 @@ test('approve action is displayed without a confirmation modal', function () {
         ->assertDontSee('Confirmar aprobación');
 
     expect($payPeriod->fresh()->status)->toBe('processed');
+});
+
+test('results review reads only the current frozen generation and exposes evidence without mutations', function () {
+    [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
+    $current = PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->sole();
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2026-01-06',
+        'result_generation' => 0,
+        'employee_name' => 'Stale result',
+    ]);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
+        ->assertSee('Frozen result')
+        ->assertDontSee('Stale result')
+        ->call('showEvidence', $current->id)
+        ->assertSee('Evidencia congelada')
+        ->assertSee('frozen');
 });
 
 test('approve is blocked when pay period is already approved or exported', function (string $status) {

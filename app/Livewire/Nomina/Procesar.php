@@ -2,9 +2,8 @@
 
 namespace App\Livewire\Nomina;
 
-use App\Models\Employee;
 use App\Models\PayPeriod;
-use App\Models\PayrollResult;
+use App\Services\Payroll\PayrollResultsReviewProjection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -22,6 +21,11 @@ class Procesar extends Component
 
     #[Url]
     public ?int $employee_id = null;
+
+    #[Url]
+    public ?string $absence = null;
+
+    public ?int $evidenceResultId = null;
 
     public bool $locked = false;
 
@@ -44,16 +48,12 @@ class Procesar extends Component
 
     public function render()
     {
-        $results = $this->queryResults();
-        $summary = $this->summary();
-        $employees = Employee::where('company_id', $this->payPeriod->company_id)
-            ->orderBy('first_name')
-            ->get();
+        $projection = app(PayrollResultsReviewProjection::class);
 
         return view('livewire.nomina.procesar', [
-            'results' => $results,
-            'summary' => $summary,
-            'employees' => $employees,
+            'results' => $projection->page($this->payPeriod, $this->employee_id, $this->absence),
+            'summary' => $projection->summary($this->payPeriod, $this->employee_id, $this->absence),
+            'evidence' => $projection->evidence($this->payPeriod, $this->evidenceResultId),
             'isCancelled' => $this->isCancelled(),
             'canApprove' => $this->canApprove(),
             'canExport' => $this->canExport(),
@@ -63,6 +63,16 @@ class Procesar extends Component
     public function updatingEmployeeId(): void
     {
         $this->resetPage();
+    }
+
+    public function updatingAbsence(): void
+    {
+        $this->resetPage();
+    }
+
+    public function showEvidence(int $resultId): void
+    {
+        $this->evidenceResultId = $resultId;
     }
 
     public function approve(): void
@@ -114,44 +124,5 @@ class Procesar extends Component
     public function isCancelled(): bool
     {
         return $this->payPeriod->status === 'cancelled';
-    }
-
-    private function queryResults()
-    {
-        return PayrollResult::withoutCompanyScope()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->with('employee')
-            ->when($this->employee_id, function ($query) {
-                $query->where('employee_id', $this->employee_id);
-            })
-            ->orderBy('employee_id')
-            ->orderBy('date')
-            ->paginate(50);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function summary(): array
-    {
-        $query = PayrollResult::withoutCompanyScope()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->when($this->employee_id, function ($query) {
-                $query->where('employee_id', $this->employee_id);
-            });
-
-        $totals = (clone $query)->selectRaw(
-            'count(*) as total_records, count(distinct employee_id) as total_employees, sum(ordinary_minutes) as ordinary_minutes, sum(extra_25_minutes) as extra_25_minutes, sum(extra_50_minutes) as extra_50_minutes, sum(extra_75_minutes) as extra_75_minutes, sum(extra_100_minutes) as extra_100_minutes'
-        )->first();
-
-        return [
-            'total_employees' => (int) ($totals?->total_employees ?? 0),
-            'total_records' => (int) ($totals?->total_records ?? 0),
-            'ordinary_hours' => (int) ($totals?->ordinary_minutes ?? 0) / 60,
-            'extra_25_hours' => (int) ($totals?->extra_25_minutes ?? 0) / 60,
-            'extra_50_hours' => (int) ($totals?->extra_50_minutes ?? 0) / 60,
-            'extra_75_hours' => (int) ($totals?->extra_75_minutes ?? 0) / 60,
-            'extra_100_hours' => (int) ($totals?->extra_100_minutes ?? 0) / 60,
-        ];
     }
 }
