@@ -13,8 +13,8 @@
                 </span>
             @else
                 @if ($canApprove)
-                    <x-ui.loading-button wire:click="openApproveConfirm" target="openApproveConfirm" loading-label="Abriendo…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-                        Aprobar
+                    <x-ui.loading-button wire:click="approve" target="approve" loading-label="Aprobando…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+                        Aprobar nómina
                     </x-ui.loading-button>
                 @endif
                 @if ($canExport)
@@ -123,23 +123,4 @@
     <div class="mt-4">
         {{ $results->links() }}
     </div>
-
-    @if ($showApproveConfirm)
-        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50" wire:click.self="closeApproveConfirm">
-            <div class="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-                <h2 class="text-lg font-bold mb-4">Confirmar aprobación</h2>
-                <p class="mb-6 text-gray-700">
-                    Al aprobar la nómina no podrá modificar los registros directamente. Cualquier corrección posterior requerirá un proceso controlado y auditado.
-                </p>
-                <div class="flex justify-end gap-2">
-                    <button wire:click="closeApproveConfirm" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
-                        Cancelar
-                    </button>
-                    <x-ui.loading-button wire:click="approve" target="approve" loading-label="Aprobando…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-                        Confirmar aprobación
-                    </x-ui.loading-button>
-                </div>
-            </div>
-        </div>
-    @endif
 </div>

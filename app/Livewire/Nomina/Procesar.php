@@ -23,8 +23,6 @@ class Procesar extends Component
     #[Url]
     public ?int $employee_id = null;
 
-    public bool $showApproveConfirm = false;
-
     public bool $locked = false;
 
     public function mount(PayPeriod $payPeriod): void
@@ -67,20 +65,6 @@ class Procesar extends Component
         $this->resetPage();
     }
 
-    public function openApproveConfirm(): void
-    {
-        if ($this->payPeriod->status !== 'processed') {
-            return;
-        }
-
-        $this->showApproveConfirm = true;
-    }
-
-    public function closeApproveConfirm(): void
-    {
-        $this->showApproveConfirm = false;
-    }
-
     public function approve(): void
     {
         Gate::authorize('payroll.approve');
@@ -108,14 +92,11 @@ class Procesar extends Component
 
         $this->payPeriod = $freshPeriod;
         $this->locked = in_array($freshPeriod->status, ['approved', 'exported', 'cancelled'], true);
-        $this->showApproveConfirm = false;
-
         if (! $approved) {
             return;
         }
 
         session()->flash('success', 'Nómina aprobada correctamente.');
-        $this->dispatch('close-approve-modal');
     }
 
     public function canExport(): bool
