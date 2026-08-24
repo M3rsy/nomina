@@ -6,6 +6,7 @@ use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
+use App\Models\PayrollRunTelemetry;
 use App\Models\User;
 use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollRunRequester;
@@ -159,6 +160,12 @@ test('one progress retry action creates and follows the replacement run', functi
         ->set('status', 'valid')
         ->set('overtimeStatus', 'rejected');
     $first->markFailed('sensitive database credentials');
+    PayrollRunTelemetry::create([
+        'payroll_run_id' => $first->id,
+        'event' => 'failed',
+        'code' => 'attendance_review_blocked',
+        'occurred_at' => now(),
+    ]);
 
     Livewire::test(Revisar::class, ['payPeriod' => $period])
         ->assertSet('activePayrollRunId', $first->id)
@@ -167,6 +174,7 @@ test('one progress retry action creates and follows the replacement run', functi
 
     $progress = Livewire::test(PayrollRunProgress::class, ['payPeriod' => $period, 'runId' => $first->id])
         ->assertSee('No se pudo procesar la nómina.')
+        ->assertSee('La revisión de asistencia tiene bloqueadores pendientes.')
         ->assertSee("Referencia #{$first->id}")
         ->assertSee('Intentar nuevamente')
         ->assertSeeHtml('wire:target="retry"')
@@ -197,6 +205,10 @@ test('one progress retry action creates and follows the replacement run', functi
     expect(PayrollRun::withoutCompanyScope()->count())->toBe(2)
         ->and($replacement->request_key)
         ->not->toBe($first->request_key);
+    expect(PayrollRunTelemetry::query()
+        ->where('payroll_run_id', $replacement->id)
+        ->where('event', 'queued')
+        ->value('previous_run_id'))->toBe($first->id);
 
     Queue::assertPushed(
         ProcessPayrollRun::class,

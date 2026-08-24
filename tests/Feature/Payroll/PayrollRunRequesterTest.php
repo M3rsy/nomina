@@ -3,6 +3,7 @@
 use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
+use App\Models\PayrollRunTelemetry;
 use App\Models\User;
 use App\Services\Payroll\PayrollRunRequester;
 use Database\Seeders\PermissionRoleSeeder;
@@ -38,6 +39,12 @@ test('queues a payroll run for a ready pay period', function () {
         ->and($run->finished_at)->toBeNull()
         ->and($run->last_error)->toBeNull()
         ->and(PayrollRun::withoutCompanyScope()->count())->toBe(1);
+
+    $telemetry = PayrollRunTelemetry::query()->sole();
+    expect($telemetry->event)->toBe('queued')
+        ->and($telemetry->code)->toBeNull()
+        ->and($telemetry->previous_run_id)->toBeNull()
+        ->and($telemetry->occurred_at)->not->toBeNull();
 });
 
 test('returns the active run instead of creating a duplicate', function () {

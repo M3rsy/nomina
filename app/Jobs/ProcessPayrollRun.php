@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
 use App\Services\Payroll\PayrollProcessor;
+use App\Services\Payroll\PayrollRunTelemetryRecorder;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -39,9 +40,10 @@ final class ProcessPayrollRun implements ShouldQueue
 
     public function handle(PayrollProcessor $processor): void
     {
+        $telemetry = app(PayrollRunTelemetryRecorder::class);
         $identity = $this->identity();
 
-        if ($identity === null || ! $this->begin($identity)) {
+        if ($identity === null || ! $this->begin($identity, $telemetry)) {
             return;
         }
 
@@ -50,7 +52,7 @@ final class ProcessPayrollRun implements ShouldQueue
                 ->where('company_id', $identity->company_id)
                 ->findOrFail($identity->pay_period_id);
             $processor->processPayPeriod($period);
-            $this->complete($identity);
+            $this->complete($identity, $telemetry);
         } catch (Throwable $exception) {
             $this->rememberFailure($identity, $exception);
             throw $exception;
@@ -70,6 +72,7 @@ final class ProcessPayrollRun implements ShouldQueue
 
             if ($run->isActive()) {
                 $run->markFailed($run->last_error ?: $this->errorMessage($exception));
+                app(PayrollRunTelemetryRecorder::class)->failed($run, $exception);
             }
         });
     }
@@ -83,9 +86,9 @@ final class ProcessPayrollRun implements ShouldQueue
             ->first();
     }
 
-    private function begin(stdClass $identity): bool
+    private function begin(stdClass $identity, PayrollRunTelemetryRecorder $telemetry): bool
     {
-        return DB::transaction(function () use ($identity): bool {
+        return DB::transaction(function () use ($identity, $telemetry): bool {
             [$period, $run] = $this->lockedContext($identity);
 
             if (! $run->isActive()) {
@@ -94,29 +97,33 @@ final class ProcessPayrollRun implements ShouldQueue
 
             if ($period->trashed()) {
                 $run->markFailed('Pay period is no longer available.');
+                $telemetry->failedWithCode($run, 'period_unavailable');
 
                 return false;
             }
 
             if ($run->status === PayrollRun::PROCESSING && $period->status === 'processed') {
                 $run->markCompleted();
+                $telemetry->completed($run);
 
                 return false;
             }
 
             if ($run->status === PayrollRun::QUEUED) {
                 $run->markProcessing();
+                $telemetry->started($run);
             }
 
             return true;
         });
     }
 
-    private function complete(stdClass $identity): void
+    private function complete(stdClass $identity, PayrollRunTelemetryRecorder $telemetry): void
     {
-        DB::transaction(function () use ($identity): void {
+        DB::transaction(function () use ($identity, $telemetry): void {
             [, $run] = $this->lockedContext($identity);
             $run->markCompleted();
+            $telemetry->completed($run);
         });
     }
 

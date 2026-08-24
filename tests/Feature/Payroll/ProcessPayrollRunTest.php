@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\PayrollRun;
+use App\Models\PayrollRunTelemetry;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
@@ -80,6 +81,8 @@ test('processes a queued run through the payroll processor', function () {
 
     expect($period->fresh()->status)->toBe('processed')
         ->and($run->fresh()->status)->toBe('completed')
+        ->and(PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->pluck('event')->all())
+        ->toBe(['queued', 'started', 'completed'])
         ->and($results)->not->toBeEmpty()
         ->and($results->every(fn (PayrollResult $result): bool => is_array($result->day_snapshot)
             && is_string($result->snapshot_hash) && strlen($result->snapshot_hash) === 64))->toBeTrue();
@@ -200,7 +203,9 @@ test('retries infrastructure exceptions before recording terminal failure', func
     $job->failed(new RuntimeException('database unavailable'));
 
     expect($run->fresh()->status)->toBe('failed')
-        ->and($run->fresh()->last_error)->toBe('database unavailable');
+        ->and($run->fresh()->last_error)->toBe('database unavailable')
+        ->and(PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->latest('id')->value('code'))
+        ->toBe('processing_failed');
 });
 
 test('records a worker timeout as terminal failure', function () {

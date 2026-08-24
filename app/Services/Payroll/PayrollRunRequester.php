@@ -15,14 +15,16 @@ use Illuminate\Validation\ValidationException;
 
 final class PayrollRunRequester
 {
-    public function request(PayPeriod $period, User $actor, string $requestKey): PayrollRun
+    public function __construct(private PayrollRunTelemetryRecorder $telemetry) {}
+
+    public function request(PayPeriod $period, User $actor, string $requestKey, ?PayrollRun $previousRun = null): PayrollRun
     {
         if (! Str::isUuid($requestKey)) {
             throw ValidationException::withMessages(['request_key' => 'The request key must be a UUID.']);
         }
 
         try {
-            $run = DB::transaction(function () use ($period, $actor, $requestKey): PayrollRun {
+            $run = DB::transaction(function () use ($period, $actor, $requestKey, $previousRun): PayrollRun {
                 $company = Company::query()->whereKey($period->company_id)->lockForUpdate()->firstOrFail();
                 $period = PayPeriod::withoutCompanyScope()
                     ->withTrashed()
@@ -49,13 +51,16 @@ final class PayrollRunRequester
                     ]);
                 }
 
-                return PayrollRun::withoutCompanyScope()->create([
+                $run = PayrollRun::withoutCompanyScope()->create([
                     'request_key' => $requestKey,
                     'company_id' => $period->company_id,
                     'pay_period_id' => $period->id,
                     'requested_by' => $actor->id,
                     'status' => PayrollRun::QUEUED,
                 ]);
+                $this->telemetry->queued($run, $previousRun);
+
+                return $run;
             });
         } catch (UniqueConstraintViolationException $exception) {
             $run = $this->priorRun($requestKey, $period)

@@ -20,6 +20,11 @@
                 </p>
             @endif
             @if ($status === \App\Models\PayrollRun::FAILED)
+                <p class="mt-2 text-xs text-indigo-700" role="status">
+                    {{ $failureCode === 'attendance_review_blocked'
+                        ? 'La revisión de asistencia tiene bloqueadores pendientes.'
+                        : 'La ejecución no pudo completarse.' }}
+                </p>
                 <x-ui.loading-button
                     type="button"
                     wire:click="retry"
