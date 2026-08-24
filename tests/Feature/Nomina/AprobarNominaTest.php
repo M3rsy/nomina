@@ -40,7 +40,6 @@ test('approve changes pay period status from processed to approved', function ()
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
-        ->set('showApproveConfirm', true)
         ->call('approve')
         ->assertHasNoErrors();
 
@@ -81,15 +80,15 @@ test('approve cannot overwrite a period reopened before the transition lock', fu
         ->and($payPeriod->fresh()->payrollResults()->count())->toBe(1);
 });
 
-test('approve opens confirmation modal first', function () {
+test('approve action is displayed without a confirmation modal', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
-        ->call('openApproveConfirm')
-        ->assertSet('showApproveConfirm', true);
+        ->assertSee('Aprobar nómina')
+        ->assertDontSee('Confirmar aprobación');
 
     expect($payPeriod->fresh()->status)->toBe('processed');
 });
@@ -131,7 +130,6 @@ test('locked is true after approving', function () {
     app(CurrentCompany::class)->set($company);
 
     $component = Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
-        ->set('showApproveConfirm', true)
         ->call('approve');
 
     $component->assertSet('locked', true);

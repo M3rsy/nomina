@@ -3,7 +3,7 @@
 test('operational commands expose scoped loading feedback while passive controls stay quiet', function () {
     $contracts = [
         'nomina/index.blade.php' => ['store'],
-        'nomina/procesar.blade.php' => ['openApproveConfirm', 'approve'],
+        'nomina/procesar.blade.php' => ['approve'],
         'respaldos/index.blade.php' => ['generate', 'confirmRestore(', 'restore'],
         'jornadas/index.blade.php' => ['confirmHistoricalSave', 'openCreateProfile', 'openRetireProfile(', 'createProfile', 'retireProfile', 'activateGeneralProfile', 'save'],
         'feriados/index.blade.php' => ['toggle(', 'edit(', 'confirmDelete(', 'save', 'delete'],
