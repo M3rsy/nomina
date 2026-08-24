@@ -4,6 +4,7 @@ namespace App\Livewire\Nomina;
 
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
+use App\Models\PayrollRunTelemetry;
 use App\Services\Payroll\PayrollRunRequester;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
@@ -21,6 +22,8 @@ final class PayrollRunProgress extends Component
     public ?string $status = null;
 
     public bool $delayed = false;
+
+    public ?string $failureCode = null;
 
     #[Locked]
     public bool $terminalNotified = false;
@@ -49,6 +52,7 @@ final class PayrollRunProgress extends Component
             $this->runId = null;
             $this->status = null;
             $this->delayed = false;
+            $this->failureCode = null;
 
             return;
         }
@@ -56,6 +60,10 @@ final class PayrollRunProgress extends Component
         $this->status = $run->status;
         $this->delayed = $run->status === PayrollRun::QUEUED
             && $run->created_at->lte(now()->subSeconds(15));
+        $this->failureCode = $run->status === PayrollRun::FAILED
+            ? PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->where('event', PayrollRunTelemetry::FAILED)
+                ->latest('id')->value('code')
+            : null;
         if (! $run->isActive() && ! $this->terminalNotified) {
             $this->terminalNotified = true;
             $this->dispatch('payroll-run-terminal', runId: $run->id);
@@ -84,11 +92,13 @@ final class PayrollRunProgress extends Component
             $this->payPeriod->fresh(),
             Auth::user(),
             $this->retryRequestKey($failedRun),
+            $failedRun,
         );
 
         $this->runId = $run->id;
         $this->status = $run->status;
         $this->delayed = false;
+        $this->failureCode = null;
         $this->terminalNotified = false;
         $this->dispatch('payroll-run-retried', failedRunId: $failedRunId, runId: $run->id);
     }

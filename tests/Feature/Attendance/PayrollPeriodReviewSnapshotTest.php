@@ -42,7 +42,7 @@ test('period review excludes employee dates before their hire date', function ()
 
 test('employee scoped review evaluates only the supplied period employees', function () {
     $company = Company::factory()->create();
-    $included = Employee::factory()->forCompany($company)->create();
+    $included = Employee::factory()->forCompany($company)->create(['hired_at' => null]);
     Employee::factory()->forCompany($company)->create();
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-05',
