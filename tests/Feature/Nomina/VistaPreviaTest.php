@@ -22,6 +22,7 @@ function setupProcessedPayPeriod(): array
         'start_date' => '2026-01-05',
         'end_date' => '2026-01-11',
         'status' => 'processed',
+        'current_result_generation' => 1,
     ]);
     $employee = Employee::factory()->forCompany($company)->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -61,7 +62,7 @@ test('procesar page renders payroll results grouped by employee', function () {
         });
 });
 
-test('procesar summary card shows totals for employees and hours', function () {
+test('procesar summary card shows totals for employees and minutes', function () {
     [$company, $payPeriod, $employee, $admin] = setupProcessedPayPeriod();
 
     PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
@@ -86,9 +87,9 @@ test('procesar summary card shows totals for employees and hours', function () {
         ->assertViewHas('summary', function ($summary) {
             expect($summary)->toMatchArray([
                 'total_employees' => 1,
-                'total_records' => 2,
-                'ordinary_hours' => 2 / 60,
-                'extra_25_hours' => 2 / 60,
+                'total_days' => 2,
+                'ordinary_minutes' => 2,
+                'extra_25_minutes' => 2,
             ]);
 
             return true;
