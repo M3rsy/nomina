@@ -57,6 +57,7 @@ final class PayrollRunRequester
                     'pay_period_id' => $period->id,
                     'requested_by' => $actor->id,
                     'status' => PayrollRun::QUEUED,
+                    'lease_expires_at' => now()->addMinutes(5),
                 ]);
                 $this->telemetry->queued($run, $previousRun);
 

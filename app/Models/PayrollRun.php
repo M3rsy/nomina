@@ -28,6 +28,7 @@ final class PayrollRun extends Model
         'requested_by',
         'status',
         'started_at',
+        'lease_expires_at',
         'finished_at',
         'last_error',
     ];
@@ -37,6 +38,7 @@ final class PayrollRun extends Model
         return [
             'active_key' => 'boolean',
             'started_at' => 'immutable_datetime',
+            'lease_expires_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
         ];
     }
@@ -65,6 +67,7 @@ final class PayrollRun extends Model
     {
         $this->transition([self::QUEUED], self::PROCESSING, [
             'started_at' => $this->started_at ?? now(),
+            'lease_expires_at' => now()->addMinutes(5),
             'last_error' => null,
         ]);
     }
@@ -84,6 +87,7 @@ final class PayrollRun extends Model
         $this->transition($from, $status, [
             'active_key' => null,
             'finished_at' => now(),
+            'lease_expires_at' => null,
             'last_error' => $error,
         ]);
     }

@@ -91,6 +91,7 @@ final readonly class StartPayrollProcessing
                     'pay_period_id' => $lockedPeriod->id,
                     'requested_by' => $lockedActor->id,
                     'status' => PayrollRun::QUEUED,
+                    'lease_expires_at' => now()->addMinutes(5),
                 ]);
                 $created = true;
 
