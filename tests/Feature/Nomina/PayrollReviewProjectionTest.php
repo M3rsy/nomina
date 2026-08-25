@@ -3,6 +3,7 @@
 use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\Holiday;
 use App\Models\PayPeriod;
 use App\Models\PayrollReviewEntry;
 use App\Models\RawMark;
@@ -12,6 +13,7 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\PayrollReviewProjection;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Artisan;
 use Livewire\Livewire;
@@ -52,6 +54,25 @@ test('payroll review screen falls back to legacy calculation when projection is 
         ->assertSee('Salida posterior');
 });
 
+test('payroll review projection generation includes assignment publication and holiday context', function () {
+    $context = payrollReviewProjectionFixture();
+    $projection = app(PayrollReviewProjection::class);
+    $baseline = $projection->generation($context['period']);
+
+    $assignment = $context['employee']->scheduleAssignments()->sole();
+    $assignment->update(['reason' => 'Updated jornada assignment']);
+    $afterAssignment = $projection->generation($context['period']);
+    $publication = $context['profile']->publications()->sole();
+    $publication->update(['payroll_policy_key' => 'duration-first-v2']);
+    $afterPublication = $projection->generation($context['period']);
+    Holiday::factory()->forCompany($context['company'])->create(['date' => '2026-07-20']);
+
+    expect($projection->generation($context['period']))->not->toBe($afterPublication)
+        ->and($afterPublication)->not->toBe($afterAssignment)
+        ->and($afterAssignment)->not->toBe($baseline)
+        ->and($projection->generation($context['period']))->toBe($projection->generation($context['period']));
+});
+
 function payrollReviewProjectionFixture(): array
 {
     $company = Company::factory()->create();
@@ -86,5 +107,5 @@ function payrollReviewProjectionFixture(): array
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     app(CurrentCompany::class)->set($company);
 
-    return compact('company', 'employee', 'period', 'actor');
+    return compact('company', 'employee', 'profile', 'period', 'actor');
 }
