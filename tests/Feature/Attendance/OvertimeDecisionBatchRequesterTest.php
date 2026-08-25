@@ -2,6 +2,7 @@
 
 use App\Jobs\ProcessOvertimeDecisionBatch;
 use App\Livewire\Nomina\OvertimeBatchProgress;
+use App\Livewire\Nomina\OvertimeReviewPanel;
 use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
@@ -466,6 +467,40 @@ test('changing overtime filters clears all-match mode and clear returns to subse
         ->call('selectCurrentOvertimePage');
 
     expect($component->get('selectedOvertimeCandidates'))->toHaveCount(1);
+});
+test('panel owns filtered overtime pagination and selection state', function () {
+    $context = batchRequestFixture();
+    foreach (range(1, 25) as $_) {
+        addBatchCandidate($context);
+    }
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(OvertimeReviewPanel::class, [
+        'payPeriod' => $context['period'],
+        'uploadedFileId' => $context['file']->id,
+    ])
+        ->set('paginators.overtimePage', 2)
+        ->call('selectCurrentOvertimePage')
+        ->assertCount('selectedOvertimeCandidates', 1)
+        ->call('selectAllFilteredOvertime')
+        ->assertSet('allFilteredOvertimeSelected', true)
+        ->set('overtimeRate', 'extra25')
+        ->assertSet('paginators.overtimePage', 1)
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->assertSet('selectedOvertimeCandidates', []);
+});
+test('panel refuses a foreign company before exposing overtime state', function () {
+    $context = batchRequestFixture();
+    $foreignCompany = Company::factory()->create();
+    $foreignActor = User::factory()->forCompany($foreignCompany)->create()->assignRole('company_admin');
+    app(CurrentCompany::class)->set($foreignCompany);
+    $this->actingAs($foreignActor);
+
+    Livewire::test(OvertimeReviewPanel::class, [
+        'payPeriod' => $context['period'],
+        'uploadedFileId' => $context['file']->id,
+    ])->assertForbidden();
 });
 test('rejects more than 500 filtered overtime matches without creating a batch', function () {
     $context = batchRequestFixture();
