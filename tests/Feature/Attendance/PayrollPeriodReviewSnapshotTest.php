@@ -59,7 +59,7 @@ test('employee scoped review evaluates only the supplied period employees', func
 
 test('period review can skip blockers for read only screens', function () {
     $company = Company::factory()->create();
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create(['hired_at' => null]);
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
     WorkSchedule::factory()->forProfile($profile)->create([
         'day_of_week' => 1,
