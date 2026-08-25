@@ -299,6 +299,10 @@ class PayrollStubExporter
     /** @param array<string, mixed> $row */
     private function assertPaymentIdentity(array $row): void
     {
+        if ($row['status'] === 'LEGACY') {
+            return;
+        }
+
         if (($row['employee_payment_code'] ?? '') === '' || ($row['employee_job_title'] ?? '') === '') {
             throw new \LogicException('Payroll result is missing payment code or job title.');
         }

@@ -18,15 +18,11 @@ final class PayrollReportingRowAdapter
             ];
         }
 
-        $employee = ($result->employee_external_id === null || $result->employee_name === null)
-            ? $result->employee()->withTrashed()->first()
-            : null;
-
         return [
-            'employee_external_id' => $result->employee_external_id ?? $employee?->external_id,
-            'employee_name' => $result->employee_name ?? $employee?->full_name,
-            'employee_payment_code' => $result->employee_payment_code ?? $employee?->payment_code,
-            'employee_job_title' => $result->employee_job_title ?? $employee?->job_title,
+            'employee_external_id' => $result->employee_external_id,
+            'employee_name' => $result->employee_name,
+            'employee_payment_code' => $result->employee_payment_code,
+            'employee_job_title' => $result->employee_job_title,
             'work_date' => $result->date?->toDateString(),
             'status' => 'LEGACY',
             'entry_at' => $result->entry_at,
