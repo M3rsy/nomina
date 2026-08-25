@@ -4,12 +4,15 @@ namespace App\Services\Payroll;
 
 use App\Models\AttendanceException;
 use App\Models\Employee;
+use App\Models\EmployeeScheduleAssignment;
+use App\Models\Holiday;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\PayrollReviewEntry;
 use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\PayrollShiftReview;
@@ -138,6 +141,10 @@ class PayrollReviewProjection
             'employees' => $this->tableVersion(Employee::withoutCompanyScope()->where('company_id', $payPeriod->company_id)),
             'profiles' => $this->tableVersion(WorkScheduleProfile::withoutCompanyScope()->where('company_id', $payPeriod->company_id)),
             'schedules' => $this->tableVersion(WorkSchedule::query()->where('company_id', $payPeriod->company_id)),
+            'assignments' => $this->tableVersion(EmployeeScheduleAssignment::withoutCompanyScope()
+                ->whereIn('employee_id', Employee::withoutCompanyScope()->where('company_id', $payPeriod->company_id)->select('id'))),
+            'publications' => $this->tableVersion(WorkScheduleProfilePublication::withoutCompanyScope()->where('company_id', $payPeriod->company_id)),
+            'holidays' => $this->tableVersion(Holiday::withoutCompanyScope()->where('company_id', $payPeriod->company_id)),
         ];
 
         return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
@@ -335,12 +342,12 @@ class PayrollReviewProjection
     private function tableVersion($query): array
     {
         $model = $query->getModel();
-        $table = $model->getTable();
+        $rows = (clone $query)->orderBy($model->getKeyName())->get()
+            ->map(fn ($row): array => $row->getAttributes())->all();
 
         return [
-            'count' => (clone $query)->count(),
-            'updated_at' => Schema::hasColumn($table, 'updated_at') ? (clone $query)->max('updated_at') : null,
-            'created_at' => Schema::hasColumn($table, 'created_at') ? (clone $query)->max('created_at') : null,
+            'count' => count($rows),
+            'fingerprint' => hash('sha256', json_encode($rows, JSON_THROW_ON_ERROR)),
         ];
     }
 }
