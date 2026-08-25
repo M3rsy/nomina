@@ -1185,6 +1185,24 @@ class Revisar extends Component
         session()->flash('success', $message);
     }
 
+    #[On('overtime-decision-submitted')]
+    public function saveOvertimeDecisionFromPanel(array $decision): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $this->overtimeDecisionEmployeeId = $decision['overtimeDecisionEmployeeId'] ?? null;
+        $this->overtimeDecisionWorkDate = $decision['overtimeDecisionWorkDate'] ?? '';
+        $this->overtimeCandidateKey = $decision['overtimeCandidateKey'] ?? '';
+        $this->overtimeDecision = $decision['overtimeDecision'] ?? '';
+        $this->overtimeDecisionReason = $decision['overtimeDecisionReason'] ?? '';
+        $this->overtimeApprovedStartsAt = $decision['overtimeApprovedStartsAt'] ?? '';
+        $this->overtimeApprovedEndsAt = $decision['overtimeApprovedEndsAt'] ?? '';
+        $this->saveOvertimeDecision();
+        $this->dispatch('overtime-decision-recorded')->to(OvertimeReviewPanel::class);
+    }
+
     public function openAttendanceException(
         int $employeeId,
         string $workDate,

@@ -502,6 +502,18 @@ test('panel refuses a foreign company before exposing overtime state', function 
         'uploadedFileId' => $context['file']->id,
     ])->assertForbidden();
 });
+test('panel owns the individual decision modal and emits its minimal command', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
+        ->call('openOvertimeDecision', $context['employee']->id, '2026-07-20', $context['candidate']->key, 'approved', '14:00 → 14:30 · 30 min', '2026-07-20T14:00', '2026-07-20T14:30')
+        ->assertSet('showOvertimeDecisionModal', true)
+        ->set('overtimeDecisionReason', 'Confirmed coverage')
+        ->call('submitOvertimeDecision')
+        ->assertDispatched('overtime-decision-submitted');
+});
 test('rejects more than 500 filtered overtime matches without creating a batch', function () {
     $context = batchRequestFixture();
     $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();

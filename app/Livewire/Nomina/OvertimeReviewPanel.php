@@ -2,11 +2,13 @@
 
 namespace App\Livewire\Nomina;
 
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Services\Payroll\OvertimeReviewReader;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -35,6 +37,24 @@ class OvertimeReviewPanel extends Component
     public array $selectedOvertimeCandidates = [];
 
     public bool $allFilteredOvertimeSelected = false;
+
+    public bool $showOvertimeDecisionModal = false;
+
+    public ?int $overtimeDecisionEmployeeId = null;
+
+    public string $overtimeDecisionWorkDate = '';
+
+    public string $overtimeCandidateKey = '';
+
+    public string $overtimeDecision = '';
+
+    public string $overtimeDecisionReason = '';
+
+    public string $overtimeCandidateSummary = '';
+
+    public string $overtimeApprovedStartsAt = '';
+
+    public string $overtimeApprovedEndsAt = '';
 
     public function mount(PayPeriod $payPeriod, ?int $uploadedFileId = null): void
     {
@@ -81,6 +101,53 @@ class OvertimeReviewPanel extends Component
     {
         $this->selectedOvertimeCandidates = [];
         $this->allFilteredOvertimeSelected = false;
+    }
+
+    public function openOvertimeDecision(int $employeeId, string $workDate, string $candidateKey, string $decision, string $summary, string $startsAt, string $endsAt): void
+    {
+        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL], true)) {
+            return;
+        }
+
+        $this->overtimeDecisionEmployeeId = $employeeId;
+        $this->overtimeDecisionWorkDate = $workDate;
+        $this->overtimeCandidateKey = $candidateKey;
+        $this->overtimeDecision = $decision;
+        $this->overtimeCandidateSummary = $summary;
+        $this->overtimeApprovedStartsAt = $startsAt;
+        $this->overtimeApprovedEndsAt = $endsAt;
+        $this->showOvertimeDecisionModal = true;
+    }
+
+    public function closeOvertimeDecisionModal(): void
+    {
+        $this->reset([
+            'showOvertimeDecisionModal', 'overtimeDecisionEmployeeId', 'overtimeDecisionWorkDate',
+            'overtimeCandidateKey', 'overtimeDecision', 'overtimeDecisionReason', 'overtimeCandidateSummary',
+            'overtimeApprovedStartsAt', 'overtimeApprovedEndsAt',
+        ]);
+        $this->resetErrorBag();
+    }
+
+    public function submitOvertimeDecision(): void
+    {
+        $data = $this->validate([
+            'overtimeDecisionEmployeeId' => ['required', 'integer'],
+            'overtimeDecisionWorkDate' => ['required', 'date_format:Y-m-d'],
+            'overtimeCandidateKey' => ['required', 'string', 'size:64'],
+            'overtimeDecision' => ['required', 'in:approved,rejected,partial'],
+            'overtimeDecisionReason' => ['required', 'string', 'max:500'],
+            'overtimeApprovedStartsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i'],
+            'overtimeApprovedEndsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i', 'after:overtimeApprovedStartsAt'],
+        ]);
+        $this->dispatch('overtime-decision-submitted', decision: $data);
+    }
+
+    #[On('overtime-decision-recorded')]
+    public function refreshAfterOvertimeDecision(): void
+    {
+        $this->closeOvertimeDecisionModal();
+        $this->resetPanelState();
     }
 
     public function render()
