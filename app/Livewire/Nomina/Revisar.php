@@ -27,12 +27,12 @@ use App\Services\Payroll\AssignRawMarkEmployeeCommand;
 use App\Services\Payroll\AuditedRawMarkRevision;
 use App\Services\Payroll\CreateEmployeeFromUnknownMarkCommand;
 use App\Services\Payroll\MarkRawMarkCorrectedCommand;
+use App\Services\Payroll\OvertimeReviewReader;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollReviewProjection;
 use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
-use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -276,12 +276,18 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $reviewProjection = $this->projectedReviewData();
-        $overtimeRenderData = $reviewProjection['overtime'] ?? $this->overtimeRenderData(
-            $this->filteredOvertimeRows($attendanceReviews),
+        $overtimeRenderData = app(OvertimeReviewReader::class)->forPeriod(
+            $this->payPeriod,
+            $this->uploaded_file_id,
+            [
+                'search' => mb_strtolower(trim($this->overtimeSearch)),
+                'status' => $this->overtimeStatus,
+                'date' => $this->overtimeDate,
+                'rate' => $this->overtimeRate,
+            ],
             $this->getPage('overtimePage'),
         );
-        $deficitReviews = $reviewProjection['deficits'] ?? $attendanceReviews
+        $deficitReviews = $this->projectedReviewData()['deficits'] ?? $attendanceReviews
             ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty());
 
         return view('livewire.nomina.revisar', [
@@ -1794,47 +1800,6 @@ class Revisar extends Component
             ->values();
     }
 
-    private function overtimeRenderData(Collection $filteredOvertimeRows, int $page): array
-    {
-        $perPage = 25;
-        $offset = max(0, ($page - 1) * $perPage);
-        $pageRows = [];
-        $pendingCount = 0;
-
-        foreach ($filteredOvertimeRows as $index => $row) {
-            if ($row['decision'] === null) {
-                $pendingCount++;
-            }
-
-            if ($index >= $offset && $index < $offset + $perPage) {
-                $pageRows[] = $row;
-            }
-        }
-
-        $pageRows = collect($pageRows);
-        $rows = new LengthAwarePaginator(
-            $pageRows,
-            $filteredOvertimeRows->count(),
-            $perPage,
-            $page,
-            ['path' => request()->url(), 'pageName' => 'overtimePage'],
-        );
-        $groups = $pageRows
-            ->groupBy(fn (array $row) => $row['review']->employee->id)
-            ->map(fn (Collection $rows) => [
-                'employee' => $rows->first()['review']->employee,
-                'rows' => $rows,
-                'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
-            ])
-            ->values();
-
-        return [
-            'rows' => $rows,
-            'groups' => $groups,
-            'pendingCount' => $pendingCount,
-        ];
-    }
-
     private function projectedReviewData(): ?array
     {
         if ($this->uploaded_file_id !== null) {
@@ -1848,15 +1813,7 @@ class Revisar extends Component
             return null;
         }
 
-        $search = mb_strtolower(trim($this->overtimeSearch));
-
         return [
-            'overtime' => $projection->overtimeRows($this->payPeriod, $generation, [
-                'search' => $search,
-                'status' => $this->overtimeStatus,
-                'date' => $this->overtimeDate,
-                'rate' => $this->overtimeRate,
-            ], $this->getPage('overtimePage')),
             'deficits' => $projection->deficitReviews($this->payPeriod, $generation),
         ];
     }

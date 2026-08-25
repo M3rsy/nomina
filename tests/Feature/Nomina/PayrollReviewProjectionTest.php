@@ -4,6 +4,7 @@ use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
+use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\PayrollReviewEntry;
 use App\Models\RawMark;
@@ -11,8 +12,11 @@ use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\OvertimeReviewReader;
 use App\Services\Payroll\PayrollReviewProjection;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Artisan;
@@ -52,6 +56,29 @@ test('payroll review screen falls back to legacy calculation when projection is 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
         ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
         ->assertSee('Salida posterior');
+});
+
+test('overtime review reader refreshes canonical rows after a decision and mark mutation', function () {
+    $context = payrollReviewProjectionFixture();
+    Artisan::call('payroll:review:rebuild', ['pay_period_id' => $context['period']->id]);
+    $reader = app(OvertimeReviewReader::class);
+    $filters = ['search' => '', 'status' => 'all', 'date' => '', 'rate' => ''];
+
+    expect($reader->forPeriod($context['period'], null, $filters, 1)['rows']->total())->toBe(1);
+
+    $candidate = app(AttendanceReviewQuery::class)
+        ->forPeriod($context['period'])->sole()->analysis->overtimeCandidates->sole();
+    app(OvertimeDecisionRecorder::class)->decide(
+        $context['period'], $context['employee'], '2026-07-20', $candidate->key,
+        OvertimeDecision::REJECTED, 'Fresh reader check', $context['actor'],
+    );
+
+    expect($reader->forPeriod($context['period'], null, $filters, 1)['rows']->sole()['decision']->decision)
+        ->toBe(OvertimeDecision::REJECTED);
+
+    RawMark::query()->where('pay_period_id', $context['period']->id)->latest('id')->firstOrFail()->update(['status' => 'deleted']);
+
+    expect($reader->forPeriod($context['period'], null, $filters, 1)['rows']->total())->toBe(0);
 });
 
 test('payroll review projection generation includes assignment publication and holiday context', function () {
