@@ -4,7 +4,11 @@ on:
     push:
         branches: [main, master]
     pull_request:
-        branches: [main, master]
+        branches:
+            - main
+            - master
+            - perf/overtime-review-panel
+            - perf/overtime-review-panel-*
 
 jobs:
     pest:
