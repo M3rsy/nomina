@@ -19,6 +19,10 @@
                     La cola está demorada. Verificá que el worker esté activo; esta pantalla seguirá comprobando el estado automáticamente.
                 </p>
             @endif
+            @if ($recoverable)
+                <p class="mt-2 text-xs text-indigo-700" role="status">La ejecución perdió su lease. Recuperala explícitamente antes de reintentar.</p>
+                <x-ui.loading-button type="button" wire:click="recover" target="recover" loading-label="Recuperando…" class="mt-3 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">Recuperar ejecución</x-ui.loading-button>
+            @endif
             @if ($status === \App\Models\PayrollRun::FAILED)
                 <p class="mt-2 text-xs text-indigo-700" role="status">
                     {{ $failureCode === 'attendance_review_blocked'

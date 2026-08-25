@@ -5,6 +5,7 @@ namespace App\Livewire\Nomina;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
 use App\Models\PayrollRunTelemetry;
+use App\Services\Payroll\AbandonedPayrollRunRecovery;
 use App\Services\Payroll\PayrollRunRequester;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
@@ -24,6 +25,8 @@ final class PayrollRunProgress extends Component
     public bool $delayed = false;
 
     public ?string $failureCode = null;
+
+    public bool $recoverable = false;
 
     #[Locked]
     public bool $terminalNotified = false;
@@ -64,6 +67,7 @@ final class PayrollRunProgress extends Component
             ? PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->where('event', PayrollRunTelemetry::FAILED)
                 ->latest('id')->value('code')
             : null;
+        $this->recoverable = $run->isActive() && $run->lease_expires_at?->isPast();
         if (! $run->isActive() && ! $this->terminalNotified) {
             $this->terminalNotified = true;
             $this->dispatch('payroll-run-terminal', runId: $run->id);
@@ -101,6 +105,20 @@ final class PayrollRunProgress extends Component
         $this->failureCode = null;
         $this->terminalNotified = false;
         $this->dispatch('payroll-run-retried', failedRunId: $failedRunId, runId: $run->id);
+    }
+
+    public function recover(): void
+    {
+        $this->authorize('view', $this->payPeriod);
+        Gate::authorize('payroll.process');
+        $run = PayrollRun::withoutCompanyScope()->where('company_id', $this->payPeriod->company_id)
+            ->where('pay_period_id', $this->payPeriod->id)->find($this->runId);
+
+        if ($run !== null) {
+            app(AbandonedPayrollRunRecovery::class)->recover($run, Auth::user());
+        }
+
+        $this->poll();
     }
 
     private function retryRequestKey(PayrollRun $failedRun): string

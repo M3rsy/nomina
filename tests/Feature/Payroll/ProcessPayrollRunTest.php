@@ -12,6 +12,7 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\AbandonedPayrollRunRecovery;
 use App\Services\Payroll\PayrollProcessor;
 use App\Services\Payroll\PayrollProcessReport;
 use App\Services\Payroll\PayrollRunRequester;
@@ -308,4 +309,39 @@ test('processes outside the active tenant while locking company period then run'
     expect(array_slice($order, 0, 3))->toBe(['company', 'pay_period', 'payroll_run'])
         ->and($period->fresh()->status)->toBe('processed')
         ->and($run->fresh()->status)->toBe('completed');
+});
+
+test('an authorized operator explicitly recovers an abandoned worker run', function () {
+    [$period, $actor] = queuedPayrollRun();
+    $run = app(PayrollRunRequester::class)->request($period, $actor, (string) Str::uuid());
+    $run->markProcessing();
+    $run->update(['lease_expires_at' => now()->subSecond()]);
+
+    expect(app(AbandonedPayrollRunRecovery::class)->recover($run->fresh(), $actor))->toBeTrue()
+        ->and($run->fresh()->status)->toBe(PayrollRun::FAILED)
+        ->and($run->fresh()->active_key)->toBeNull()
+        ->and(PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->latest('id')->value('code'))
+        ->toBe('worker_abandoned');
+});
+
+test('an expired queued run is recoverable when queue dispatch was lost', function () {
+    [$period, $actor] = queuedPayrollRun();
+    $run = app(PayrollRunRequester::class)->request($period, $actor, (string) Str::uuid());
+    $run->update(['lease_expires_at' => now()->subSecond()]);
+
+    expect(app(AbandonedPayrollRunRecovery::class)->recover($run->fresh(), $actor))->toBeTrue()
+        ->and($run->fresh()->status)->toBe(PayrollRun::FAILED)
+        ->and(PayrollRunTelemetry::query()->where('payroll_run_id', $run->id)->latest('id')->value('code'))
+        ->toBe('queued_abandoned');
+});
+
+test('recovery cannot overwrite a concurrent terminal completion', function () {
+    [$period, $actor] = queuedPayrollRun();
+    $run = app(PayrollRunRequester::class)->request($period, $actor, (string) Str::uuid());
+    $run->markProcessing();
+    $period->update(['status' => 'processed']);
+    $run->markCompleted();
+
+    expect(app(AbandonedPayrollRunRecovery::class)->recover($run->fresh(), $actor))->toBeFalse()
+        ->and($run->fresh()->status)->toBe(PayrollRun::COMPLETED);
 });
