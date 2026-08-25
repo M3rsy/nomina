@@ -18,6 +18,7 @@ use App\Services\Payroll\PayrollRunRequester;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
@@ -86,6 +87,46 @@ test('processes a queued run through the payroll processor', function () {
         ->and($results)->not->toBeEmpty()
         ->and($results->every(fn (PayrollResult $result): bool => is_array($result->day_snapshot)
             && is_string($result->snapshot_hash) && strlen($result->snapshot_hash) === 64))->toBeTrue();
+});
+
+test('completes a run when the telemetry table is unavailable', function () {
+    [$period, $run] = payrollRunWorkerFixture();
+    Log::spy();
+    DB::statement('drop table payroll_run_telemetry');
+
+    (new ProcessPayrollRun($run->id))->handle(app(PayrollProcessor::class));
+
+    Log::shouldHaveReceived('warning')
+        ->atLeast()->once()
+        ->with('Payroll run telemetry write failed', Mockery::on(
+            fn (array $context): bool => $context['run_id'] === $run->id
+                && $context['event'] === 'started'
+                && $context['exception_class'] === 'Illuminate\\Database\\QueryException'
+                && array_keys($context) === ['run_id', 'event', 'exception_class'],
+        ));
+
+    expect($period->fresh()->status)->toBe('processed')
+        ->and($run->fresh()->status)->toBe('completed')
+        ->and($run->fresh()->active_key)->toBeNull();
+});
+
+test('preserves a processor failure when telemetry rejects writes', function () {
+    [, $run] = payrollRunWorkerFixture();
+    DB::statement("create trigger reject_payroll_run_telemetry before insert on payroll_run_telemetry begin select raise(abort, 'telemetry unavailable'); end");
+    $processor = Mockery::mock(PayrollProcessor::class);
+    $processor->shouldReceive('processPayPeriod')->once()->andThrow(new RuntimeException('processor failed'));
+    $job = new ProcessPayrollRun($run->id);
+
+    try {
+        expect(fn () => $job->handle($processor))->toThrow(RuntimeException::class, 'processor failed');
+        $job->failed(new RuntimeException('processor failed'));
+    } finally {
+        DB::statement('drop trigger reject_payroll_run_telemetry');
+    }
+
+    expect($run->fresh()->status)->toBe('failed')
+        ->and($run->fresh()->active_key)->toBeNull()
+        ->and($run->fresh()->last_error)->toBe('processor failed');
 });
 
 test('runs payroll processing outside job state transactions', function () {
