@@ -271,28 +271,37 @@ test('payroll exports label legacy rows and leave unavailable snapshot facts bla
     unlink($stubPath);
 });
 
-test('legacy exports recover null identity from a soft-deleted employee', function () {
+test('legacy exports leave unknown identity blank after employee changes', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'exported']);
     $employee = Employee::factory()->forCompany($company)->create([
-        'external_id' => 'LEGACY-7', 'first_name' => 'Legacy', 'last_name' => 'Worker',
+        'external_id' => 'LIVE-7', 'first_name' => 'Live', 'last_name' => 'Employee',
+        'payment_code' => '00999', 'job_title' => 'Live title',
     ]);
     PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
-        'employee_external_id' => null, 'employee_name' => null, 'day_snapshot' => null,
+        'employee_external_id' => null, 'employee_name' => null,
+        'employee_payment_code' => null, 'employee_job_title' => null, 'day_snapshot' => null,
     ]);
-    $employee->delete();
+    $employee->update([
+        'external_id' => 'CHANGED-7', 'first_name' => 'Changed', 'last_name' => 'Employee',
+        'payment_code' => '00001', 'job_title' => 'Changed title',
+    ]);
 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $global = IOFactory::load($globalPath)->getActiveSheet();
     $stub = IOFactory::load($stubPath)->getActiveSheet();
 
-    expect($global->getCell('A6')->getValue())->toBe('LEGACY-7')
-        ->and($global->getCell('B6')->getValue())->toBe('Legacy Worker')
-        ->and($stub->getCell('B2')->getValue())->toBe('Legacy Worker')
-        ->and($stub->getCell('B3')->getValue())->toBe('LEGACY-7')
-        ->and($stub->getCell('A9')->getValue())->toBe('LEGACY-7')
-        ->and($stub->getCell('B9')->getValue())->toBe('Legacy Worker');
+    expect($global->getCell('A6')->getValue())->toBeNull()
+        ->and($global->getCell('B6')->getValue())->toBeNull()
+        ->and($global->getCell('AE6')->getValue())->toBeNull()
+        ->and($global->getCell('AF6')->getValue())->toBeNull()
+        ->and($stub->getCell('B2')->getValue())->toBeNull()
+        ->and($stub->getCell('B3')->getValue())->toBeNull()
+        ->and($stub->getCell('A9')->getValue())->toBeNull()
+        ->and($stub->getCell('B9')->getValue())->toBeNull()
+        ->and($stub->getCell('AH9')->getValue())->toBeNull()
+        ->and($stub->getCell('AI9')->getValue())->toBeNull();
 
     unlink($globalPath);
     unlink($stubPath);
@@ -361,9 +370,18 @@ test('global and employee exports expose canonical immutable snapshot columns', 
         'date' => '2026-07-08',
         'employee_external_id' => 'MUTABLE-7',
         'employee_name' => 'Mutable Employee',
+        'employee_payment_code' => '00042',
+        'employee_job_title' => 'Frozen title',
         'worked_minutes' => 0,
         'ordinary_minutes' => 0,
         'day_snapshot' => $snapshot,
+    ]);
+    $employee->update([
+        'external_id' => 'CHANGED-7',
+        'first_name' => 'Changed',
+        'last_name' => 'Employee',
+        'payment_code' => '00001',
+        'job_title' => 'Changed title',
     ]);
 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
@@ -384,7 +402,9 @@ test('global and employee exports expose canonical immutable snapshot columns', 
         ->and($global->getCell('Y6')->getValue())->toContain('2026-07-07 15:00:00')
         ->and($global->getCell('Z6')->getValue())->toContain('2026-07-07 16:00:00')
         ->and($global->getCell('AA6')->getValue())->toContain('schedule_entry')
-        ->and($global->getCell('AB6')->getValue())->toContain('Reviewed');
+        ->and($global->getCell('AB6')->getValue())->toContain('Reviewed')
+        ->and($global->getCell('AE6')->getValue())->toBe('00042')
+        ->and($global->getCell('AF6')->getValue())->toBe('Frozen title');
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
@@ -408,7 +428,9 @@ test('global and employee exports expose canonical immutable snapshot columns', 
         ->and($stub->getCell('AA9')->getValue())->toContain('2026-07-07 15:00:00')
         ->and($stub->getCell('AB9')->getValue())->toContain('2026-07-07 16:00:00')
         ->and($stub->getCell('AC9')->getValue())->toContain('schedule_entry')
-        ->and($stub->getCell('AD9')->getValue())->toContain('Reviewed');
+        ->and($stub->getCell('AD9')->getValue())->toContain('Reviewed')
+        ->and($stub->getCell('AH9')->getValue())->toBe('00042')
+        ->and($stub->getCell('AI9')->getValue())->toBe('Frozen title');
 
     unlink($globalPath);
     unlink($stubPath);
