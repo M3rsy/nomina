@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Nomina\OvertimeReviewPanel;
 use App\Livewire\Nomina\Revisar;
 use App\Models\AttendanceException;
 use App\Models\AttendanceVariationAcknowledgement;
@@ -501,16 +502,29 @@ test('partial overtime approval preserves exact rejected complements and payable
     $resolver = app(PayrollShiftEvaluationResolver::class);
     $candidate = $resolver->review($period, $employee, '2026-07-20')->analysis->overtimeCandidates->sole();
 
-    Livewire::test(Revisar::class, ['payPeriod' => $period])
-        ->call('openOvertimeDecision', $employee->id, '2026-07-20', $candidate->key, 'partial')
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $period])
+        ->call('openOvertimeDecision', $employee->id, '2026-07-20', $candidate->key, 'partial', '17:00 → 19:00 · 120 min', '2026-07-20T17:00', '2026-07-20T19:00')
         ->assertSet('showOvertimeDecisionModal', true)
         ->assertSee('Aprobar tramo parcial')
         ->set('overtimeApprovedStartsAt', '2026-07-20T17:30')
         ->set('overtimeApprovedEndsAt', '2026-07-20T18:30')
         ->set('overtimeDecisionReason', 'Approved exact worked interval')
-        ->call('saveOvertimeDecision')
+        ->call('submitOvertimeDecision')
         ->assertHasNoErrors()
-        ->assertSee('Tramo parcial aprobado');
+        ->assertDispatched('overtime-decision-submitted');
+
+    Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('saveOvertimeDecisionFromPanel', [
+            'overtimeDecisionEmployeeId' => $employee->id,
+            'overtimeDecisionWorkDate' => '2026-07-20',
+            'overtimeCandidateKey' => $candidate->key,
+            'overtimeDecision' => 'partial',
+            'overtimeDecisionReason' => 'Approved exact worked interval',
+            'overtimeApprovedStartsAt' => '2026-07-20T17:30',
+            'overtimeApprovedEndsAt' => '2026-07-20T18:30',
+        ])
+        ->assertHasNoErrors()
+        ->assertDispatched('overtime-decision-recorded');
 
     $decision = OvertimeDecision::withoutCompanyScope()->sole();
     $evaluation = $resolver->resolve($period, $employee, '2026-07-20');
