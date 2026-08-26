@@ -33,7 +33,6 @@ use App\Services\Payroll\PayrollReviewProjection;
 use App\Services\Payroll\StartPayrollProcessing;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -66,18 +65,6 @@ class Revisar extends Component
 
     #[Url]
     public ?int $uploaded_file_id = null;
-
-    #[Url]
-    public string $overtimeStatus = 'pending';
-
-    #[Url]
-    public string $overtimeSearch = '';
-
-    #[Url]
-    public string $overtimeDate = '';
-
-    #[Url]
-    public string $overtimeRate = '';
 
     public bool $showEditModal = false;
 
@@ -155,42 +142,6 @@ class Revisar extends Component
 
     public string $reopenReason = '';
 
-    public bool $showOvertimeDecisionModal = false;
-
-    public ?int $overtimeDecisionEmployeeId = null;
-
-    public string $overtimeDecisionWorkDate = '';
-
-    public string $overtimeCandidateKey = '';
-
-    public string $overtimeDecision = '';
-
-    public string $overtimeDecisionReason = '';
-
-    public string $overtimeCandidateSummary = '';
-
-    public string $overtimeApprovedStartsAt = '';
-
-    public string $overtimeApprovedEndsAt = '';
-
-    public array $selectedOvertimeCandidates = [];
-
-    public bool $allFilteredOvertimeSelected = false;
-
-    public bool $showOvertimeBatchModal = false;
-
-    public string $overtimeBatchDecision = '';
-
-    public string $overtimeBatchReason = '';
-
-    public string $overtimeBatchRequestKey = '';
-
-    public string $overtimeBatchSelection = '';
-
-    public int $overtimeBatchCount = 0;
-
-    public string $overtimeBatchFilterSummary = '';
-
     public ?int $activeOvertimeBatchId = null;
 
     #[Locked]
@@ -237,22 +188,6 @@ class Revisar extends Component
         $this->authorize('view', $payPeriod);
         Gate::authorize('marks.manage');
 
-        if (! in_array($this->overtimeStatus, ['pending', 'approved', 'rejected', 'all'], true)) {
-            $this->overtimeStatus = 'pending';
-        }
-        if (! in_array($this->overtimeRate, ['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'], true)) {
-            $this->overtimeRate = '';
-        }
-        if ($this->overtimeDate !== '') {
-            $parts = explode('-', $this->overtimeDate);
-
-            if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->overtimeDate)
-                || count($parts) !== 3
-                || ! checkdate((int) $parts[1], (int) $parts[2], (int) $parts[0])) {
-                $this->overtimeDate = '';
-            }
-        }
-
         $this->payPeriod = $payPeriod;
         $this->locked = $this->isBlocked();
         $this->recoverOvertimeBatch();
@@ -276,17 +211,6 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $overtimeRenderData = app(OvertimeReviewReader::class)->forPeriod(
-            $this->payPeriod,
-            $this->uploaded_file_id,
-            [
-                'search' => mb_strtolower(trim($this->overtimeSearch)),
-                'status' => $this->overtimeStatus,
-                'date' => $this->overtimeDate,
-                'rate' => $this->overtimeRate,
-            ],
-            $this->getPage('overtimePage'),
-        );
         $deficitReviews = $this->projectedReviewData()['deficits'] ?? $attendanceReviews
             ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty());
 
@@ -298,9 +222,6 @@ class Revisar extends Component
             'faltas' => $faltas,
             'isBlocked' => $isBlocked,
             'uploadedFiles' => $uploadedFiles,
-            'overtimeGroups' => $overtimeRenderData['groups'],
-            'overtimeRows' => $overtimeRenderData['rows'],
-            'pendingOvertimeMatchCount' => $overtimeRenderData['pendingCount'],
             'variationReviews' => $attendanceReviews
                 ->filter(fn ($review) => $review->analysis->variations->isNotEmpty()),
             'deficitReviews' => $deficitReviews,
@@ -320,129 +241,6 @@ class Revisar extends Component
     public function updatingUploadedFileId(): void
     {
         $this->resetPage();
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-    }
-
-    public function updatingOvertimeSearch(): void
-    {
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-    }
-
-    public function updatingOvertimeStatus(): void
-    {
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-    }
-
-    public function updatingOvertimeDate(): void
-    {
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-    }
-
-    public function updatingOvertimeRate(): void
-    {
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-    }
-
-    public function selectCurrentOvertimePage(): void
-    {
-        $this->allFilteredOvertimeSelected = false;
-        $this->selectedOvertimeCandidates = $this->authoritativeOvertimeTargets(true)->keys()->all();
-    }
-
-    public function selectAllFilteredOvertime(): void
-    {
-        $this->allFilteredOvertimeSelected = true;
-        $this->selectedOvertimeCandidates = [];
-    }
-
-    public function clearOvertimeSelection(): void
-    {
-        $this->resetOvertimeSelection();
-    }
-
-    public function openOvertimeBatch(string $decision): void
-    {
-        if ($this->isBlocked() || ! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)) {
-            return;
-        }
-
-        $targets = $this->resolvedOvertimeBatchTargets();
-        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
-            $this->addError(
-                'selectedOvertimeCandidates',
-                'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.',
-            );
-
-            return;
-        }
-        if ($targets->isEmpty()) {
-            $this->addError('selectedOvertimeCandidates', 'Seleccione al menos un candidato pendiente.');
-
-            return;
-        }
-
-        $this->resetErrorBag();
-        $this->overtimeBatchDecision = $decision;
-        $this->overtimeBatchSelection = $this->overtimeBatchConfirmation($targets);
-        $this->overtimeBatchCount = $targets->count();
-        $this->overtimeBatchFilterSummary = $this->overtimeFilterSummary();
-        $this->overtimeBatchReason = '';
-        $this->overtimeBatchRequestKey = (string) Str::uuid();
-        $this->showOvertimeBatchModal = true;
-    }
-
-    public function closeOvertimeBatchModal(): void
-    {
-        $this->showOvertimeBatchModal = false;
-        $this->overtimeBatchDecision = '';
-        $this->overtimeBatchReason = '';
-        $this->overtimeBatchRequestKey = '';
-        $this->overtimeBatchSelection = '';
-        $this->overtimeBatchCount = 0;
-        $this->overtimeBatchFilterSummary = '';
-        $this->resetErrorBag();
-    }
-
-    public function saveOvertimeBatch(): void
-    {
-        if ($this->isBlocked() || ! $this->showOvertimeBatchModal) {
-            return;
-        }
-
-        $this->validate([
-            'overtimeBatchDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
-            'overtimeBatchReason' => ['required', 'string', 'max:500'],
-            'overtimeBatchRequestKey' => ['required', 'uuid'],
-        ], ['overtimeBatchReason.required' => 'Debe indicar un motivo común.']);
-        $targets = $this->resolvedOvertimeBatchTargets();
-        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
-            $this->addError(
-                'selectedOvertimeCandidates',
-                'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.',
-            );
-
-            return;
-        }
-        if ($this->overtimeBatchConfirmation($targets) !== $this->overtimeBatchSelection) {
-            $this->addError('selectedOvertimeCandidates', 'La selección cambió. Revísela antes de continuar.');
-
-            return;
-        }
-
-        $batch = app(OvertimeDecisionBatchRequester::class)->request(
-            $this->payPeriod, $targets->map(fn (array $target) => Arr::except($target, 'fingerprint'))->values()->all(), $this->overtimeBatchDecision,
-            $this->overtimeBatchReason, Auth::user(), $this->overtimeBatchRequestKey,
-        );
-        $this->activeOvertimeBatchId = $batch->id;
-        $this->refreshedOvertimeBatchId = null;
-        $this->showOvertimeBatchModal = false;
-        $this->resetOvertimeSelection();
-        session()->flash('success', 'El lote fue enviado y se procesará en segundo plano.');
     }
 
     #[On('overtime-batch-terminal')]
@@ -463,7 +261,7 @@ class Revisar extends Component
 
         $this->refreshedOvertimeBatchId = $batchId;
         $this->periodReviewSnapshot = null;
-        $this->resetPage('overtimePage');
+        $this->dispatch('overtime-batch-recorded')->to(OvertimeReviewPanel::class);
     }
 
     #[On('overtime-batch-unavailable')]
@@ -1054,137 +852,6 @@ class Revisar extends Component
         $this->payPeriod = $this->payPeriod->fresh();
     }
 
-    public function openOvertimeDecision(
-        int $employeeId,
-        string $workDate,
-        string $candidateKey,
-        string $decision,
-    ): void {
-        if ($this->isBlocked()) {
-            return;
-        }
-
-        $this->closeOvertimeDecisionModal();
-
-        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL], true)) {
-            $this->addError('overtimeDecision', 'La decisión debe aprobar o rechazar el tramo completo.');
-
-            return;
-        }
-
-        if (validator(['work_date' => $workDate], ['work_date' => ['required', 'date_format:Y-m-d']])->fails()) {
-            $this->addError('overtimeCandidateKey', 'La fecha laboral del candidato no es válida.');
-
-            return;
-        }
-
-        $employee = $this->findPeriodEmployee($employeeId);
-
-        if ($employee === null) {
-            $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
-
-            return;
-        }
-
-        try {
-            $review = app(PayrollShiftEvaluationResolver::class)
-                ->review($this->payPeriod, $employee, $workDate);
-        } catch (InvalidArgumentException) {
-            $this->addError('overtimeCandidateKey', 'El candidato no pertenece a este período.');
-
-            return;
-        }
-        $candidate = $review->analysis->overtimeCandidates->firstWhere('key', $candidateKey);
-
-        if ($candidate === null) {
-            $this->addError('overtimeCandidateKey', 'El candidato ya no coincide con las marcas vigentes.');
-
-            return;
-        }
-        if ($decision === OvertimeDecision::PARTIAL
-            && $review->analysis->payrollPolicyKey !== 'duration-first-v2') {
-            $this->addError('overtimeDecision', 'La aprobación parcial solo está disponible para candidatos de duración primero.');
-
-            return;
-        }
-
-        $this->overtimeDecisionEmployeeId = $employee->id;
-        $this->overtimeDecisionWorkDate = $review->analysis->workDate->toDateString();
-        $this->overtimeCandidateKey = $candidate->key;
-        $this->overtimeDecision = $decision;
-        $this->overtimeCandidateSummary = $candidate->start->format('H:i')
-            .' → '.$candidate->end->format('H:i')
-            .' · '.$candidate->minutes.' min';
-        $this->overtimeApprovedStartsAt = $candidate->start->format('Y-m-d\TH:i');
-        $this->overtimeApprovedEndsAt = $candidate->end->format('Y-m-d\TH:i');
-        $this->showOvertimeDecisionModal = true;
-    }
-
-    public function closeOvertimeDecisionModal(): void
-    {
-        $this->showOvertimeDecisionModal = false;
-        $this->overtimeDecisionEmployeeId = null;
-        $this->overtimeDecisionWorkDate = '';
-        $this->overtimeCandidateKey = '';
-        $this->overtimeDecision = '';
-        $this->overtimeDecisionReason = '';
-        $this->overtimeCandidateSummary = '';
-        $this->overtimeApprovedStartsAt = '';
-        $this->overtimeApprovedEndsAt = '';
-        $this->resetErrorBag();
-    }
-
-    public function saveOvertimeDecision(): void
-    {
-        if ($this->isBlocked()) {
-            return;
-        }
-
-        $validated = $this->validate([
-            'overtimeDecisionEmployeeId' => ['required', 'integer'],
-            'overtimeDecisionWorkDate' => ['required', 'date_format:Y-m-d'],
-            'overtimeCandidateKey' => ['required', 'string', 'size:64'],
-            'overtimeDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL])],
-            'overtimeDecisionReason' => ['required', 'string', 'max:500'],
-            'overtimeApprovedStartsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i'],
-            'overtimeApprovedEndsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i', 'after:overtimeApprovedStartsAt'],
-        ], [
-            'overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.',
-        ]);
-        $employee = $this->findPeriodEmployee((int) $validated['overtimeDecisionEmployeeId']);
-
-        if ($employee === null) {
-            $this->addError('overtimeDecisionEmployeeId', 'El empleado no pertenece a este período.');
-
-            return;
-        }
-
-        $recorder = app(OvertimeDecisionRecorder::class);
-        if ($validated['overtimeDecision'] === OvertimeDecision::PARTIAL) {
-            $recorder->approvePartial(
-                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
-                $validated['overtimeCandidateKey'], $validated['overtimeApprovedStartsAt'],
-                $validated['overtimeApprovedEndsAt'], $validated['overtimeDecisionReason'], Auth::user(),
-            );
-        } else {
-            $recorder->decide(
-                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
-                $validated['overtimeCandidateKey'], $validated['overtimeDecision'],
-                $validated['overtimeDecisionReason'], Auth::user(),
-            );
-        }
-
-        $message = $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
-            ? 'Tramo parcial aprobado y complemento rechazado.'
-            : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.';
-        $this->closeOvertimeDecisionModal();
-        $this->resetPage('overtimePage');
-        $this->resetOvertimeSelection();
-        $this->loadReadinessBlockers();
-
-        session()->flash('success', $message);
-    }
-
     #[On('overtime-decision-submitted')]
     public function saveOvertimeDecisionFromPanel(array $decision): void
     {
@@ -1192,15 +859,60 @@ class Revisar extends Component
             return;
         }
 
-        $this->overtimeDecisionEmployeeId = $decision['overtimeDecisionEmployeeId'] ?? null;
-        $this->overtimeDecisionWorkDate = $decision['overtimeDecisionWorkDate'] ?? '';
-        $this->overtimeCandidateKey = $decision['overtimeCandidateKey'] ?? '';
-        $this->overtimeDecision = $decision['overtimeDecision'] ?? '';
-        $this->overtimeDecisionReason = $decision['overtimeDecisionReason'] ?? '';
-        $this->overtimeApprovedStartsAt = $decision['overtimeApprovedStartsAt'] ?? '';
-        $this->overtimeApprovedEndsAt = $decision['overtimeApprovedEndsAt'] ?? '';
-        $this->saveOvertimeDecision();
+        $this->recordOvertimeDecision($decision);
         $this->dispatch('overtime-decision-recorded')->to(OvertimeReviewPanel::class);
+    }
+
+    #[On('overtime-batch-submitted')]
+    public function requestOvertimeBatchFromPanel(array $intent): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $validated = validator($intent, [
+            'decision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
+            'reason' => ['required', 'string', 'max:500'],
+            'request_key' => ['required', 'uuid'],
+            'selection' => ['required', 'string', 'size:64'],
+            'filters' => ['required', 'array:search,status,date,rate'],
+            'filters.search' => ['present', 'string', 'max:255'],
+            'filters.status' => ['required', Rule::in(['pending', 'approved', 'rejected', 'all'])],
+            'filters.date' => ['present', 'nullable', 'date_format:Y-m-d'],
+            'filters.rate' => ['present', Rule::in(['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'])],
+            'all' => ['required', 'boolean'],
+            'selected' => ['required', 'array'],
+            'selected.*' => ['string', 'regex:/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D'],
+        ])->validate();
+        $targets = app(OvertimeReviewReader::class)->pendingTargetsForPeriod(
+            $this->payPeriod, $this->uploaded_file_id, $validated['filters'],
+        );
+        if (! $validated['all']) {
+            $selected = array_flip($validated['selected']);
+            $targets = $targets->filter(fn (array $target, string $token): bool => isset($selected[$token]));
+        }
+        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
+            $this->dispatch('overtime-batch-rejected', message: 'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.')
+                ->to(OvertimeReviewPanel::class);
+
+            return;
+        }
+        if ($targets->isEmpty() || $this->overtimeBatchConfirmation($targets, $validated['filters'], $validated['all']) !== $validated['selection']) {
+            $this->dispatch('overtime-batch-rejected', message: 'La selección cambió. Revísela antes de continuar.')
+                ->to(OvertimeReviewPanel::class);
+
+            return;
+        }
+
+        $batch = app(OvertimeDecisionBatchRequester::class)->request(
+            $this->payPeriod, $targets->map(fn (array $target) => [
+                'employee_id' => $target['employee_id'], 'work_date' => $target['work_date'], 'candidate_key' => $target['candidate_key'],
+            ])->values()->all(), $validated['decision'], $validated['reason'], Auth::user(), $validated['request_key'],
+        );
+        $this->activeOvertimeBatchId = $batch->id;
+        $this->refreshedOvertimeBatchId = null;
+        $this->dispatch('overtime-batch-recorded')->to(OvertimeReviewPanel::class);
+        session()->flash('success', 'El lote fue enviado y se procesará en segundo plano.');
     }
 
     public function openAttendanceException(
@@ -1744,80 +1456,6 @@ class Revisar extends Component
             ->forPeriod($this->payPeriod, includeBlockers: false);
     }
 
-    private function authoritativeSelectedOvertimeTargets(): Collection
-    {
-        $selected = collect($this->selectedOvertimeCandidates)
-            ->filter(fn (mixed $token): bool => is_string($token)
-                && preg_match('/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D', $token) === 1)
-            ->flip()->all();
-
-        return $this->authoritativeOvertimeTargets()
-            ->filter(fn (array $target, string $token): bool => isset($selected[$token]));
-    }
-
-    private function resolvedOvertimeBatchTargets(): Collection
-    {
-        return $this->allFilteredOvertimeSelected
-            ? $this->authoritativeOvertimeTargets()
-            : $this->authoritativeSelectedOvertimeTargets();
-    }
-
-    private function authoritativeOvertimeTargets(bool $currentPage = false): Collection
-    {
-        $rows = $this->filteredOvertimeRows(
-            app(AttendanceReviewQuery::class)
-                ->forPeriod($this->payPeriod, $this->uploaded_file_id, $this->periodReviewSnapshot()),
-        );
-        if ($currentPage) {
-            $rows = $rows->forPage($this->getPage('overtimePage'), 25)->values();
-        }
-
-        return $rows->filter(fn (array $row): bool => $row['decision'] === null)
-            ->mapWithKeys(function (array $row): array {
-                $target = [
-                    'employee_id' => $row['review']->employee->id,
-                    'work_date' => $row['review']->analysis->workDate->toDateString(),
-                    'candidate_key' => $row['candidate']->key,
-                    'fingerprint' => $row['candidate']->fingerprint,
-                ];
-
-                return [implode('|', Arr::except($target, 'fingerprint')) => $target];
-            });
-    }
-
-    private function filteredOvertimeRows(Collection $attendanceReviews): Collection
-    {
-        $search = mb_strtolower(trim($this->overtimeSearch));
-
-        return $attendanceReviews
-            ->flatMap(fn ($review) => $review->analysis->overtimeCandidates->map(fn ($candidate) => [
-                'review' => $review,
-                'candidate' => $candidate,
-                'decision' => $review->decisionFor($candidate),
-            ]))
-            ->filter(function (array $row) use ($search): bool {
-                $review = $row['review'];
-                $candidate = $row['candidate'];
-                $employee = mb_strtolower($review->employee->full_name.' '.$review->employee->external_id);
-                $rateMinutes = match ($this->overtimeRate) {
-                    'ordinary' => $candidate->rateMinutes->ordinaryMinutes,
-                    'extra25' => $candidate->rateMinutes->extra25Minutes,
-                    'extra50' => $candidate->rateMinutes->extra50Minutes,
-                    'extra75' => $candidate->rateMinutes->extra75Minutes,
-                    'extra100' => $candidate->rateMinutes->extra100Minutes,
-                    default => 1,
-                };
-
-                return ($this->overtimeStatus === 'all'
-                        || ($row['decision']?->decision ?? 'pending') === $this->overtimeStatus)
-                    && ($search === '' || str_contains($employee, $search))
-                    && ($this->overtimeDate === ''
-                        || $review->analysis->workDate->toDateString() === $this->overtimeDate)
-                    && $rateMinutes > 0;
-            })
-            ->values();
-    }
-
     private function projectedReviewData(): ?array
     {
         if ($this->uploaded_file_id !== null) {
@@ -1873,55 +1511,63 @@ class Revisar extends Component
             ->where('requested_by', Auth::id());
     }
 
-    private function overtimeBatchConfirmation(Collection $targets): string
+    private function recordOvertimeDecision(array $decision): void
     {
-        $candidateSnapshot = $targets->map(
-            fn (array $target, string $token): string => $token.'|'.$target['fingerprint']
-        )->sort()->values()->all();
+        $validated = validator($decision, [
+            'overtimeDecisionEmployeeId' => ['required', 'integer'],
+            'overtimeDecisionWorkDate' => ['required', 'date_format:Y-m-d'],
+            'overtimeCandidateKey' => ['required', 'string', 'size:64'],
+            'overtimeDecision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED, OvertimeDecision::PARTIAL])],
+            'overtimeDecisionReason' => ['required', 'string', 'max:500'],
+            'overtimeApprovedStartsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i'],
+            'overtimeApprovedEndsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i', 'after:overtimeApprovedStartsAt'],
+        ], ['overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.'])->validate();
+        if (validator(['work_date' => $validated['overtimeDecisionWorkDate']], [
+            'work_date' => ['required', 'date_format:Y-m-d'],
+        ])->fails()) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'La fecha laboral del candidato no es válida.']);
+        }
+        $employee = $this->findPeriodEmployee((int) $validated['overtimeDecisionEmployeeId']);
+        if ($employee === null) {
+            throw ValidationException::withMessages(['overtimeDecisionEmployeeId' => 'El empleado no pertenece a este período.']);
+        }
 
+        try {
+            $review = app(PayrollShiftEvaluationResolver::class)->review(
+                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
+            );
+        } catch (InvalidArgumentException) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'El candidato no pertenece a este período.']);
+        }
+        $candidate = $review->analysis->overtimeCandidates->firstWhere('key', $validated['overtimeCandidateKey']);
+        if ($candidate === null) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'El candidato ya no coincide con las marcas vigentes.']);
+        }
+        if ($validated['overtimeDecision'] === OvertimeDecision::PARTIAL
+            && $review->analysis->payrollPolicyKey !== 'duration-first-v2') {
+            throw ValidationException::withMessages(['overtimeDecision' => 'La aprobación parcial solo está disponible para candidatos de duración primero.']);
+        }
+
+        $recorder = app(OvertimeDecisionRecorder::class);
+        if ($validated['overtimeDecision'] === OvertimeDecision::PARTIAL) {
+            $recorder->approvePartial($this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'], $validated['overtimeCandidateKey'], $validated['overtimeApprovedStartsAt'], $validated['overtimeApprovedEndsAt'], $validated['overtimeDecisionReason'], Auth::user());
+        } else {
+            $recorder->decide($this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'], $validated['overtimeCandidateKey'], $validated['overtimeDecision'], $validated['overtimeDecisionReason'], Auth::user());
+        }
+
+        $this->loadReadinessBlockers();
+        session()->flash('success', $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
+            ? 'Tramo parcial aprobado y complemento rechazado.'
+            : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.');
+    }
+
+    private function overtimeBatchConfirmation(Collection $targets, array $filters, bool $all): string
+    {
         return hash('sha256', json_encode([
-            'filters' => [
-                'search' => trim($this->overtimeSearch),
-                'status' => $this->overtimeStatus,
-                'date' => $this->overtimeDate,
-                'rate' => $this->overtimeRate,
-                'uploaded_file_id' => $this->uploaded_file_id,
-                'all' => $this->allFilteredOvertimeSelected,
-            ],
-            'candidates' => $candidateSnapshot,
+            'filters' => $filters,
+            'all' => $all,
+            'candidates' => $targets->map(fn (array $target, string $token): string => $token.'|'.$target['fingerprint'])->sort()->values()->all(),
         ], JSON_THROW_ON_ERROR));
-    }
-
-    private function overtimeFilterSummary(): string
-    {
-        $parts = ['Estado: Pendientes'];
-        if (($search = trim($this->overtimeSearch)) !== '') {
-            $parts[] = 'Empleado: '.$search;
-        }
-        if ($this->overtimeDate !== '') {
-            $parts[] = 'Fecha: '.$this->overtimeDate;
-        }
-        if ($this->overtimeRate !== '') {
-            $parts[] = 'Porcentaje: '.match ($this->overtimeRate) {
-                'ordinary' => 'Ordinario', 'extra25' => '25%', 'extra50' => '50%',
-                'extra75' => '75%', 'extra100' => '100%', default => $this->overtimeRate,
-            };
-        }
-        if ($this->uploaded_file_id !== null) {
-            $file = $this->payPeriod->uploadedFiles()->whereKey($this->uploaded_file_id)->value('original_name');
-            if ($file !== null) {
-                $parts[] = 'Archivo: '.$file;
-            }
-        }
-
-        return implode(' · ', $parts);
-    }
-
-    private function resetOvertimeSelection(): void
-    {
-        $this->selectedOvertimeCandidates = [];
-        $this->allFilteredOvertimeSelected = false;
-        $this->closeOvertimeBatchModal();
     }
 
     private function lockMutablePayPeriod(): ?PayPeriod

@@ -1,6 +1,6 @@
 <?php
 
-use App\Livewire\Nomina\Revisar;
+use App\Livewire\Nomina\OvertimeReviewPanel;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Holiday;
@@ -41,7 +41,7 @@ test('payroll review screen reads fresh projected overtime rows', function () {
     Artisan::call('payroll:review:rebuild', ['pay_period_id' => $context['period']->id]);
     $this->actingAs($context['actor']);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $context['period']->fresh()])
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']->fresh()])
         ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
         ->assertViewHas('overtimeGroups', fn ($groups) => $groups->count() === 1)
         ->assertSee('María Guardia')
@@ -53,7 +53,7 @@ test('payroll review screen falls back to legacy calculation when projection is 
     $context = payrollReviewProjectionFixture();
     $this->actingAs($context['actor']);
 
-    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 1)
         ->assertSee('Salida posterior');
 });
