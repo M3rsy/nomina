@@ -13,21 +13,25 @@ class AttendanceReviewQuery
     public function forPeriod(
         PayPeriod $payPeriod,
         ?int $uploadedFileId = null,
-        ?array $snapshot = null,
+        ?PayrollPeriodReviewSnapshotContext $snapshot = null,
     ): Collection {
-        return ($snapshot ?? $this->snapshots->forPeriod($payPeriod))['reviews']
-            ->filter(fn (PayrollShiftReview $review): bool => $review->analysis->overtimeCandidates->isNotEmpty()
-                || $review->analysis->deficits->isNotEmpty()
-                || $review->analysis->variations->isNotEmpty()
-            )
-            ->when(
-                $uploadedFileId !== null,
-                fn (Collection $reviews): Collection => $reviews->filter(
-                    fn (PayrollShiftReview $review): bool => $review->occurrence->marks->contains(
-                        fn ($mark): bool => $mark->uploaded_file_id === $uploadedFileId,
-                    ),
-                ),
-            )
-            ->values();
+        $reviews = collect();
+        $snapshot ??= $this->snapshots->captureForPeriod($payPeriod);
+
+        $this->snapshots->forEachReview($snapshot, function (PayrollShiftReview $review) use ($reviews, $uploadedFileId): void {
+            if ($review->analysis->overtimeCandidates->isEmpty()
+                && $review->analysis->deficits->isEmpty()
+                && $review->analysis->variations->isEmpty()) {
+                return;
+            }
+            if ($uploadedFileId !== null && ! $review->occurrence->marks->contains(
+                fn ($mark): bool => $mark->uploaded_file_id === $uploadedFileId,
+            )) {
+                return;
+            }
+            $reviews->push($review);
+        });
+
+        return $reviews->values();
     }
 }

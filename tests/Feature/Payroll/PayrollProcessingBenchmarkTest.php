@@ -91,6 +91,7 @@ test('benchmarks payroll processing and review with an opt-in profile', function
 
     $reviewCount = 0;
     $reviewSnapshotMetrics = [];
+    $reviewStreamMetrics = [];
 
     if ($reviewPrepassMode === 'treatment') {
         memory_reset_peak_usage();
@@ -100,6 +101,7 @@ test('benchmarks payroll processing and review with an opt-in profile', function
             'review_snapshot_duration_ms' => max(0, (int) round((hrtime(true) - $reviewSnapshotStartedAt) / 1_000_000)),
             'review_snapshot_peak_memory_mb' => max(0, (int) ceil(memory_get_peak_usage(true) / 1024 / 1024)),
         ];
+        $reviewStreamMetrics = payrollReviewStreamMetrics(app(PayrollPeriodReviewSnapshot::class), $period);
     }
     $period->update(['status' => 'ready']);
 
@@ -142,6 +144,7 @@ test('benchmarks payroll processing and review with an opt-in profile', function
         'inserted_count' => $telemetry->inserted_count,
         'reused_count' => $telemetry->reused_count,
         ...$reviewSnapshotMetrics,
+        ...$reviewStreamMetrics,
     ];
 
     if ($telemetry->queue_wait_ms === null) {
@@ -154,10 +157,115 @@ test('benchmarks payroll processing and review with an opt-in profile', function
         expect($reportedMetrics)->toHaveKeys([
             'review_snapshot_duration_ms',
             'review_snapshot_peak_memory_mb',
+            'review_stream_duration_ms',
+            'review_stream_peak_memory_mb',
+            'review_stream_output_count',
+            'review_stream_output_checksum',
         ])
             ->and($reportedMetrics['review_snapshot_duration_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
-            ->and($reportedMetrics['review_snapshot_peak_memory_mb'])->toBeInt()->toBeGreaterThanOrEqual(0);
+            ->and($reportedMetrics['review_snapshot_peak_memory_mb'])->toBeInt()->toBeGreaterThanOrEqual(0)
+            ->and($reportedMetrics['review_stream_duration_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
+            ->and($reportedMetrics['review_stream_peak_memory_mb'])->toBeInt()->toBeGreaterThanOrEqual(0)
+            ->and($reportedMetrics['review_stream_output_count'])->toBeInt()->toBeGreaterThan(0)
+            ->and($reportedMetrics['review_stream_output_checksum'])->toBeInt()->toBeGreaterThan(0);
     }
 
     fwrite(STDOUT, json_encode($metrics, JSON_THROW_ON_ERROR).PHP_EOL);
 })->with('payroll benchmark profiles');
+
+test('reports stream review metrics with outputs matching materialized reviews', function (): void {
+    $start = CarbonImmutable::parse('2026-07-01');
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach (range(0, 6) as $dayOfWeek) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $dayOfWeek,
+            'is_working_day' => true,
+            'start_time' => '06:00',
+            'end_time' => '14:00',
+            'base_ordinary_hours' => 8,
+        ]);
+    }
+
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => $start,
+        'end_date' => $start->addDay(),
+        'status' => 'uploaded',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $employees = Employee::factory()->count(2)->forCompany($company)->create();
+    $rowNumber = 1;
+
+    foreach ($employees as $employee) {
+        app(EmployeeScheduleAssigner::class)->assign($employee, $profile, $start, 'Benchmark parity fixture');
+
+        for ($date = $start; $date->lte($period->end_date); $date = $date->addDay()) {
+            foreach (['06:00:00', '15:00:00'] as $time) {
+                RawMark::factory()->create([
+                    'company_id' => $company->id,
+                    'pay_period_id' => $period->id,
+                    'uploaded_file_id' => $file->id,
+                    'employee_external_id' => $employee->external_id,
+                    'employee_id' => $employee->id,
+                    'event_at' => "{$date->toDateString()} {$time}",
+                    'raw_line' => "{$employee->external_id} {$date->toDateString()} {$time}",
+                    'source' => 'glg',
+                    'row_number' => $rowNumber++,
+                    'status' => 'valid',
+                ]);
+            }
+        }
+    }
+
+    $snapshots = app(PayrollPeriodReviewSnapshot::class);
+    $streamMetrics = payrollReviewStreamMetrics($snapshots, $period);
+    $legacyOutputs = payrollReviewDerivedOutputs($snapshots->forPeriod($period, includeBlockers: false)['reviews']);
+
+    expect($streamMetrics)->toHaveKeys([
+        'review_stream_duration_ms',
+        'review_stream_peak_memory_mb',
+        'review_stream_output_count',
+        'review_stream_output_checksum',
+    ])
+        ->and($streamMetrics['review_stream_duration_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($streamMetrics['review_stream_peak_memory_mb'])->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($streamMetrics['review_stream_output_count'])->toBe(4)
+        ->and($streamMetrics['review_stream_output_checksum'])->toBeGreaterThan(0)
+        ->and($streamMetrics['review_stream_output_count'])->toBe($legacyOutputs['count'])
+        ->and($streamMetrics['review_stream_output_checksum'])->toBe($legacyOutputs['checksum']);
+});
+
+/** @return array{review_stream_duration_ms: int, review_stream_peak_memory_mb: int, review_stream_output_count: int, review_stream_output_checksum: int} */
+function payrollReviewStreamMetrics(PayrollPeriodReviewSnapshot $snapshots, PayPeriod $period): array
+{
+    memory_reset_peak_usage();
+    $startedAt = hrtime(true);
+    $context = $snapshots->captureForPeriod($period);
+    $outputs = ['count' => 0, 'checksum' => 0];
+
+    $snapshots->forEachReview($context, function ($review) use (&$outputs): void {
+        $outputs['count']++;
+        $outputs['checksum'] += $review->analysis->workedMinutes;
+    });
+
+    return [
+        'review_stream_duration_ms' => max(0, (int) round((hrtime(true) - $startedAt) / 1_000_000)),
+        'review_stream_peak_memory_mb' => max(0, (int) ceil(memory_get_peak_usage(true) / 1024 / 1024)),
+        'review_stream_output_count' => $outputs['count'],
+        'review_stream_output_checksum' => $outputs['checksum'],
+    ];
+}
+
+/** @return array{count: int, checksum: int} */
+function payrollReviewDerivedOutputs(iterable $reviews): array
+{
+    $outputs = ['count' => 0, 'checksum' => 0];
+
+    foreach ($reviews as $review) {
+        $outputs['count']++;
+        $outputs['checksum'] += $review->analysis->workedMinutes;
+    }
+
+    return $outputs;
+}

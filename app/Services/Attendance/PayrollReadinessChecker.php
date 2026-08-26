@@ -16,9 +16,10 @@ class PayrollReadinessChecker
     public function blockers(
         PayPeriod $payPeriod,
         ?HolidayCalendarContext $calendarContext = null,
-        ?array $snapshot = null,
+        ?PayrollPeriodReviewSnapshotContext $snapshot = null,
     ): Collection {
-        $blockers = ($snapshot ?? $this->snapshots->forPeriod($payPeriod, $calendarContext))['blockers'];
+        $snapshot ??= $this->snapshots->captureForPeriod($payPeriod, $calendarContext);
+        $blockers = $this->snapshots->blockers($snapshot);
         $missingIdentity = Employee::withoutCompanyScope()
             ->where('company_id', $payPeriod->company_id)
             ->where('is_active', true)
