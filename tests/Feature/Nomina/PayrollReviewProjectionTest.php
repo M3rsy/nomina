@@ -20,6 +20,7 @@ use App\Services\Payroll\OvertimeReviewReader;
 use App\Services\Payroll\PayrollReviewProjection;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -100,6 +101,96 @@ test('payroll review projection generation includes assignment publication and h
         ->and($projection->generation($context['period']))->toBe($projection->generation($context['period']));
 });
 
+test('projected overtime pagination filters in SQL before hydrating the selected page', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    app(CurrentCompany::class)->set($company);
+    $generation = 'projected-overtime-pagination';
+
+    foreach (range(1, 60) as $number) {
+        $employee = Employee::factory()->forCompany($company)->create([
+            'first_name' => 'Paged',
+            'last_name' => sprintf('Employee %03d', $number),
+            'external_id' => sprintf('PAG-%03d', $number),
+        ]);
+
+        PayrollReviewEntry::query()->create(projectedOvertimeEntryAttributes(
+            companyId: $company->id,
+            payPeriodId: $period->id,
+            employeeId: $employee->id,
+            generation: $generation,
+            sourceKey: sprintf('candidate-%03d', $number),
+            rate: 'extra50',
+        ));
+    }
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    try {
+        $data = app(PayrollReviewProjection::class)->overtimeRows($period, $generation, [
+            'search' => 'paged',
+            'status' => 'pending',
+            'date' => '2026-07-20',
+            'rate' => 'extra50',
+        ], 2);
+        $queries = DB::getQueryLog();
+    } finally {
+        DB::disableQueryLog();
+        DB::flushQueryLog();
+    }
+
+    $entryQueries = collect($queries)
+        ->filter(fn (array $query): bool => str_contains(strtolower($query['query']), 'from "payroll_review_entries"'));
+    $pageQuery = $entryQueries->first(
+        fn (array $query): bool => str_contains(strtolower($query['query']), 'limit 25 offset 25'),
+    );
+
+    expect($data['rows']->total())->toBe(60)
+        ->and($data['rows']->currentPage())->toBe(2)
+        ->and($data['rows']->perPage())->toBe(25)
+        ->and($data['groups']->pluck('employee.external_id')->all())
+        ->toBe(array_map(fn (int $number): string => sprintf('PAG-%03d', $number), range(26, 50)))
+        ->and($pageQuery)->not->toBeNull()
+        ->and(strtolower($pageQuery['query']))->toContain('"rate_extra50_minutes" > ?');
+});
+
+test('projected overtime SQL filters preserve status date search and rate parity', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    app(CurrentCompany::class)->set($company);
+    $generation = 'projected-overtime-filter-parity';
+    $matchingEmployee = Employee::factory()->forCompany($company)->create([
+        'first_name' => 'Rate', 'last_name' => 'Match', 'external_id' => 'RATE-50',
+    ]);
+    $otherEmployee = Employee::factory()->forCompany($company)->create();
+
+    PayrollReviewEntry::query()->create(projectedOvertimeEntryAttributes(
+        companyId: $company->id, payPeriodId: $period->id, employeeId: $matchingEmployee->id,
+        generation: $generation, sourceKey: 'matching-candidate', rate: 'extra50',
+    ));
+    PayrollReviewEntry::query()->create(projectedOvertimeEntryAttributes(
+        companyId: $company->id, payPeriodId: $period->id, employeeId: $matchingEmployee->id,
+        generation: $generation, sourceKey: 'wrong-status', rate: 'extra50', status: 'approved',
+    ));
+    PayrollReviewEntry::query()->create(projectedOvertimeEntryAttributes(
+        companyId: $company->id, payPeriodId: $period->id, employeeId: $otherEmployee->id,
+        generation: $generation, sourceKey: 'wrong-rate', rate: 'extra25',
+    ));
+    PayrollReviewEntry::query()->create(projectedOvertimeEntryAttributes(
+        companyId: $company->id, payPeriodId: $period->id, employeeId: $matchingEmployee->id,
+        generation: $generation, sourceKey: 'wrong-date', rate: 'extra50', workDate: '2026-07-21',
+    ));
+
+    $data = app(PayrollReviewProjection::class)->overtimeRows($period, $generation, [
+        'search' => 'rate-50', 'status' => 'pending', 'date' => '2026-07-20', 'rate' => 'extra50',
+    ], 1);
+
+    expect($data['rows']->total())->toBe(1)
+        ->and($data['rows']->sole()['review']->employee->external_id)->toBe('RATE-50')
+        ->and($data['pendingCount'])->toBe(1);
+});
+
 function payrollReviewProjectionFixture(): array
 {
     $company = Company::factory()->create();
@@ -135,4 +226,52 @@ function payrollReviewProjectionFixture(): array
     app(CurrentCompany::class)->set($company);
 
     return compact('company', 'employee', 'profile', 'period', 'actor');
+}
+
+function projectedOvertimeEntryAttributes(
+    int $companyId,
+    int $payPeriodId,
+    int $employeeId,
+    string $generation,
+    string $sourceKey,
+    string $rate,
+    string $status = 'pending',
+    string $workDate = '2026-07-20',
+): array {
+    $rateMinutes = ['ordinary' => 0, 'extra25' => 0, 'extra50' => 0, 'extra75' => 0, 'extra100' => 0];
+    $rateMinutes[$rate] = 30;
+
+    return [
+        'company_id' => $companyId,
+        'pay_period_id' => $payPeriodId,
+        'employee_id' => $employeeId,
+        'work_date' => $workDate,
+        'type' => 'overtime_candidate',
+        'status' => $status,
+        'source_key' => $sourceKey,
+        'source_fingerprint' => hash('sha256', $sourceKey),
+        'generation' => $generation,
+        'occurred_at' => "{$workDate} 14:00:00",
+        'rate_ordinary_minutes' => $rateMinutes['ordinary'],
+        'rate_extra25_minutes' => $rateMinutes['extra25'],
+        'rate_extra50_minutes' => $rateMinutes['extra50'],
+        'rate_extra75_minutes' => $rateMinutes['extra75'],
+        'rate_extra100_minutes' => $rateMinutes['extra100'],
+        'payload' => [
+            'segment' => [
+                'kind' => 'post_shift', 'key' => $sourceKey, 'fingerprint' => hash('sha256', $sourceKey),
+                'start' => "{$workDate} 14:00:00", 'end' => "{$workDate} 14:30:00", 'minutes' => 30,
+                'rate_minutes' => $rateMinutes,
+            ],
+            'analysis' => [
+                'work_date' => $workDate, 'entry_at' => "{$workDate} 06:00:00", 'exit_at' => "{$workDate} 14:30:00",
+                'payroll_policy_key' => 'schedule-overlap-v1', 'excluded_transfer_minutes' => 0,
+            ],
+            'occurrence' => ['scheduled_start' => "{$workDate} 06:00:00", 'scheduled_end' => "{$workDate} 14:00:00"],
+            'resolution' => $status === 'pending' ? null : [
+                'decision' => $status, 'reason' => 'Existing decision', 'resolution_kind' => null,
+                'approved_minutes' => null, 'rejected_minutes' => null, 'decider_email' => null, 'created_at' => null,
+            ],
+        ],
+    ];
 }
