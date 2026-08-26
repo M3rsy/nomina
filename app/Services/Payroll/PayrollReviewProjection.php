@@ -46,7 +46,11 @@ class PayrollReviewProjection
             $rows->chunk(500)->each(fn (Collection $chunk) => PayrollReviewEntry::query()->upsert(
                 $chunk->all(),
                 ['pay_period_id', 'type', 'source_key', 'generation'],
-                ['company_id', 'employee_id', 'work_date', 'status', 'source_fingerprint', 'occurred_at', 'payload', 'updated_at'],
+                [
+                    'company_id', 'employee_id', 'work_date', 'status', 'source_fingerprint', 'occurred_at',
+                    'rate_ordinary_minutes', 'rate_extra25_minutes', 'rate_extra50_minutes', 'rate_extra75_minutes',
+                    'rate_extra100_minutes', 'payload', 'updated_at',
+                ],
             ));
 
             PayrollReviewEntry::withoutCompanyScope()
@@ -83,7 +87,6 @@ class PayrollReviewProjection
     public function overtimeRows(PayPeriod $payPeriod, string $generation, array $filters, int $page): array
     {
         $query = $this->baseQuery($payPeriod, $generation, 'overtime_candidate')
-            ->with(['employee'])
             ->when($filters['status'] !== 'all', fn ($q) => $q->where('status', $filters['status']))
             ->when($filters['date'] !== '', fn ($q) => $q->whereDate('work_date', $filters['date']))
             ->when($filters['search'] !== '', function ($q) use ($filters): void {
@@ -93,29 +96,23 @@ class PayrollReviewProjection
                     ->orWhere('last_name', 'like', $search)
                     ->orWhere('external_id', 'like', $search));
             })
+            ->when($filters['rate'] !== '', function ($q) use ($filters): void {
+                $column = $this->rateMinutesColumn($filters['rate']);
+
+                $column === null ? $q->whereRaw('1 = 0') : $q->where($column, '>', 0);
+            })
             ->orderBy('work_date')
             ->orderBy('employee_id')
             ->orderBy('id');
 
-        $filtered = $query->get()
+        $pendingCount = (clone $query)->where('status', 'pending')->count();
+        $rows = $query->with('employee')->paginate(25, ['*'], 'overtimePage', $page);
+        $pageRows = $rows->getCollection()
             ->map(fn (PayrollReviewEntry $entry): array => $this->overtimeRowFromEntry($entry))
-            ->filter(function (array $row) use ($filters): bool {
-                if ($filters['rate'] === '') {
-                    return true;
-                }
-
-                return match ($filters['rate']) {
-                    'ordinary' => $row['candidate']->rateMinutes->ordinaryMinutes,
-                    'extra25' => $row['candidate']->rateMinutes->extra25Minutes,
-                    'extra50' => $row['candidate']->rateMinutes->extra50Minutes,
-                    'extra75' => $row['candidate']->rateMinutes->extra75Minutes,
-                    'extra100' => $row['candidate']->rateMinutes->extra100Minutes,
-                    default => 0,
-                } > 0;
-            })
             ->values();
+        $rows->setCollection($pageRows);
 
-        return $this->overtimeRenderData($filtered, $page);
+        return $this->overtimeRenderData($rows, $pendingCount);
     }
 
     public function deficitReviews(PayPeriod $payPeriod, string $generation): Collection
@@ -183,6 +180,11 @@ class PayrollReviewProjection
             'source_fingerprint' => $segment->fingerprint,
             'generation' => $generation,
             'occurred_at' => $segment->start ?? $review->analysis->workDate,
+            'rate_ordinary_minutes' => $segment->rateMinutes->ordinaryMinutes,
+            'rate_extra25_minutes' => $segment->rateMinutes->extra25Minutes,
+            'rate_extra50_minutes' => $segment->rateMinutes->extra50Minutes,
+            'rate_extra75_minutes' => $segment->rateMinutes->extra75Minutes,
+            'rate_extra100_minutes' => $segment->rateMinutes->extra100Minutes,
             'payload' => json_encode([
                 'segment' => $this->segmentPayload($segment),
                 'analysis' => [
@@ -321,13 +323,12 @@ class PayrollReviewProjection
         ];
     }
 
-    private function overtimeRenderData(Collection $filteredOvertimeRows, int $page): array
+    private function overtimeRenderData(LengthAwarePaginator $rows, int $pendingCount): array
     {
-        $perPage = 25;
-        $pageRows = $filteredOvertimeRows->forPage($page, $perPage)->values();
+        $pageRows = $rows->getCollection();
 
         return [
-            'rows' => new LengthAwarePaginator($pageRows, $filteredOvertimeRows->count(), $perPage, $page, ['path' => request()->url(), 'pageName' => 'overtimePage']),
+            'rows' => $rows,
             'groups' => $pageRows
                 ->groupBy(fn (array $row) => $row['review']->employee->id)
                 ->map(fn (Collection $rows) => [
@@ -335,8 +336,20 @@ class PayrollReviewProjection
                     'rows' => $rows,
                     'minutes' => $rows->sum(fn (array $row) => $row['candidate']->minutes),
                 ])->values(),
-            'pendingCount' => $filteredOvertimeRows->where('decision', null)->count(),
+            'pendingCount' => $pendingCount,
         ];
+    }
+
+    private function rateMinutesColumn(string $rate): ?string
+    {
+        return match ($rate) {
+            'ordinary' => 'rate_ordinary_minutes',
+            'extra25' => 'rate_extra25_minutes',
+            'extra50' => 'rate_extra50_minutes',
+            'extra75' => 'rate_extra75_minutes',
+            'extra100' => 'rate_extra100_minutes',
+            default => null,
+        };
     }
 
     private function tableVersion($query): array
