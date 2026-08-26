@@ -266,6 +266,7 @@ class OvertimeReviewPanel extends Component
     {
         $this->resetPage('overtimePage');
         $this->clearOvertimeSelection();
+        $this->closeOvertimeBatchModal();
     }
 
     private function pendingTargets(?int $page = null): Collection
