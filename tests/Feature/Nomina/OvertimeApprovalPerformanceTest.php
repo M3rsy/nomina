@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Nomina\OvertimeReviewPanel;
 use App\Livewire\Nomina\Revisar;
 use App\Models\Company;
 use App\Models\Employee;
@@ -73,27 +74,32 @@ test('approves overtime within a bounded query budget for a representative perio
     app(CurrentCompany::class)->set($company);
     $this->actingAs($actor);
 
-    $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
-        ->call(
-            'openOvertimeDecision',
-            $employee->id,
-            $start->toDateString(),
-            $candidate->key,
-            OvertimeDecision::APPROVED,
-        )
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $period])
+        ->call('openOvertimeDecision', $employee->id, $start->toDateString(), $candidate->key,
+            OvertimeDecision::APPROVED, '14:00 → 14:30 · 30 min', '2026-07-20T14:00', '2026-07-20T14:30')
         ->assertSet('showOvertimeDecisionModal', true)
-        ->set('overtimeDecisionReason', 'Representative approval');
+        ->set('overtimeDecisionReason', 'Representative approval')
+        ->call('submitOvertimeDecision')
+        ->assertDispatched('overtime-decision-submitted');
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $period]);
 
     DB::flushQueryLog();
     DB::enableQueryLog();
 
     try {
         $component
-            ->call('saveOvertimeDecision')
+            ->call('saveOvertimeDecisionFromPanel', [
+                'overtimeDecisionEmployeeId' => $employee->id,
+                'overtimeDecisionWorkDate' => $start->toDateString(),
+                'overtimeCandidateKey' => $candidate->key,
+                'overtimeDecision' => OvertimeDecision::APPROVED,
+                'overtimeDecisionReason' => 'Representative approval',
+                'overtimeApprovedStartsAt' => '2026-07-20T14:00',
+                'overtimeApprovedEndsAt' => '2026-07-20T14:30',
+            ])
             ->assertHasNoErrors()
-            ->assertSet('showOvertimeDecisionModal', false)
-            ->assertViewHas('overtimeRows', fn ($rows) => $rows->total() === 27)
-            ->assertSee('Tramo completo aprobado y registrado en el historial.');
+            ->assertDispatched('overtime-decision-recorded');
         $queryCount = count(DB::getQueryLog());
     } finally {
         DB::disableQueryLog();

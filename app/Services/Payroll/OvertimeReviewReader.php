@@ -32,6 +32,30 @@ final class OvertimeReviewReader
         ), $page);
     }
 
+    /**
+     * @param  array{search:string,status:string,date:string,rate:string}  $filters
+     * @return Collection<string, array{employee_id:int,work_date:string,candidate_key:string,fingerprint:string}>
+     */
+    public function pendingTargetsForPeriod(PayPeriod $period, ?int $uploadedFileId, array $filters, ?int $page = null): Collection
+    {
+        $rows = $this->filteredRows($this->reviews->forPeriod($period, $uploadedFileId), $filters);
+        if ($page !== null) {
+            $rows = $rows->forPage($page, 25)->values();
+        }
+
+        return $rows->filter(fn (array $row): bool => $row['decision'] === null)
+            ->mapWithKeys(function (array $row): array {
+                $target = [
+                    'employee_id' => $row['review']->employee->id,
+                    'work_date' => $row['review']->analysis->workDate->toDateString(),
+                    'candidate_key' => $row['candidate']->key,
+                    'fingerprint' => $row['candidate']->fingerprint,
+                ];
+
+                return [implode('|', array_slice($target, 0, 3)) => $target];
+            });
+    }
+
     private function filteredRows(Collection $reviews, array $filters): Collection
     {
         return $reviews
