@@ -90,6 +90,27 @@ test('processes a queued run through the payroll processor', function () {
             && is_string($result->snapshot_hash) && strlen($result->snapshot_hash) === 64))->toBeTrue();
 });
 
+test('records scoped performance metrics after a completed payroll run', function () {
+    [, $run] = payrollRunWorkerFixture();
+
+    (new ProcessPayrollRun($run->id))->handle(app(PayrollProcessor::class));
+
+    $telemetry = PayrollRunTelemetry::query()
+        ->where('payroll_run_id', $run->id)
+        ->where('event', PayrollRunTelemetry::COMPLETED)
+        ->sole();
+
+    expect($telemetry->duration_ms)->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($telemetry->queue_wait_ms)->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($telemetry->db_time_ms)->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($telemetry->query_count)->toBeInt()->toBeGreaterThan(0)
+        ->and($telemetry->peak_memory_mb)->toBeInt()->toBeGreaterThanOrEqual(0)
+        ->and($telemetry->employee_count)->toBe(1)
+        ->and($telemetry->day_count)->toBe(15)
+        ->and($telemetry->result_count)->toBeGreaterThan(0)
+        ->and($telemetry->inserted_count + $telemetry->reused_count)->toBe($telemetry->result_count);
+});
+
 test('completes a run when the telemetry table is unavailable', function () {
     [$period, $run] = payrollRunWorkerFixture();
     Log::spy();

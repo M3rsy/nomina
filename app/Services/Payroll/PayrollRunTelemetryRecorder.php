@@ -22,14 +22,16 @@ final class PayrollRunTelemetryRecorder
         $this->append($run, PayrollRunTelemetry::STARTED);
     }
 
-    public function completed(PayrollRun $run): void
+    /** @param array<string, int> $metrics */
+    public function completed(PayrollRun $run, array $metrics = []): void
     {
-        $this->append($run, PayrollRunTelemetry::COMPLETED);
+        $this->append($run, PayrollRunTelemetry::COMPLETED, metrics: $metrics);
     }
 
-    public function failed(PayrollRun $run, Throwable $exception): void
+    /** @param array<string, int> $metrics */
+    public function failed(PayrollRun $run, Throwable $exception, array $metrics = []): void
     {
-        $this->append($run, PayrollRunTelemetry::FAILED, $this->failureCode($exception));
+        $this->append($run, PayrollRunTelemetry::FAILED, $this->failureCode($exception), metrics: $metrics);
     }
 
     public function failedWithCode(PayrollRun $run, string $code): void
@@ -37,9 +39,10 @@ final class PayrollRunTelemetryRecorder
         $this->append($run, PayrollRunTelemetry::FAILED, $code);
     }
 
-    private function append(PayrollRun $run, string $event, ?string $code = null, ?int $previousRunId = null): void
+    /** @param array<string, int> $metrics */
+    private function append(PayrollRun $run, string $event, ?string $code = null, ?int $previousRunId = null, array $metrics = []): void
     {
-        DB::afterCommit(function () use ($run, $event, $code, $previousRunId): void {
+        DB::afterCommit(function () use ($run, $event, $code, $previousRunId, $metrics): void {
             try {
                 PayrollRunTelemetry::create([
                     'payroll_run_id' => $run->id,
@@ -47,6 +50,7 @@ final class PayrollRunTelemetryRecorder
                     'event' => $event,
                     'code' => $code,
                     'occurred_at' => now(),
+                    ...$metrics,
                 ]);
             } catch (QueryException $exception) {
                 $this->reportWriteFailure($run, $event, $exception);

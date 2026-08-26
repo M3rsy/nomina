@@ -5,7 +5,10 @@ namespace App\Providers;
 use App\Models\User;
 use App\Services\BackupArchiveVerifier;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\PayrollRunMetrics;
 use App\View\Components\AppLayout;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
@@ -25,6 +28,7 @@ class AppServiceProvider extends ServiceProvider
             return new CurrentCompany;
         });
         $this->app->singleton(BackupArchiveVerifier::class);
+        $this->app->singleton(PayrollRunMetrics::class);
 
         if ($this->shouldUseFileCacheForMaintenanceCommands()) {
             config(['cache.default' => 'file']);
@@ -43,6 +47,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Event::listen(BackupManifestWasCreated::class, [$backupArchiveVerifier, 'captureManifest']);
         Event::listen(BackupZipWasCreated::class, [$backupArchiveVerifier, 'verifyArchive']);
+        DB::listen(fn (QueryExecuted $query) => app(PayrollRunMetrics::class)->record($query));
 
         Gate::define('backups.manage-global', fn (User $user): bool => self::canManageGlobalBackups($user));
 
