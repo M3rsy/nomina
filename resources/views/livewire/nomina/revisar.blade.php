@@ -249,6 +249,18 @@
         </div>
     </section>
 
+    @if ($activeOvertimeBatchId)
+        <livewire:nomina.overtime-batch-progress
+            :pay-period="$payPeriod"
+            :batch-id="$activeOvertimeBatchId"
+            :key="'overtime-batch-'.$activeOvertimeBatchId"
+        />
+    @endif
+
+    <livewire:nomina.overtime-review-panel :pay-period="$payPeriod" :uploaded-file-id="$uploaded_file_id" :is-blocked="$isBlocked" />
+
+    {{-- Overtime representation moved to OvertimeReviewPanel. --}}
+    @if (false)
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -469,6 +481,7 @@
             </div>
         @endif
     </section>
+    @endif
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -872,6 +885,7 @@
         </div>
     @endif
 
+    @if (false)
     @if ($showOvertimeBatchModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
             <div role="dialog" aria-modal="true" aria-labelledby="overtime_batch_title" class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
@@ -953,6 +967,7 @@
                 </form>
             </div>
         </div>
+    @endif
     @endif
 
     @if ($showEditModal)
