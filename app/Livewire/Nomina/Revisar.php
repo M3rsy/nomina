@@ -17,6 +17,7 @@ use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollPeriodReviewSnapshot;
+use App\Services\Attendance\PayrollPeriodReviewSnapshotContext;
 use App\Services\Attendance\PayrollReadinessChecker;
 use App\Services\Attendance\PayrollShiftEvaluationResolver;
 use App\Services\Attendance\RawMarkMutationGuard;
@@ -181,7 +182,7 @@ class Revisar extends Component
 
     public bool $locked = false;
 
-    private ?array $periodReviewSnapshot = null;
+    private ?PayrollPeriodReviewSnapshotContext $periodReviewSnapshot = null;
 
     public function mount(PayPeriod $payPeriod): void
     {
@@ -1372,9 +1373,9 @@ class Revisar extends Component
         ];
     }
 
-    private function detectFaltas(?array $snapshot = null): Collection
+    private function detectFaltas(?PayrollPeriodReviewSnapshotContext $snapshot = null): Collection
     {
-        return ($snapshot ?? $this->periodReviewSnapshot())['absences'];
+        return app(PayrollPeriodReviewSnapshot::class)->absences($snapshot ?? $this->periodReviewSnapshot());
     }
 
     private function findRawMark(?int $id): ?RawMark
@@ -1436,7 +1437,7 @@ class Revisar extends Component
     ): bool {
         $target = $payPeriod ?? $this->payPeriod;
         $this->periodReviewSnapshot = app(PayrollPeriodReviewSnapshot::class)
-            ->forPeriod($target, $calendarContext);
+            ->captureForPeriod($target, $calendarContext);
         $this->readinessBlockers = app(PayrollReadinessChecker::class)
             ->blockers($target, $calendarContext, $this->periodReviewSnapshot)
             ->values()
@@ -1450,10 +1451,10 @@ class Revisar extends Component
         return $this->readinessBlockers !== [];
     }
 
-    private function periodReviewSnapshot(): array
+    private function periodReviewSnapshot(): PayrollPeriodReviewSnapshotContext
     {
         return $this->periodReviewSnapshot ??= app(PayrollPeriodReviewSnapshot::class)
-            ->forPeriod($this->payPeriod, includeBlockers: false);
+            ->captureForPeriod($this->payPeriod);
     }
 
     private function projectedReviewData(): ?array

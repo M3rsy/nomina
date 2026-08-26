@@ -46,13 +46,18 @@ final class OvertimeDecisionBatchRequester
                 $period = PayPeriod::withoutCompanyScope()->with('company')->lockForUpdate()->findOrFail($period->id);
                 $this->authorize($actor = User::query()->findOrFail($actor->id), $period->company);
                 $this->validatePeriod($period);
-                $pending = $this->snapshot->forPeriod($period)['reviews']->flatMap(
-                    fn (PayrollShiftReview $review) => $review->analysis->overtimeCandidates
-                        ->filter(fn (AttendanceSegment $candidate): bool => $review->decisionFor($candidate) === null)
-                        ->mapWithKeys(fn (AttendanceSegment $candidate): array => [
-                            $this->targetKey($review->employee->id, $review->occurrence->workDate->toDateString(), $candidate->key) => $candidate,
-                        ]),
-                );
+                $requested = $canonical->mapWithKeys(fn (array $target): array => [
+                    $this->targetKey($target['employee_id'], $target['work_date'], $target['candidate_key']) => true,
+                ]);
+                $pending = collect();
+                $this->snapshot->forEachReview($this->snapshot->captureForPeriod($period), function (PayrollShiftReview $review) use ($requested, $pending): void {
+                    foreach ($review->analysis->overtimeCandidates as $candidate) {
+                        $key = $this->targetKey($review->employee->id, $review->occurrence->workDate->toDateString(), $candidate->key);
+                        if ($requested->has($key) && $review->decisionFor($candidate) === null) {
+                            $pending->put($key, $candidate);
+                        }
+                    }
+                });
                 $items = $canonical->map(function (array $target) use ($pending): array {
                     $candidate = $pending->get($this->targetKey(
                         $target['employee_id'], $target['work_date'], $target['candidate_key'],

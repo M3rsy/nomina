@@ -13,8 +13,8 @@ use App\Models\RawMark;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Models\WorkScheduleProfilePublication;
-use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\AttendanceSegment;
+use App\Services\Attendance\PayrollPeriodReviewSnapshot;
 use App\Services\Attendance\PayrollShiftReview;
 use Carbon\CarbonImmutable;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -25,7 +25,7 @@ use stdClass;
 
 class PayrollReviewProjection
 {
-    public function __construct(private AttendanceReviewQuery $reviews) {}
+    public function __construct(private PayrollPeriodReviewSnapshot $snapshots) {}
 
     public function rebuild(PayPeriod $payPeriod): int
     {
@@ -34,32 +34,49 @@ class PayrollReviewProjection
         }
 
         $generation = $this->generation($payPeriod);
-        $rows = $this->reviews->forPeriod($payPeriod, snapshot: null)
-            ->flatMap(fn (PayrollShiftReview $review): Collection => $this->projectReview($payPeriod, $review, $generation));
+        $snapshot = $this->snapshots->captureForPeriod($payPeriod);
 
-        return DB::transaction(function () use ($payPeriod, $generation, $rows): int {
+        return DB::transaction(function () use ($payPeriod, $generation, $snapshot): int {
             PayrollReviewEntry::withoutCompanyScope()
                 ->where('pay_period_id', $payPeriod->id)
                 ->where('generation', $generation)
                 ->delete();
 
-            $rows->chunk(500)->each(fn (Collection $chunk) => PayrollReviewEntry::query()->upsert(
-                $chunk->all(),
-                ['pay_period_id', 'type', 'source_key', 'generation'],
-                [
-                    'company_id', 'employee_id', 'work_date', 'status', 'source_fingerprint', 'occurred_at',
-                    'rate_ordinary_minutes', 'rate_extra25_minutes', 'rate_extra50_minutes', 'rate_extra75_minutes',
-                    'rate_extra100_minutes', 'payload', 'updated_at',
-                ],
-            ));
+            $rows = collect();
+            $count = 0;
+            $this->snapshots->forEachReview(
+                $snapshot,
+                function (PayrollShiftReview $review) use ($payPeriod, $generation, $rows, &$count): void {
+                    foreach ($this->projectReview($payPeriod, $review, $generation) as $row) {
+                        $rows->push($row);
+                        $count++;
+                        if ($rows->count() === 500) {
+                            $this->upsertRows($rows);
+                            $rows->splice(0);
+                        }
+                    }
+                },
+            );
+            if ($rows->isNotEmpty()) {
+                $this->upsertRows($rows);
+            }
 
             PayrollReviewEntry::withoutCompanyScope()
                 ->where('pay_period_id', $payPeriod->id)
                 ->where('generation', '!=', $generation)
                 ->delete();
 
-            return $rows->count();
+            return $count;
         });
+    }
+
+    private function upsertRows(Collection $rows): void
+    {
+        PayrollReviewEntry::query()->upsert($rows->all(), ['pay_period_id', 'type', 'source_key', 'generation'], [
+            'company_id', 'employee_id', 'work_date', 'status', 'source_fingerprint', 'occurred_at',
+            'rate_ordinary_minutes', 'rate_extra25_minutes', 'rate_extra50_minutes', 'rate_extra75_minutes',
+            'rate_extra100_minutes', 'payload', 'updated_at',
+        ]);
     }
 
     public function freshGeneration(PayPeriod $payPeriod): ?string
