@@ -1,6 +1,6 @@
 <div class="relative isolate mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
     <x-ui.loading-overlay
-        target="continueToReady,confirmContinueToReady,startPayrollRun,saveAttendanceException,saveOvertimeBatch,saveOvertimeDecision,saveManualMark,saveEditRawMark,markCorrected,deleteRawMark,saveAssign,saveCreatedEmployee,reopenProcessedPeriod"
+        target="continueToReady,confirmContinueToReady,startPayrollRun,saveAttendanceException,saveManualMark,saveEditRawMark,markCorrected,deleteRawMark,saveAssign,saveCreatedEmployee,reopenProcessedPeriod"
         message="Validando y preparando la nómina…"
     />
 

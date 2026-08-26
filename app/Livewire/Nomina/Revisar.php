@@ -1522,9 +1522,30 @@ class Revisar extends Component
             'overtimeApprovedStartsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i'],
             'overtimeApprovedEndsAt' => ['required_if:overtimeDecision,partial', 'date_format:Y-m-d\TH:i', 'after:overtimeApprovedStartsAt'],
         ], ['overtimeDecisionReason.required' => 'Debe indicar el motivo de la decisión.'])->validate();
+        if (validator(['work_date' => $validated['overtimeDecisionWorkDate']], [
+            'work_date' => ['required', 'date_format:Y-m-d'],
+        ])->fails()) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'La fecha laboral del candidato no es válida.']);
+        }
         $employee = $this->findPeriodEmployee((int) $validated['overtimeDecisionEmployeeId']);
         if ($employee === null) {
             throw ValidationException::withMessages(['overtimeDecisionEmployeeId' => 'El empleado no pertenece a este período.']);
+        }
+
+        try {
+            $review = app(PayrollShiftEvaluationResolver::class)->review(
+                $this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'],
+            );
+        } catch (InvalidArgumentException) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'El candidato no pertenece a este período.']);
+        }
+        $candidate = $review->analysis->overtimeCandidates->firstWhere('key', $validated['overtimeCandidateKey']);
+        if ($candidate === null) {
+            throw ValidationException::withMessages(['overtimeCandidateKey' => 'El candidato ya no coincide con las marcas vigentes.']);
+        }
+        if ($validated['overtimeDecision'] === OvertimeDecision::PARTIAL
+            && $review->analysis->payrollPolicyKey !== 'duration-first-v2') {
+            throw ValidationException::withMessages(['overtimeDecision' => 'La aprobación parcial solo está disponible para candidatos de duración primero.']);
         }
 
         $recorder = app(OvertimeDecisionRecorder::class);

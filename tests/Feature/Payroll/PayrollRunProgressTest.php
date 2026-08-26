@@ -157,8 +157,7 @@ test('one progress retry action creates and follows the replacement run', functi
     $this->actingAs($operator);
     $parent = Livewire::test(Revisar::class, ['payPeriod' => $period])
         ->set('search', 'Ana')
-        ->set('status', 'valid')
-        ->set('overtimeStatus', 'rejected');
+        ->set('status', 'valid');
     $first->markFailed('sensitive database credentials');
     PayrollRunTelemetry::create([
         'payroll_run_id' => $first->id,
@@ -199,8 +198,7 @@ test('one progress retry action creates and follows the replacement run', functi
         ->dispatch('payroll-run-retried', failedRunId: $first->id, runId: $replacement->id)
         ->assertSet('activePayrollRunId', $replacement->id)
         ->assertSet('search', 'Ana')
-        ->assertSet('status', 'valid')
-        ->assertSet('overtimeStatus', 'rejected');
+        ->assertSet('status', 'valid');
 
     expect(PayrollRun::withoutCompanyScope()->count())->toBe(2)
         ->and($replacement->request_key)
