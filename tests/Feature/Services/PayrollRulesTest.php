@@ -52,6 +52,26 @@ test('overtime bands ignore historical per-schedule configuration', function () 
         ->and($bands[3])->toMatchArray(['start' => 1080, 'end' => 1440, 'bucket' => 'extra50', 'extra_percent' => 50]);
 });
 
+test('overtime bands remain canonical across repeated calls and caller mutation', function () {
+    $rules = new PayrollRules;
+    $customBands = [
+        ['start' => '00:00', 'end' => '24:00', 'rate' => 100],
+    ];
+
+    $first = $rules->normalizedOvertimeBands($customBands);
+    $first[0]['extra_percent'] = 100;
+    $second = $rules->normalizedOvertimeBands(null);
+    $third = $rules->normalizedOvertimeBands($customBands);
+
+    expect($second)->toBe($third)
+        ->and($second[0])->toMatchArray([
+            'start' => 0,
+            'end' => 360,
+            'bucket' => 'extra75',
+            'extra_percent' => 75,
+        ]);
+});
+
 test('canonical global rate bands always provide complete coverage', function () {
     expect((new PayrollRules)->hasCompleteRateBandCoverage([
         ['start' => '06:00', 'end' => '12:00', 'rate' => 0],
