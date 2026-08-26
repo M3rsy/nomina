@@ -6,6 +6,8 @@ use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\PayrollRun;
 use App\Services\Payroll\PayrollProcessor;
+use App\Services\Payroll\PayrollProcessReport;
+use App\Services\Payroll\PayrollRunMetrics;
 use App\Services\Payroll\PayrollRunTelemetryRecorder;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -41,9 +43,33 @@ final class ProcessPayrollRun implements ShouldQueue
     public function handle(PayrollProcessor $processor): void
     {
         $telemetry = app(PayrollRunTelemetryRecorder::class);
-        $identity = $this->identity();
+        $metrics = app(PayrollRunMetrics::class);
+        $metrics->begin();
+        try {
+            $identity = $this->identity();
+        } catch (Throwable $exception) {
+            $metrics->finish();
 
-        if ($identity === null || ! $this->begin($identity, $telemetry)) {
+            throw $exception;
+        }
+
+        if ($identity === null) {
+            $metrics->finish();
+
+            return;
+        }
+
+        try {
+            $started = $this->begin($identity, $telemetry);
+        } catch (Throwable $exception) {
+            $metrics->finish();
+
+            throw $exception;
+        }
+
+        if (! $started) {
+            $metrics->finish();
+
             return;
         }
 
@@ -51,9 +77,14 @@ final class ProcessPayrollRun implements ShouldQueue
             $period = PayPeriod::withoutCompanyScope()
                 ->where('company_id', $identity->company_id)
                 ->findOrFail($identity->pay_period_id);
-            $processor->processPayPeriod($period);
-            $this->complete($identity, $telemetry);
+            $report = $processor->processPayPeriod($period);
+            $run = PayrollRun::withoutCompanyScope()
+                ->where('company_id', $identity->company_id)
+                ->where('pay_period_id', $identity->pay_period_id)
+                ->findOrFail($this->runId);
+            $this->complete($identity, $telemetry, $this->metrics($metrics, $run, $period, $report));
         } catch (Throwable $exception) {
+            $metrics->finish();
             $this->rememberFailure($identity, $exception);
             throw $exception;
         }
@@ -61,20 +92,34 @@ final class ProcessPayrollRun implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        $identity = $this->identity();
+        $metrics = app(PayrollRunMetrics::class);
+        $metrics->begin();
+        try {
+            $identity = $this->identity();
+        } catch (Throwable $exception) {
+            $metrics->finish();
+
+            throw $exception;
+        }
 
         if ($identity === null) {
+            $metrics->finish();
+
             return;
         }
 
-        DB::transaction(function () use ($identity, $exception): void {
-            [, $run] = $this->lockedContext($identity);
+        try {
+            DB::transaction(function () use ($identity, $exception, $metrics): void {
+                [, $run] = $this->lockedContext($identity);
 
-            if ($run->isActive()) {
-                $run->markFailed($run->last_error ?: $this->errorMessage($exception));
-                app(PayrollRunTelemetryRecorder::class)->failed($run, $exception);
-            }
-        });
+                if ($run->isActive()) {
+                    $run->markFailed($run->last_error ?: $this->errorMessage($exception));
+                    app(PayrollRunTelemetryRecorder::class)->failed($run, $exception, $metrics->finish($run->created_at));
+                }
+            });
+        } finally {
+            $metrics->finish();
+        }
     }
 
     private function identity(): ?stdClass
@@ -118,12 +163,13 @@ final class ProcessPayrollRun implements ShouldQueue
         });
     }
 
-    private function complete(stdClass $identity, PayrollRunTelemetryRecorder $telemetry): void
+    /** @param array<string, int> $metrics */
+    private function complete(stdClass $identity, PayrollRunTelemetryRecorder $telemetry, array $metrics): void
     {
-        DB::transaction(function () use ($identity, $telemetry): void {
+        DB::transaction(function () use ($identity, $telemetry, $metrics): void {
             [, $run] = $this->lockedContext($identity);
             $run->markCompleted();
-            $telemetry->completed($run);
+            $telemetry->completed($run, $metrics);
         });
     }
 
@@ -156,5 +202,18 @@ final class ProcessPayrollRun implements ShouldQueue
     private function errorMessage(Throwable $exception): string
     {
         return Str::limit($exception->getMessage() ?: class_basename($exception), 2000, '');
+    }
+
+    /** @return array<string, int> */
+    private function metrics(PayrollRunMetrics $metrics, PayrollRun $run, PayPeriod $period, PayrollProcessReport $report): array
+    {
+        return [
+            ...$metrics->finish($run->created_at),
+            'employee_count' => $report->employeesProcessed,
+            'day_count' => $period->start_date->diffInDays($period->end_date) + 1,
+            'result_count' => $report->resultsInserted + $report->resultsReused,
+            'inserted_count' => $report->resultsInserted,
+            'reused_count' => $report->resultsReused,
+        ];
     }
 }
