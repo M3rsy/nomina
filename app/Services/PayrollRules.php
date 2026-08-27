@@ -39,6 +39,9 @@ class PayrollRules
         ['start' => self::BAND_EXTRA_50_START, 'end' => self::BAND_EXTRA_50_END, 'extra_percent' => 50],
     ];
 
+    /** @var array<int, array{start: int, end: int, bucket: string, extra_percent: int}>|null */
+    private ?array $canonicalOvertimeBands = null;
+
     public function isHoliday(Company $company, CarbonImmutable $date): bool
     {
         return Holiday::withoutCompanyScope()
@@ -261,6 +264,6 @@ class PayrollRules
 
     private function defaultOvertimeBands(): array
     {
-        return $this->parseOvertimeBands(self::DEFAULT_BANDS) ?? [];
+        return $this->canonicalOvertimeBands ??= $this->parseOvertimeBands(self::DEFAULT_BANDS) ?? [];
     }
 }

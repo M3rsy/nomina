@@ -22,6 +22,11 @@ class PayrollReviewEntry extends Model
         'source_fingerprint',
         'generation',
         'occurred_at',
+        'rate_ordinary_minutes',
+        'rate_extra25_minutes',
+        'rate_extra50_minutes',
+        'rate_extra75_minutes',
+        'rate_extra100_minutes',
         'payload',
     ];
 
@@ -30,6 +35,11 @@ class PayrollReviewEntry extends Model
         return [
             'work_date' => 'date',
             'occurred_at' => 'immutable_datetime',
+            'rate_ordinary_minutes' => 'integer',
+            'rate_extra25_minutes' => 'integer',
+            'rate_extra50_minutes' => 'integer',
+            'rate_extra75_minutes' => 'integer',
+            'rate_extra100_minutes' => 'integer',
             'payload' => 'array',
         ];
     }
