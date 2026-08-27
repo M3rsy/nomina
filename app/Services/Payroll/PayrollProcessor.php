@@ -68,6 +68,14 @@ class PayrollProcessor
 
                 $rulesVersion = config('payroll.rules_version', '1');
                 $resultGeneration = $payPeriod->authorized_result_generation ?? $payPeriod->current_result_generation;
+                $this->snapshotWriter->preloadForPayrollPeriod(
+                    $payPeriod->company_id,
+                    $payPeriod->id,
+                    $employees->pluck('id')->map(fn (int $id): int => $id)->all(),
+                    $start->toDateString(),
+                    $end->toDateString(),
+                    $resultGeneration,
+                );
 
                 for ($date = $start->copy(); $date->lte($end); $date = $date->addDay()) {
                     foreach ($employees as $employee) {

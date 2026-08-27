@@ -16,6 +16,7 @@ use App\Services\Payroll\PayrollProcessor;
 use App\Services\Payroll\PayrollRunRequester;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 dataset('payroll benchmark profiles', [
@@ -234,6 +235,75 @@ test('reports stream review metrics with outputs matching materialized reviews',
         ->and($streamMetrics['review_stream_output_count'])->toBe($legacyOutputs['count'])
         ->and($streamMetrics['review_stream_output_checksum'])->toBe($legacyOutputs['checksum']);
 });
+
+test('bounds snapshot writer lookup queries as payroll rows grow', function (int $employeeCount): void {
+    $start = CarbonImmutable::parse('2026-07-01');
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+
+    foreach (range(0, 6) as $dayOfWeek) {
+        WorkSchedule::factory()->forProfile($profile)->create([
+            'day_of_week' => $dayOfWeek,
+            'is_working_day' => true,
+            'start_time' => '06:00',
+            'end_time' => '14:00',
+            'base_ordinary_hours' => 8,
+        ]);
+    }
+
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => $start,
+        'end_date' => $start->addDay(),
+        'status' => 'ready',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $employees = Employee::factory()->count($employeeCount)->forCompany($company)->create();
+    $rowNumber = 1;
+
+    foreach ($employees as $employee) {
+        app(EmployeeScheduleAssigner::class)->assign($employee, $profile, $start, 'Writer query fixture');
+
+        for ($date = $start; $date->lte($period->end_date); $date = $date->addDay()) {
+            foreach (['06:00:00', '14:00:00'] as $time) {
+                RawMark::factory()->create([
+                    'company_id' => $company->id,
+                    'pay_period_id' => $period->id,
+                    'uploaded_file_id' => $file->id,
+                    'employee_external_id' => $employee->external_id,
+                    'employee_id' => $employee->id,
+                    'event_at' => "{$date->toDateString()} {$time}",
+                    'raw_line' => "{$employee->external_id} {$date->toDateString()} {$time}",
+                    'source' => 'glg',
+                    'row_number' => $rowNumber++,
+                    'status' => 'valid',
+                ]);
+            }
+        }
+    }
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    app(PayrollProcessor::class)->processPayPeriod($period);
+    $queries = DB::getQueryLog();
+    DB::disableQueryLog();
+
+    $lookups = collect($queries)
+        ->filter(fn (array $query): bool => str_starts_with(strtolower($query['query']), 'select')
+            && str_contains($query['query'], 'from "payroll_results"'))
+        ->values();
+
+    expect($lookups)->toHaveCount(1)
+        ->and($lookups->pluck('query')->unique())->toHaveCount(1)
+        ->and($lookups->first()['query'])->toContain('where "company_id" = ?')
+        ->toContain('and "pay_period_id" = ?')
+        ->toContain('and "employee_id" in (')
+        ->toContain('and strftime(\'%Y-%m-%d\', "date") >= cast(? as text)')
+        ->toContain('and strftime(\'%Y-%m-%d\', "date") <= cast(? as text)')
+        ->toContain('and "result_generation" in (?)');
+})->with([
+    'two employees × two days' => 2,
+    'four employees × two days' => 4,
+]);
 
 /** @return array{review_stream_duration_ms: int, review_stream_peak_memory_mb: int, review_stream_output_count: int, review_stream_output_checksum: int} */
 function payrollReviewStreamMetrics(PayrollPeriodReviewSnapshot $snapshots, PayPeriod $period): array
