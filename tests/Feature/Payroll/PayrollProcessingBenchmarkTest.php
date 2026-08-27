@@ -41,7 +41,6 @@ test('benchmarks payroll processing and review with an opt-in profile', function
     $end = $start->addDays($dayCount - 1);
     $company = Company::factory()->create();
     $scheduleProfile = WorkScheduleProfile::factory()->forCompany($company)->create();
-
     foreach (range(0, 6) as $dayOfWeek) {
         WorkSchedule::factory()->forProfile($scheduleProfile)->create([
             'day_of_week' => $dayOfWeek,
