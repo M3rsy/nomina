@@ -12,7 +12,7 @@ final class PayrollResultsReviewProjection
     public function summary(PayPeriod $period, ?int $employeeId, ?string $absence): array
     {
         $totals = $this->query($period, $employeeId, $absence)->selectRaw(
-            'count(*) as total_days, count(distinct employee_id) as total_employees, sum(ordinary_minutes) as ordinary_minutes, sum(extra_25_minutes) as extra_25_minutes, sum(extra_50_minutes) as extra_50_minutes, sum(extra_75_minutes) as extra_75_minutes, sum(extra_100_minutes) as extra_100_minutes, sum(case when is_absence = 1 then 1 else 0 end) as absence_days, sum(approved_overtime_minutes) as approved_overtime_minutes',
+            'count(*) as total_days, count(distinct employee_id) as total_employees, sum(ordinary_minutes) as ordinary_minutes, sum(extra_25_minutes) as extra_25_minutes, sum(extra_50_minutes) as extra_50_minutes, sum(extra_75_minutes) as extra_75_minutes, sum(extra_100_minutes) as extra_100_minutes, sum(case when is_absence = true then 1 else 0 end) as absence_days, sum(approved_overtime_minutes) as approved_overtime_minutes',
         )->first();
 
         return [
