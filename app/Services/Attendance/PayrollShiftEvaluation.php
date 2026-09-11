@@ -8,6 +8,10 @@ use Illuminate\Support\Collection;
 
 readonly class PayrollShiftEvaluation
 {
+    public const DAY_TYPE_ATTENDANCE = 'attendance';
+
+    public const DAY_TYPE_PAID_VACATION = 'paid_vacation';
+
     public const BLOCKED = 'blocked';
 
     public const PROCESSABLE = 'processable';
@@ -37,5 +41,8 @@ readonly class PayrollShiftEvaluation
         public array $metadata = [],
         public ?int $publicationId = null,
         public ?string $payrollPolicyKey = null,
+        public string $dayType = self::DAY_TYPE_ATTENDANCE,
+        public ?int $vacationId = null,
+        public ?int $vacationDayId = null,
     ) {}
 }

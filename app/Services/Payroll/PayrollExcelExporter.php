@@ -23,19 +23,27 @@ class PayrollExcelExporter
     /** @var array<string, int> */
     private const COLUMN_WIDTHS = [
         'A' => 12,
-        'B' => 30,
-        'C' => 22,
-        'D' => 22,
-        'E' => 16,
-        'F' => 18,
+        'B' => 18,
+        'C' => 30,
+        'D' => 24,
+        'E' => 22,
+        'F' => 22,
         'G' => 16,
-        'H' => 16,
+        'H' => 18,
         'I' => 16,
-        'J' => 17,
-        'K' => 15,
-        'L' => 13,
-        'AE' => 18,
-        'AF' => 24,
+        'J' => 16,
+        'K' => 16,
+        'L' => 17,
+        'M' => 15,
+    ];
+
+    /** @var array<string, int> */
+    private const AUDIT_COLUMN_WIDTHS = [
+        'A' => 18, 'B' => 18, 'C' => 30, 'D' => 24, 'E' => 15, 'F' => 13,
+        'G' => 22, 'H' => 22, 'I' => 18, 'J' => 45, 'K' => 45, 'L' => 18,
+        'M' => 16, 'N' => 16, 'O' => 16, 'P' => 17, 'Q' => 16, 'R' => 18,
+        'S' => 30, 'T' => 45, 'U' => 45, 'V' => 45, 'W' => 45, 'X' => 45,
+        'Y' => 20, 'Z' => 22, 'AA' => 20, 'AB' => 18, 'AC' => 45,
     ];
 
     private const DATE_FORMAT = 'yyyy-mm-dd h:mm AM/PM';
@@ -51,13 +59,25 @@ class PayrollExcelExporter
     {
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Hoja1');
+        $sheet->setTitle('Asistencia');
+        $auditSheet = $spreadsheet->createSheet();
+        $auditSheet->setTitle('Auditoría');
+
+        $results = PayrollResult::withoutCompanyScope()
+            ->where('pay_period_id', $payPeriod->id)
+            ->orderBy('employee_id')
+            ->orderBy('date')
+            ->get();
 
         $this->applyColumnWidths($sheet);
         $this->writeTitleRows($sheet, $payPeriod);
         $this->writeHeaderRow($sheet);
-        $this->writeDataRows($sheet, $payPeriod);
+        $this->writeDataRows($sheet, $results);
         $this->applyHeaderStyle($sheet);
+
+        $this->applyColumnWidths($auditSheet, self::AUDIT_COLUMN_WIDTHS);
+        $this->writeAuditRows($auditSheet, $payPeriod, $results);
+        $spreadsheet->setActiveSheetIndex(0);
 
         $path = tempnam(sys_get_temp_dir(), 'payroll_export_').'.xlsx';
         $writer = new Xlsx($spreadsheet);
@@ -74,16 +94,17 @@ class PayrollExcelExporter
         return "Asistencia {$start} hasta {$end}.xlsx";
     }
 
-    private function applyColumnWidths(Worksheet $sheet): void
+    /** @param array<string, int> $widths */
+    private function applyColumnWidths(Worksheet $sheet, array $widths = self::COLUMN_WIDTHS): void
     {
-        foreach (self::COLUMN_WIDTHS as $column => $width) {
+        foreach ($widths as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
     }
 
     private function writeTitleRows(Worksheet $sheet, PayPeriod $payPeriod): void
     {
-        $lastColumn = 'AF';
+        $lastColumn = 'M';
 
         $start = $payPeriod->start_date;
         $end = $payPeriod->end_date;
@@ -118,37 +139,18 @@ class PayrollExcelExporter
     {
         $headers = [
             'A5' => 'Código de empleado',
-            'B5' => 'NOMBRE',
-            'C5' => 'Entrada',
-            'D5' => 'Salida',
-            'E5' => 'Cantidad Horas',
-            'F5' => 'Horas Ordinarias',
-            'G5' => 'Horas Ext 25%',
-            'H5' => 'Horas Ext 50%',
-            'I5' => 'Horas Ext 75%',
-            'J5' => 'Horas Ext 100%',
-            'K5' => 'Fecha laboral',
-            'L5' => 'Estado de fila',
-            'M5' => 'Minutos observados',
-            'N5' => 'Marcas observadas',
-            'O5' => 'Revisiones de marcas',
-            'P5' => 'Minutos ordinarios',
-            'Q5' => 'Minutos Ext 25%',
-            'R5' => 'Minutos Ext 50%',
-            'S5' => 'Minutos Ext 75%',
-            'T5' => 'Minutos Ext 100%',
-            'U5' => 'Déficit minutos',
-            'V5' => 'Déficit estado',
-            'W5' => 'Déficit motivo',
-            'X5' => 'Hora extra detectada',
-            'Y5' => 'Hora extra aprobada',
-            'Z5' => 'Hora extra rechazada',
-            'AA5' => 'Variación',
-            'AB5' => 'Reconocimiento de variación',
-            'AC5' => 'Transferencia excluida',
-            'AD5' => 'Versión de reglas',
-            'AE5' => 'Código de pago',
-            'AF5' => 'Cargo',
+            'B5' => 'Código de pago',
+            'C5' => 'NOMBRE',
+            'D5' => 'Cargo',
+            'E5' => 'Entrada',
+            'F5' => 'Salida',
+            'G5' => 'Cantidad Horas',
+            'H5' => 'Horas Ordinarias',
+            'I5' => 'Horas Ext 25%',
+            'J5' => 'Horas Ext 50%',
+            'K5' => 'Horas Ext 75%',
+            'L5' => 'Horas Ext 100%',
+            'M5' => 'Fecha laboral',
         ];
 
         foreach ($headers as $coordinate => $label) {
@@ -156,14 +158,9 @@ class PayrollExcelExporter
         }
     }
 
-    private function writeDataRows(Worksheet $sheet, PayPeriod $payPeriod): void
+    /** @param iterable<PayrollResult> $results */
+    private function writeDataRows(Worksheet $sheet, iterable $results): void
     {
-        $results = PayrollResult::withoutCompanyScope()
-            ->where('pay_period_id', $payPeriod->id)
-            ->orderBy('employee_id')
-            ->orderBy('date')
-            ->get();
-
         $row = 6;
         $employeeId = null;
         $employeeTotals = $this->emptyTotals();
@@ -180,57 +177,51 @@ class PayrollExcelExporter
             $employeeId = $result->employee_id;
 
             $sheet->setCellValue("A{$row}", $reportingRow['employee_external_id']);
-            $sheet->setCellValue("B{$row}", $reportingRow['employee_name']);
+            $this->assertPaymentIdentity($reportingRow);
+            $sheet->setCellValueExplicit("B{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
+            $sheet->setCellValue("C{$row}", $reportingRow['employee_name']);
+            $sheet->setCellValue("D{$row}", $reportingRow['employee_job_title']);
 
             if ($reportingRow['entry_at'] !== null) {
-                $sheet->setCellValue("C{$row}", $reportingRow['entry_at'] instanceof \DateTimeInterface
+                $sheet->setCellValue("E{$row}", $reportingRow['entry_at'] instanceof \DateTimeInterface
                     ? $reportingRow['entry_at']->format('Y-m-d H:i:s')
                     : $reportingRow['entry_at']);
-                $sheet->getStyle("C{$row}")
+                $sheet->getStyle("E{$row}")
                     ->getNumberFormat()
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
             if ($reportingRow['exit_at'] !== null) {
-                $sheet->setCellValue("D{$row}", $reportingRow['exit_at'] instanceof \DateTimeInterface
+                $sheet->setCellValue("F{$row}", $reportingRow['exit_at'] instanceof \DateTimeInterface
                     ? $reportingRow['exit_at']->format('Y-m-d H:i:s')
                     : $reportingRow['exit_at']);
-                $sheet->getStyle("D{$row}")
+                $sheet->getStyle("F{$row}")
                     ->getNumberFormat()
                     ->setFormatCode(self::DATE_FORMAT);
             }
 
-            $sheet->setCellValue("E{$row}", $this->hoursFromMinutes($reportingRow['worked_minutes']));
-            $sheet->getStyle("E{$row}")
+            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($reportingRow['worked_minutes']));
+            $sheet->getStyle("G{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("F{$row}", $this->hoursFromMinutes($reportingRow['ordinary_minutes']));
-            $sheet->getStyle("F{$row}")
+            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($reportingRow['ordinary_minutes']));
+            $sheet->getStyle("H{$row}")
                 ->getNumberFormat()
                 ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
 
-            $sheet->setCellValue("G{$row}", $this->hoursFromMinutes($reportingRow['extra_25_minutes']));
-            $sheet->setCellValue("H{$row}", $this->hoursFromMinutes($reportingRow['extra_50_minutes']));
-            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($reportingRow['extra_75_minutes']));
-            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($reportingRow['extra_100_minutes']));
+            $sheet->setCellValue("I{$row}", $this->hoursFromMinutes($reportingRow['extra_25_minutes']));
+            $sheet->setCellValue("J{$row}", $this->hoursFromMinutes($reportingRow['extra_50_minutes']));
+            $sheet->setCellValue("K{$row}", $this->hoursFromMinutes($reportingRow['extra_75_minutes']));
+            $sheet->setCellValue("L{$row}", $this->hoursFromMinutes($reportingRow['extra_100_minutes']));
 
-            foreach (['G', 'H', 'I', 'J'] as $column) {
+            foreach (['I', 'J', 'K', 'L'] as $column) {
                 $sheet->getStyle("{$column}{$row}")
                     ->getNumberFormat()
                     ->setFormatCode(self::DECIMAL_HOURS_FORMAT);
             }
 
-            foreach (array_combine(
-                ['K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'AA', 'AB', 'AC', 'AD'],
-                ['work_date', 'status', 'worked_minutes', 'observed_marks', 'mark_revisions', 'ordinary_minutes', 'extra_25_minutes', 'extra_50_minutes', 'extra_75_minutes', 'extra_100_minutes', 'shortfall_minutes', 'shortfall_state', 'shortfall_reason', 'detected_overtime', 'approved_overtime', 'rejected_overtime', 'variation', 'acknowledgement', 'excluded_transfer_minutes', 'rules_version'],
-            ) as $column => $key) {
-                $sheet->setCellValue("{$column}{$row}", $reportingRow[$key]);
-            }
-
-            $this->assertPaymentIdentity($reportingRow);
-            $sheet->setCellValueExplicit("AE{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
-            $sheet->setCellValue("AF{$row}", $reportingRow['employee_job_title']);
+            $sheet->setCellValue("M{$row}", $reportingRow['work_date']);
 
             $this->accumulate($employeeTotals, $reportingRow);
             $this->accumulate($grandTotals, $reportingRow);
@@ -243,6 +234,193 @@ class PayrollExcelExporter
         }
 
         $this->writeTotalsRow($sheet, $row, 'GRAND TOTAL', $grandTotals);
+    }
+
+    /** @param iterable<PayrollResult> $results */
+    private function writeAuditRows(Worksheet $sheet, PayPeriod $payPeriod, iterable $results): void
+    {
+        $this->writeAuditTitleRows($sheet, $payPeriod);
+
+        $headers = [
+            'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Fecha laboral', 'Estado de fila',
+            'Entrada', 'Salida', 'Minutos observados', 'Marcas observadas', 'Revisiones de marcas',
+            'Minutos ordinarios', 'Minutos Ext 25%', 'Minutos Ext 50%', 'Minutos Ext 75%', 'Minutos Ext 100%',
+            'Déficit minutos', 'Déficit estado', 'Déficit motivo', 'Hora extra detectada',
+            'Hora extra aprobada', 'Hora extra rechazada', 'Variación', 'Reconocimiento de variación',
+            'Transferencia excluida', 'Versión de reglas', 'Tipo de día', 'Vacación', 'Detalle de vacación',
+        ];
+        $sheet->fromArray($headers, null, 'A5');
+
+        $row = 6;
+        foreach ($results as $result) {
+            $reportingRow = $this->rowAdapter->adapt($result);
+            $this->assertPaymentIdentity($reportingRow);
+
+            $sheet->setCellValue("A{$row}", $reportingRow['employee_external_id']);
+            $sheet->setCellValueExplicit("B{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
+            foreach ([
+                'C' => 'employee_name', 'D' => 'employee_job_title', 'E' => 'work_date', 'F' => 'status',
+                'G' => 'entry_at', 'H' => 'exit_at', 'I' => 'worked_minutes', 'L' => 'ordinary_minutes',
+                'M' => 'extra_25_minutes', 'N' => 'extra_50_minutes', 'O' => 'extra_75_minutes',
+                'P' => 'extra_100_minutes', 'Q' => 'shortfall_minutes', 'R' => 'shortfall_state',
+                'S' => 'shortfall_reason', 'Y' => 'excluded_transfer_minutes', 'Z' => 'rules_version',
+                'AA' => 'day_type', 'AB' => 'vacation_id',
+            ] as $column => $key) {
+                $sheet->setCellValue("{$column}{$row}", $this->displayValue($reportingRow[$key]));
+            }
+
+            $sheet->setCellValue("J{$row}", $this->describeObservedMarks($reportingRow['observed_marks']));
+            $sheet->setCellValue("K{$row}", $this->describeMarkRevisions($reportingRow['observed_marks']));
+            $sheet->setCellValue("T{$row}", $this->describeOvertime($reportingRow['detected_overtime'], 'detected'));
+            $sheet->setCellValue("U{$row}", $this->describeOvertime($reportingRow['approved_overtime'], 'approved'));
+            $sheet->setCellValue("V{$row}", $this->describeOvertime($reportingRow['rejected_overtime'], 'rejected'));
+            $sheet->setCellValue("W{$row}", $this->describeVariations($reportingRow['variation']));
+            $sheet->setCellValue("X{$row}", $this->describeAcknowledgements($reportingRow['acknowledgement']));
+            $sheet->setCellValue("AC{$row}", $this->describeVacation($reportingRow['vacation']));
+            $row++;
+        }
+
+        $sheet->freezePane('A6');
+        $sheet->getStyle('A5:AC5')->getFont()->setBold(true);
+        $sheet->getStyle('A5:AC5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('A5:AC5')->getFill()->setFillType(Fill::FILL_SOLID)->setStartColor(new Color('FFE0E0E0'));
+        $sheet->getStyle('A5:AC5')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        $sheet->getStyle("A6:AC{$row}")->getAlignment()->setWrapText(true);
+    }
+
+    private function writeAuditTitleRows(Worksheet $sheet, PayPeriod $payPeriod): void
+    {
+        $sheet->setCellValue('A2', sprintf(
+            'AUDITORÍA DE ASISTENCIA DEL %s AL %s',
+            $payPeriod->start_date->format('d/m/Y'),
+            $payPeriod->end_date->format('d/m/Y'),
+        ));
+        $sheet->mergeCells('A2:AC2');
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(14);
+        $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+    }
+
+    private function displayValue(mixed $value): mixed
+    {
+        return $value instanceof \DateTimeInterface ? $value->format('Y-m-d H:i:s') : $value;
+    }
+
+    private function describeObservedMarks(?string $json): ?string
+    {
+        return $this->describeJson($json, function (array $marks): array {
+            return array_map(function (array $mark): string {
+                return $this->joinDescriptionParts([
+                    $mark['event_at'] ?? null,
+                    $mark['status'] ?? null,
+                    $mark['source'] ?? null,
+                ]);
+            }, $marks);
+        });
+    }
+
+    private function describeMarkRevisions(?string $json): ?string
+    {
+        return $this->describeJson($json, function (array $marks): array {
+            $descriptions = [];
+            foreach ($marks as $mark) {
+                foreach ($mark['revisions'] ?? [] as $revision) {
+                    $descriptions[] = $this->joinDescriptionParts([
+                        'Revisión', $revision['changed_at'] ?? null,
+                    ]);
+                }
+            }
+
+            return $descriptions;
+        });
+    }
+
+    private function describeOvertime(?string $json, string $type): ?string
+    {
+        return $this->describeJson($json, function (array $items) use ($type): array {
+            $descriptions = [];
+            foreach ($items as $item) {
+                $ranges = match ($type) {
+                    'detected' => [['starts_at', 'ends_at', 'minutes']],
+                    'approved' => [['approved_starts_at', 'approved_ends_at', 'approved_minutes']],
+                    'rejected' => [
+                        ['rejected_before_starts_at', 'rejected_before_ends_at', 'rejected_before_minutes'],
+                        ['rejected_after_starts_at', 'rejected_after_ends_at', 'rejected_after_minutes'],
+                    ],
+                };
+                $presentRanges = array_filter($ranges, fn (array $range): bool => ($item[$range[0]] ?? null) !== null || ($item[$range[1]] ?? null) !== null);
+
+                foreach ($ranges as [$start, $end, $minutes]) {
+                    if (($item[$start] ?? null) !== null || ($item[$end] ?? null) !== null || ($item[$minutes] ?? null) !== null) {
+                        $minuteValue = $item[$minutes] ?? ($type === 'rejected' && count($presentRanges) === 1
+                            ? $item['rejected_minutes'] ?? null
+                            : null);
+                        $descriptions[] = $this->joinDescriptionParts([
+                            $item[$start] ?? null,
+                            $item[$end] ?? null,
+                            $minuteValue !== null ? "{$minuteValue} min" : null,
+                        ]);
+                    }
+                }
+            }
+
+            return $descriptions;
+        });
+    }
+
+    private function describeVariations(?string $json): ?string
+    {
+        return $this->describeJson($json, fn (array $variations): array => array_map(
+            fn (array $variation): string => $this->joinDescriptionParts([
+                $variation['kind'] ?? null,
+                $variation['entry_at'] ?? null,
+            ]),
+            $variations,
+        ));
+    }
+
+    private function describeAcknowledgements(?string $json): ?string
+    {
+        return $this->describeJson($json, fn (array $acknowledgements): array => array_map(
+            fn (array $acknowledgement): string => $this->joinDescriptionParts([
+                $acknowledgement['reason'] ?? null,
+                $acknowledgement['acknowledged_at'] ?? null,
+            ]),
+            $acknowledgements,
+        ));
+    }
+
+    private function describeVacation(?string $json): ?string
+    {
+        if ($json === null || $json === '[]') {
+            return null;
+        }
+
+        $vacation = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+
+        return $this->joinDescriptionParts([
+            isset($vacation['planned_minutes']) ? $vacation['planned_minutes'].' min pagados' : null,
+            $vacation['scheduled_start'] ?? null,
+            $vacation['scheduled_end'] ?? null,
+        ]);
+    }
+
+    /** @param callable(list<array<string, mixed>>): list<string> $describe */
+    private function describeJson(?string $json, callable $describe): ?string
+    {
+        if ($json === null || $json === '[]') {
+            return null;
+        }
+
+        $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        $descriptions = array_filter($describe($decoded));
+
+        return $descriptions === [] ? null : implode('; ', $descriptions);
+    }
+
+    /** @param list<mixed> $parts */
+    private function joinDescriptionParts(array $parts): string
+    {
+        return implode(' — ', array_filter($parts, fn (mixed $part): bool => $part !== null && $part !== ''));
     }
 
     /** @return array<string, int> */
@@ -268,24 +446,17 @@ class PayrollExcelExporter
     /** @param array<string, int> $totals */
     private function writeTotalsRow(Worksheet $sheet, int $row, string $label, array $totals): void
     {
-        $sheet->setCellValue("B{$row}", $label);
+        $sheet->setCellValue("C{$row}", $label);
 
         foreach (array_combine(
-            ['E', 'F', 'G', 'H', 'I', 'J'],
-            ['M', 'P', 'Q', 'R', 'S', 'T'],
-        ) as $column => $sourceColumn) {
-            $sheet->setCellValue("{$column}{$row}", "={$sourceColumn}{$row}/60");
-        }
-
-        foreach (array_combine(
-            ['M', 'P', 'Q', 'R', 'S', 'T'],
+            ['G', 'H', 'I', 'J', 'K', 'L'],
             ['worked_minutes', 'ordinary_minutes', 'extra_25_minutes', 'extra_50_minutes', 'extra_75_minutes', 'extra_100_minutes'],
         ) as $column => $key) {
-            $sheet->setCellValue("{$column}{$row}", $totals[$key]);
+            $sheet->setCellValue("{$column}{$row}", "={$totals[$key]}/60");
         }
 
-        $sheet->getStyle("B{$row}:T{$row}")->getFont()->setBold(true);
-        $sheet->getStyle("E{$row}:J{$row}")->getNumberFormat()->setFormatCode(self::DECIMAL_HOURS_FORMAT);
+        $sheet->getStyle("A{$row}:M{$row}")->getFont()->setBold(true);
+        $sheet->getStyle("G{$row}:L{$row}")->getNumberFormat()->setFormatCode(self::DECIMAL_HOURS_FORMAT);
     }
 
     private function hoursFromMinutes(?int $minutes): ?float
@@ -295,7 +466,7 @@ class PayrollExcelExporter
 
     private function applyHeaderStyle(Worksheet $sheet): void
     {
-        $range = 'A5:AF5';
+        $range = 'A5:M5';
         $style = $sheet->getStyle($range);
 
         $style->getFont()->setBold(true);

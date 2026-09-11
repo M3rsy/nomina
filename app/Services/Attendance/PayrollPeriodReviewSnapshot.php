@@ -77,7 +77,14 @@ final class PayrollPeriodReviewSnapshot
     {
         $blockers = collect();
         $this->forEachReview($context, function (PayrollShiftReview $review) use ($blockers): void {
-            $evaluation = $this->shiftEvaluator->evaluate($review->occurrence, $review->analysis, $review->currentDecisions, $review->currentExceptions);
+            $evaluation = $this->shiftEvaluator->evaluate(
+                $review->occurrence,
+                $review->analysis,
+                $review->currentDecisions,
+                $review->currentExceptions,
+                $review->vacationDay,
+                $review->vacationIsStale,
+            );
             foreach ($evaluation->blockers as $blocker) {
                 $blockers->push([
                     'employee_id' => $review->employee->id,
@@ -97,6 +104,10 @@ final class PayrollPeriodReviewSnapshot
     {
         $absences = collect();
         $this->forEachReview($context, function (PayrollShiftReview $review) use ($context, $absences): void {
+            if ($review->vacationDay !== null) {
+                return;
+            }
+
             $date = $review->occurrence->workDate;
             if ($context->calendar->isHoliday($date) || ! $review->occurrence->schedule?->is_working_day || $review->occurrence->status !== ShiftOccurrence::NO_MARKS) {
                 return;

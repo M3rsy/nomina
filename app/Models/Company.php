@@ -106,6 +106,16 @@ class Company extends Model
         return $this->hasMany(Holiday::class);
     }
 
+    public function vacations(): HasMany
+    {
+        return $this->hasMany(Vacation::class);
+    }
+
+    public function vacationBalanceMovements(): HasMany
+    {
+        return $this->hasMany(VacationBalanceMovement::class);
+    }
+
     public static function defaultWorkSchedules(): array
     {
         return [

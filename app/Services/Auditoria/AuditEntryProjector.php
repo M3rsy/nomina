@@ -31,6 +31,8 @@ class AuditEntryProjector
         'attendance_exception',
         'full_day_absence',
         'payroll_state',
+        'vacation',
+        'vacation_balance',
     ];
 
     public function project(Model $source): ?AuditLogEntry

@@ -47,6 +47,8 @@ class PermissionRoleSeeder extends Seeder
         'work_schedules.manage',
         'holidays.view',
         'holidays.manage',
+        'vacations.view',
+        'vacations.manage',
     ];
 
     public const ROLES = [
@@ -78,6 +80,8 @@ class PermissionRoleSeeder extends Seeder
             'work_schedules.view',
             'holidays.view',
             'holidays.manage',
+            'vacations.view',
+            'vacations.manage',
         ],
     ];
 

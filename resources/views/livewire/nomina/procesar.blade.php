@@ -103,7 +103,9 @@
                         <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_75_minutes / 60, 2) }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">{{ number_format($result->extra_100_minutes / 60, 2) }}</td>
                         <td class="px-4 py-2 whitespace-nowrap">
-                            @if ($result->is_absence)
+                            @if ($result->day_type === 'paid_vacation')
+                                <span class="font-semibold text-sky-700">Vacación pagada</span>
+                            @elseif ($result->is_absence)
                                 @if ($result->is_justified)
                                     <span class="text-purple-600">Justificada</span>
                                 @elseif ($result->unjustified)

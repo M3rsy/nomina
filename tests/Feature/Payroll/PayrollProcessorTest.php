@@ -61,6 +61,25 @@ function processorEmployee(Company $company): Employee
     return $employee;
 }
 
+test('processor excludes employees hired after the period end', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $eligible = processorEmployee($company);
+    $eligible->update(['hired_at' => '2020-01-01']);
+    Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2026-02-01',
+        'payment_code' => null,
+    ]);
+    app(CurrentCompany::class)->set($company);
+
+    $report = app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+
+    expect($payPeriod->fresh()->status)->toBe('processed')
+        ->and($report->employeesProcessed)->toBe(1)
+        ->and(PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)
+            ->where('employee_id', '!=', $eligible->id)->doesntExist())->toBeTrue();
+});
+
 test('processor rolls back when an overtime candidate is pending', function () {
     $company = Company::factory()->create();
     $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
@@ -186,7 +205,7 @@ test('reviewed overtime flows from readiness to exact payroll and export', funct
         ->and($result->ordinary_minutes)->toBe(480)
         ->and($result->extra_25_minutes)->toBe(30)
         ->and((float) $result->extra_25_hours)->toBe(0.5)
-        ->and($data[5][6])->toBe(0.5)
+        ->and($data[5][8])->toBe(0.5)
         ->and($payPeriod->fresh()->status)->toBe('processed');
 
     unlink($path);
@@ -494,7 +513,7 @@ test('processor stores employee identity snapshot and keeps it stable in payroll
         ->and($snapshotExternalId)->toBe('E-100')
         ->and($snapshotName)->toBe('Original Employee')
         ->and($data[5][0])->toBe('E-100')
-        ->and($data[5][1])->toBe('Original Employee');
+        ->and($data[5][2])->toBe('Original Employee');
 
     unlink($path);
 });

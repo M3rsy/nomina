@@ -36,6 +36,8 @@ class Index extends Component
         'attendance_exception' => 'Excepciones de asistencia',
         'full_day_absence' => 'Justificaciones de jornada completa',
         'payroll_state' => 'Estados de nómina',
+        'vacation' => 'Vacaciones',
+        'vacation_balance' => 'Saldos de vacaciones',
     ];
 
     private const PROJECTED_TYPES = AuditEntryProjector::PROJECTED_TYPES;
@@ -498,40 +500,40 @@ class Index extends Component
             )->all());
 
             $absences->each(function (JustifiedAbsence $absence) use (&$entries, $usersById): void {
-                    foreach ($absence->metadata['revisions'] ?? [] as $revision) {
-                        $at = $revision['at'] ?? null;
+                foreach ($absence->metadata['revisions'] ?? [] as $revision) {
+                    $at = $revision['at'] ?? null;
 
-                        if (! $at) {
-                            continue;
-                        }
-
-                        $createdAt = Carbon::parse($at);
-
-                        if (! $this->dateIsVisible($createdAt)) {
-                            continue;
-                        }
-
-                        $userId = $revision['user_id'] ?? null;
-                        $user = $userId ? $usersById->get($userId) : null;
-                        $entries[] = new AuditEntry(
-                            'full_day_absence',
-                            'Justificación de jornada completa',
-                            $createdAt,
-                            $absence->company_id,
-                            $absence->company?->name ?? 'Desconocida',
-                            $userId,
-                            $user?->email,
-                            $this->describeFullDayAbsenceRevision($absence, $revision),
-                            [
-                                'justified_absence_id' => $absence->id,
-                                'employee_id' => $absence->employee_id,
-                                'action' => $revision['action'] ?? 'justify_full_day_absence',
-                                'old_values' => $revision['old_values'] ?? null,
-                                'new_values' => $revision['new_values'] ?? null,
-                            ],
-                        );
+                    if (! $at) {
+                        continue;
                     }
-                });
+
+                    $createdAt = Carbon::parse($at);
+
+                    if (! $this->dateIsVisible($createdAt)) {
+                        continue;
+                    }
+
+                    $userId = $revision['user_id'] ?? null;
+                    $user = $userId ? $usersById->get($userId) : null;
+                    $entries[] = new AuditEntry(
+                        'full_day_absence',
+                        'Justificación de jornada completa',
+                        $createdAt,
+                        $absence->company_id,
+                        $absence->company?->name ?? 'Desconocida',
+                        $userId,
+                        $user?->email,
+                        $this->describeFullDayAbsenceRevision($absence, $revision),
+                        [
+                            'justified_absence_id' => $absence->id,
+                            'employee_id' => $absence->employee_id,
+                            'action' => $revision['action'] ?? 'justify_full_day_absence',
+                            'old_values' => $revision['old_values'] ?? null,
+                            'new_values' => $revision['new_values'] ?? null,
+                        ],
+                    );
+                }
+            });
         }
 
         if (in_array('payroll_state', $types, true)) {
@@ -552,60 +554,60 @@ class Index extends Component
             })->all());
 
             $payPeriods->each(function (PayPeriod $payPeriod) use (&$entries, $usersById): void {
-                    $metadata = $payPeriod->metadata ?? [];
-                    foreach (['approved', 'exported', 'processed'] as $action) {
-                        $at = $metadata[$action.'_at'] ?? null;
-                        if (! $at) {
-                            continue;
-                        }
-
-                        $createdAt = Carbon::parse($at);
-                        if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
-                            continue;
-                        }
-                        if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
-                            continue;
-                        }
-
-                        $userId = $metadata[$action.'_by'] ?? null;
-                        $user = $userId ? $usersById->get($userId) : null;
-
-                        $entries[] = new AuditEntry(
-                            'payroll_state',
-                            'Estado de nómina',
-                            $createdAt,
-                            $payPeriod->company_id,
-                            $payPeriod->company?->name ?? 'Desconocida',
-                            $userId,
-                            $user?->email,
-                            "Período {$payPeriod->name} cambió a estado {$action}",
-                            ['pay_period_id' => $payPeriod->id, 'status' => $action]
-                        );
+                $metadata = $payPeriod->metadata ?? [];
+                foreach (['approved', 'exported', 'processed'] as $action) {
+                    $at = $metadata[$action.'_at'] ?? null;
+                    if (! $at) {
+                        continue;
                     }
 
-                    foreach ($metadata['reopenings'] ?? [] as $reopening) {
-                        $at = $reopening['at'] ?? null;
-                        if (! $at || ! $this->dateIsVisible(Carbon::parse($at))) {
-                            continue;
-                        }
-
-                        $userId = $reopening['user_id'] ?? null;
-                        $user = $userId ? $usersById->get($userId) : null;
-                        $invalidated = (int) ($reopening['invalidated_results'] ?? 0);
-                        $reason = $reopening['reason'] ?? 'Sin motivo registrado';
-                        $entries[] = new AuditEntry(
-                            'payroll_state',
-                            'Estado de nómina',
-                            Carbon::parse($at),
-                            $payPeriod->company_id,
-                            $payPeriod->company?->name ?? 'Desconocida',
-                            $userId,
-                            $user?->email,
-                            "Período {$payPeriod->name} reabierto de procesado a validación. Motivo: {$reason}. {$invalidated} resultados invalidados",
-                            ['pay_period_id' => $payPeriod->id, 'status' => 'reopened']
-                        );
+                    $createdAt = Carbon::parse($at);
+                    if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
+                        continue;
                     }
-                });
+                    if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
+                        continue;
+                    }
+
+                    $userId = $metadata[$action.'_by'] ?? null;
+                    $user = $userId ? $usersById->get($userId) : null;
+
+                    $entries[] = new AuditEntry(
+                        'payroll_state',
+                        'Estado de nómina',
+                        $createdAt,
+                        $payPeriod->company_id,
+                        $payPeriod->company?->name ?? 'Desconocida',
+                        $userId,
+                        $user?->email,
+                        "Período {$payPeriod->name} cambió a estado {$action}",
+                        ['pay_period_id' => $payPeriod->id, 'status' => $action]
+                    );
+                }
+
+                foreach ($metadata['reopenings'] ?? [] as $reopening) {
+                    $at = $reopening['at'] ?? null;
+                    if (! $at || ! $this->dateIsVisible(Carbon::parse($at))) {
+                        continue;
+                    }
+
+                    $userId = $reopening['user_id'] ?? null;
+                    $user = $userId ? $usersById->get($userId) : null;
+                    $invalidated = (int) ($reopening['invalidated_results'] ?? 0);
+                    $reason = $reopening['reason'] ?? 'Sin motivo registrado';
+                    $entries[] = new AuditEntry(
+                        'payroll_state',
+                        'Estado de nómina',
+                        Carbon::parse($at),
+                        $payPeriod->company_id,
+                        $payPeriod->company?->name ?? 'Desconocida',
+                        $userId,
+                        $user?->email,
+                        "Período {$payPeriod->name} reabierto de procesado a validación. Motivo: {$reason}. {$invalidated} resultados invalidados",
+                        ['pay_period_id' => $payPeriod->id, 'status' => 'reopened']
+                    );
+                }
+            });
         }
 
         if (in_array('mark_revision', $types, true)) {
@@ -620,37 +622,37 @@ class Index extends Component
             )->all());
 
             $rawMarks->each(function (RawMark $rawMark) use (&$entries, $usersById): void {
-                    foreach ($rawMark->metadata['revisions'] ?? [] as $rev) {
-                        $at = $rev['at'] ?? null;
-                        if (! $at) {
-                            continue;
-                        }
-
-                        $createdAt = Carbon::parse($at);
-                        if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
-                            continue;
-                        }
-                        if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
-                            continue;
-                        }
-
-                        $userId = $rev['user_id'] ?? null;
-                        $user = $userId ? $usersById->get($userId) : null;
-
-                        $description = $this->describeMarkRevision($rawMark, $rev);
-                        $entries[] = new AuditEntry(
-                            'mark_revision',
-                            'Revisión de marca',
-                            $createdAt,
-                            $rawMark->company_id,
-                            $rawMark->company?->name ?? 'Desconocida',
-                            $userId,
-                            $user?->email,
-                            $description,
-                            ['raw_mark_id' => $rawMark->id, 'action' => $rev['action']]
-                        );
+                foreach ($rawMark->metadata['revisions'] ?? [] as $rev) {
+                    $at = $rev['at'] ?? null;
+                    if (! $at) {
+                        continue;
                     }
-                });
+
+                    $createdAt = Carbon::parse($at);
+                    if ($this->from && $createdAt->lt(Carbon::parse($this->from)->startOfDay())) {
+                        continue;
+                    }
+                    if ($this->to && $createdAt->gt(Carbon::parse($this->to)->endOfDay())) {
+                        continue;
+                    }
+
+                    $userId = $rev['user_id'] ?? null;
+                    $user = $userId ? $usersById->get($userId) : null;
+
+                    $description = $this->describeMarkRevision($rawMark, $rev);
+                    $entries[] = new AuditEntry(
+                        'mark_revision',
+                        'Revisión de marca',
+                        $createdAt,
+                        $rawMark->company_id,
+                        $rawMark->company?->name ?? 'Desconocida',
+                        $userId,
+                        $user?->email,
+                        $description,
+                        ['raw_mark_id' => $rawMark->id, 'action' => $rev['action']]
+                    );
+                }
+            });
         }
 
         usort($entries, fn (AuditEntry $a, AuditEntry $b) => $b->createdAt <=> $a->createdAt);

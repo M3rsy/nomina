@@ -32,8 +32,9 @@ final readonly class PayrollDaySnapshot
         $analysis = $review->analysis;
 
         return new self([
-            'schema_version' => 2,
+            'schema_version' => 3,
             'work_date' => $evaluation->workDate->toDateString(),
+            'day_type' => $evaluation->dayType,
             'employee' => [
                 'id' => $employee->id,
                 'external_id' => $employee->external_id,
@@ -68,6 +69,19 @@ final readonly class PayrollDaySnapshot
                 'excluded_transfer_minutes' => $analysis->excludedTransferMinutes,
             ],
             'payable_minutes' => self::rates($evaluation->payableRates),
+            'vacation' => $review->vacationDay === null ? null : [
+                'id' => $review->vacationDay->vacation_id,
+                'day_id' => $review->vacationDay->id,
+                'planned_minutes' => $review->vacationDay->planned_minutes,
+                'rate_minutes' => $review->vacationDay->rate_minutes,
+                'snapshot_fingerprint' => $review->vacationDay->snapshot_fingerprint,
+                'holiday_generation' => $review->vacationDay->holiday_generation,
+                'scheduled_start' => self::dateTime($review->vacationDay->scheduled_start),
+                'scheduled_end' => self::dateTime($review->vacationDay->scheduled_end),
+                'assignment_id' => $review->vacationDay->employee_schedule_assignment_id,
+                'schedule_id' => $review->vacationDay->work_schedule_id,
+                'publication_id' => $review->vacationDay->work_schedule_profile_publication_id,
+            ],
             'shortfalls' => $analysis->deficits->sortBy('key')->map(function (AttendanceSegment $deficit) use ($review): array {
                 $decision = $review->exceptionFor($deficit);
 

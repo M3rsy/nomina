@@ -3,6 +3,7 @@
 namespace App\Services\Payroll;
 
 use App\Models\PayrollResult;
+use App\Services\Attendance\PayrollShiftEvaluation;
 
 final class PayrollReportingRowAdapter
 {
@@ -10,7 +11,7 @@ final class PayrollReportingRowAdapter
     public function adapt(PayrollResult $result): array
     {
         $snapshot = $result->day_snapshot;
-        if (is_array($snapshot) && ($snapshot['schema_version'] ?? null) === 2) {
+        if (is_array($snapshot) && in_array(($snapshot['schema_version'] ?? null), [2, 3], true)) {
             return [
                 ...$this->adaptSnapshot($snapshot),
                 'employee_payment_code' => $result->employee_payment_code,
@@ -24,6 +25,10 @@ final class PayrollReportingRowAdapter
             'employee_payment_code' => $result->employee_payment_code,
             'employee_job_title' => $result->employee_job_title,
             'work_date' => $result->date?->toDateString(),
+            'day_type' => $result->day_type ?? PayrollShiftEvaluation::DAY_TYPE_ATTENDANCE,
+            'vacation_id' => $result->vacation_id,
+            'vacation_day_id' => $result->vacation_day_id,
+            'vacation' => null,
             'status' => 'LEGACY',
             'entry_at' => $result->entry_at,
             'exit_at' => $result->exit_at,
@@ -62,6 +67,7 @@ final class PayrollReportingRowAdapter
         $shortfalls = $snapshot['shortfalls'] ?? [];
         $overtime = $snapshot['overtime'] ?? [];
         $variations = $snapshot['variations'] ?? [];
+        $vacation = $snapshot['vacation'] ?? null;
 
         $decisions = array_values(array_filter(array_column($overtime, 'decision')));
         $acknowledgements = array_values(array_filter(array_column($variations, 'acknowledgement')));
@@ -72,6 +78,10 @@ final class PayrollReportingRowAdapter
             'employee_payment_code' => null,
             'employee_job_title' => null,
             'work_date' => $snapshot['work_date'] ?? null,
+            'day_type' => $snapshot['day_type'] ?? PayrollShiftEvaluation::DAY_TYPE_ATTENDANCE,
+            'vacation_id' => $vacation['id'] ?? null,
+            'vacation_day_id' => $vacation['day_id'] ?? null,
+            'vacation' => $vacation === null ? null : $this->json($vacation),
             'status' => 'CURRENT',
             'entry_at' => $attendance['entry_at'] ?? null,
             'exit_at' => $attendance['exit_at'] ?? null,
