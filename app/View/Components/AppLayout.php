@@ -25,6 +25,7 @@ class AppLayout extends Component
         ['label' => 'Usuarios', 'route' => 'usuarios.index', 'active' => 'usuarios.*', 'permission' => 'users.view'],
         ['label' => 'Jornadas', 'route' => 'jornadas.index', 'active' => 'jornadas.*', 'permission' => 'work_schedules.view'],
         ['label' => 'Feriados', 'route' => 'feriados.index', 'active' => 'feriados.*', 'permission' => 'holidays.view'],
+        ['label' => 'Vacaciones', 'route' => 'vacaciones.index', 'active' => 'vacaciones.*', 'permission' => 'vacations.view'],
         ['label' => 'Auditoría', 'route' => 'auditoria.index', 'active' => 'auditoria.*', 'permission' => 'audit.view'],
         ['label' => 'Respaldos', 'route' => 'respaldos.index', 'active' => 'respaldos.*', 'permission' => 'backups.manage-global'],
     ];

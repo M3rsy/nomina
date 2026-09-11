@@ -6,6 +6,7 @@ use App\Models\AttendanceException;
 use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
+use App\Models\VacationDay;
 use Illuminate\Support\Collection;
 
 readonly class PayrollShiftReview
@@ -23,6 +24,8 @@ readonly class PayrollShiftReview
         public Collection $currentExceptions,
         public Collection $variationAcknowledgements,
         private AttendanceDecisionMatcher $decisionMatcher,
+        public ?VacationDay $vacationDay = null,
+        public bool $vacationIsStale = false,
     ) {}
 
     public function decisionFor(AttendanceSegment $candidate): ?OvertimeDecision

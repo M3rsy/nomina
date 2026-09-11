@@ -74,4 +74,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(AttendanceException::class, 'decided_by');
     }
+
+    public function approvedVacations(): HasMany
+    {
+        return $this->hasMany(Vacation::class, 'approved_by');
+    }
+
+    public function vacationBalanceMovements(): HasMany
+    {
+        return $this->hasMany(VacationBalanceMovement::class, 'recorded_by');
+    }
 }

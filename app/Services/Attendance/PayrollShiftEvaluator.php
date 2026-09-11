@@ -4,6 +4,7 @@ namespace App\Services\Attendance;
 
 use App\Models\AttendanceException;
 use App\Models\OvertimeDecision;
+use App\Models\VacationDay;
 use App\Services\Payroll\BandSplit;
 use Illuminate\Support\Collection;
 
@@ -20,8 +21,14 @@ class PayrollShiftEvaluator
         AttendanceShiftAnalysis $analysis,
         Collection $currentDecisions,
         Collection $currentExceptions = new Collection,
+        ?VacationDay $vacationDay = null,
+        bool $vacationIsStale = false,
     ): PayrollShiftEvaluation {
         $provenance = $this->provenance($occurrence);
+
+        if ($vacationDay !== null) {
+            return $this->evaluateVacation($occurrence, $analysis, $vacationDay, $vacationIsStale, $provenance);
+        }
 
         if (! in_array($analysis->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
             return new PayrollShiftEvaluation(
@@ -166,6 +173,70 @@ class PayrollShiftEvaluator
             ] : [])],
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,
+        );
+    }
+
+    /** @param array<string, int|string> $provenance */
+    private function evaluateVacation(
+        ShiftOccurrence $occurrence,
+        AttendanceShiftAnalysis $analysis,
+        VacationDay $vacationDay,
+        bool $vacationIsStale,
+        array $provenance,
+    ): PayrollShiftEvaluation {
+        $metadata = [
+            ...$provenance,
+            'day_type' => PayrollShiftEvaluation::DAY_TYPE_PAID_VACATION,
+            'vacation_id' => $vacationDay->vacation_id,
+            'vacation_day_id' => $vacationDay->id,
+            'vacation_snapshot_fingerprint' => $vacationDay->snapshot_fingerprint,
+        ];
+
+        if ($occurrence->marks->isNotEmpty()) {
+            return new PayrollShiftEvaluation(
+                status: PayrollShiftEvaluation::BLOCKED,
+                workDate: $analysis->workDate,
+                entryAt: $analysis->entryAt,
+                exitAt: $analysis->exitAt,
+                blockers: collect([['code' => 'vacation_has_marks', 'vacation_day_id' => $vacationDay->id]]),
+                metadata: $metadata,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
+                dayType: PayrollShiftEvaluation::DAY_TYPE_PAID_VACATION,
+                vacationId: $vacationDay->vacation_id,
+                vacationDayId: $vacationDay->id,
+            );
+        }
+
+        if ($vacationIsStale) {
+            return new PayrollShiftEvaluation(
+                status: PayrollShiftEvaluation::BLOCKED,
+                workDate: $analysis->workDate,
+                blockers: collect([['code' => 'stale_vacation_day', 'vacation_day_id' => $vacationDay->id]]),
+                metadata: $metadata,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
+                dayType: PayrollShiftEvaluation::DAY_TYPE_PAID_VACATION,
+                vacationId: $vacationDay->vacation_id,
+                vacationDayId: $vacationDay->id,
+            );
+        }
+
+        $payableRates = $this->bandSplit($vacationDay->rate_minutes);
+
+        return new PayrollShiftEvaluation(
+            status: PayrollShiftEvaluation::PROCESSABLE,
+            workDate: $analysis->workDate,
+            workedMinutes: 0,
+            scheduledMinutes: $vacationDay->planned_minutes,
+            recognizedMinutes: $vacationDay->planned_minutes,
+            payableRates: $payableRates,
+            metadata: $metadata,
+            publicationId: $occurrence->publicationId,
+            payrollPolicyKey: $occurrence->payrollPolicyKey,
+            dayType: PayrollShiftEvaluation::DAY_TYPE_PAID_VACATION,
+            vacationId: $vacationDay->vacation_id,
+            vacationDayId: $vacationDay->id,
         );
     }
 

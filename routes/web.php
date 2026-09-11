@@ -30,6 +30,7 @@ use App\Livewire\Respaldos\Index as RespaldosIndex;
 use App\Livewire\Usuarios\Create as UserCreate;
 use App\Livewire\Usuarios\Edit as UserEdit;
 use App\Livewire\Usuarios\Index as UsersIndex;
+use App\Livewire\Vacaciones\Index as VacationsIndex;
 use App\Models\PayPeriod;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
@@ -123,6 +124,12 @@ Route::middleware(['auth', 'can:holidays.view'])
     ->prefix('feriados')
     ->group(function () {
         Route::get('/', HolidaysIndex::class)->name('feriados.index');
+    });
+
+Route::middleware(['auth', 'can:vacations.view'])
+    ->prefix('vacaciones')
+    ->group(function () {
+        Route::get('/', VacationsIndex::class)->name('vacaciones.index');
     });
 
 Route::middleware(['auth', 'can:files.view'])

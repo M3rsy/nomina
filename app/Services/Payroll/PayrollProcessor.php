@@ -85,6 +85,8 @@ class PayrollProcessor
                             $review->analysis,
                             $review->currentDecisions,
                             $review->currentExceptions,
+                            $review->vacationDay,
+                            $review->vacationIsStale,
                         );
 
                         if ($result->status === PayrollShiftEvaluation::BLOCKED) {
@@ -139,6 +141,7 @@ class PayrollProcessor
         $end = CarbonImmutable::parse($period->end_date)->addDays(2);
         $employeeIds = Employee::withoutCompanyScope()
             ->where('company_id', $period->company_id)
+            ->where(fn ($query) => $query->whereNull('hired_at')->orWhereDate('hired_at', '<=', $period->end_date))
             ->pluck('id');
         $assignments = EmployeeScheduleAssignment::withoutCompanyScope()
             ->where('company_id', $period->company_id)
@@ -234,9 +237,14 @@ class PayrollProcessor
             'is_absence' => $result->isAbsence,
             'is_justified' => $result->isJustified,
             'unjustified' => $result->unjustified,
-            'notes' => $result->isJustified
+            'day_type' => $result->dayType,
+            'vacation_id' => $result->vacationId,
+            'vacation_day_id' => $result->vacationDayId,
+            'notes' => $result->dayType === PayrollShiftEvaluation::DAY_TYPE_PAID_VACATION
+                ? 'Vacación pagada: minutos programados reconocidos sin marcas.'
+                : ($result->isJustified
                 ? 'Justified absence: scheduled minutes paid.'
-                : ($result->unjustified ? 'Unjustified absence on scheduled working day.' : null),
+                : ($result->unjustified ? 'Unjustified absence on scheduled working day.' : null)),
             'rules_version' => $rulesVersion,
             'calendar_generation' => $calendarGeneration,
             'metadata' => $result->metadata,

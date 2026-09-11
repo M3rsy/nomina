@@ -152,6 +152,21 @@ class Employee extends Model
         return $this->hasMany(AttendanceException::class);
     }
 
+    public function vacations(): HasMany
+    {
+        return $this->hasMany(Vacation::class);
+    }
+
+    public function vacationDays(): HasMany
+    {
+        return $this->hasMany(VacationDay::class);
+    }
+
+    public function vacationBalanceMovements(): HasMany
+    {
+        return $this->hasMany(VacationBalanceMovement::class);
+    }
+
     public function getFullNameAttribute(): string
     {
         return trim($this->first_name.' '.$this->last_name);

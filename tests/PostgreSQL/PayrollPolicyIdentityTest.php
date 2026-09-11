@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 const PAYROLL_POLICY_IDENTITY_MIGRATION = 'database/migrations/2026_07_30_000001_create_work_schedule_profile_publications.php';
+const VACATIONS_MIGRATION = 'database/migrations/2026_09_10_010000_create_vacations_tables.php';
+const PAYROLL_VACATION_IDENTITY_MIGRATION = 'database/migrations/2026_09_10_010001_add_vacation_identity_to_payroll_results.php';
 
 function payrollPolicySqlState(Closure $operation): ?string
 {
@@ -28,8 +30,22 @@ function payrollPolicySqlState(Closure $operation): ?string
 
 function remigratePayrollPolicyIdentity(): void
 {
+    rollbackVacationMigrationDependencies();
     Artisan::call('migrate:rollback', ['--path' => PAYROLL_POLICY_IDENTITY_MIGRATION, '--force' => true]);
     Artisan::call('migrate', ['--path' => PAYROLL_POLICY_IDENTITY_MIGRATION, '--force' => true]);
+    migrateVacationMigrationDependencies();
+}
+
+function rollbackVacationMigrationDependencies(): void
+{
+    Artisan::call('migrate:rollback', ['--path' => PAYROLL_VACATION_IDENTITY_MIGRATION, '--force' => true]);
+    Artisan::call('migrate:rollback', ['--path' => VACATIONS_MIGRATION, '--force' => true]);
+}
+
+function migrateVacationMigrationDependencies(): void
+{
+    Artisan::call('migrate', ['--path' => VACATIONS_MIGRATION, '--force' => true]);
+    Artisan::call('migrate', ['--path' => PAYROLL_VACATION_IDENTITY_MIGRATION, '--force' => true]);
 }
 
 test('backfills future legacy coverage for an unassigned pre-existing active profile', function () {
@@ -138,6 +154,7 @@ test('rejects invalid legacy assignment history before writing publication schem
         'effective_to' => null, 'reason' => 'Invalid tenant history',
         'created_at' => now(), 'updated_at' => now(),
     ]);
+    rollbackVacationMigrationDependencies();
     Artisan::call('migrate:rollback', ['--path' => PAYROLL_POLICY_IDENTITY_MIGRATION, '--force' => true]);
 
     $exception = null;

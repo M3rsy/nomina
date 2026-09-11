@@ -85,18 +85,19 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
 
     // Reference layout: row 1 empty, row 2 title (merged), row 3 week label,
     // row 4 empty, row 5 header (bold/centered), row 6 onwards data rows.
-    expect($sheet->getTitle())->toBe('Hoja1')
+    expect($spreadsheet->getSheetNames())->toBe(['Asistencia', 'Auditoría'])
+        ->and($sheet->getTitle())->toBe('Asistencia')
         ->and($data[1][0])->toMatch('/^REPORTE DEL/')
         ->and($data[2][0])->toMatch('/^SEMANA/')
-        ->and(array_slice($data[4], 0, 10))->toBe(['Código de empleado', 'NOMBRE', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%'])
+        ->and($sheet->rangeToArray('A5:M5')[0])->toBe(['Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral'])
         ->and($data[5])->toContain(1, 'Juan Perez')
-        ->and($data[5][2])->toContain('2024-01-22')
-        ->and($data[5][4])->toBe(9.0)
-        ->and($data[5][5])->toBe(8.0)
-        ->and($data[5][6])->toBe(0.5)
-        ->and($data[5][7])->toBe(0.0)
-        ->and($data[5][8])->toBe(0.0)
-        ->and($data[5][9])->toBe(0.0);
+        ->and($data[5][4])->toContain('2024-01-22')
+        ->and($data[5][6])->toBe(9.0)
+        ->and($data[5][7])->toBe(8.0)
+        ->and($data[5][8])->toBe(0.5)
+        ->and($data[5][9])->toBe(0.0)
+        ->and($data[5][10])->toBe(0.0)
+        ->and($data[5][11])->toBe(0.0);
 });
 
 test('PayrollExcelExporter keeps employee identity snapshot after employee changes', function () {
@@ -134,7 +135,7 @@ test('PayrollExcelExporter keeps employee identity snapshot after employee chang
     $data = IOFactory::load($path)->getActiveSheet()->toArray(null, true, false, false);
 
     expect($data[5][0])->toBe(1)
-        ->and($data[5][1])->toBe('Juan Perez');
+        ->and($data[5][2])->toBe('Juan Perez');
 
     unlink($path);
 });
@@ -250,12 +251,13 @@ test('payroll exports label legacy rows and leave unavailable snapshot facts bla
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $global = IOFactory::load($globalPath)->getActiveSheet();
 
-    expect($global->getCell('L6')->getValue())->toBe('LEGACY')
-        ->and($global->getCell('N6')->getValue())->toBeNull()
-        ->and($global->getCell('O6')->getValue())->toBeNull()
-        ->and($global->getCell('U6')->getValue())->toBeNull()
-        ->and($global->getCell('AC6')->getValue())->toBeNull()
-        ->and($global->getCell('AD6')->getValue())->toBe('schedule-overlap-v1');
+    $audit = IOFactory::load($globalPath)->getSheetByName('Auditoría');
+    expect($audit)->not->toBeNull()
+        ->and($audit->getCell('F6')->getValue())->toBe('LEGACY')
+        ->and($audit->getCell('J6')->getValue())->toBeNull()
+        ->and($audit->getCell('K6')->getValue())->toBeNull()
+        ->and($audit->getCell('Y6')->getValue())->toBeNull()
+        ->and($audit->getCell('Z6')->getValue())->toBe('schedule-overlap-v1');
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
@@ -294,8 +296,8 @@ test('legacy exports leave unknown identity blank after employee changes', funct
 
     expect($global->getCell('A6')->getValue())->toBeNull()
         ->and($global->getCell('B6')->getValue())->toBeNull()
-        ->and($global->getCell('AE6')->getValue())->toBeNull()
-        ->and($global->getCell('AF6')->getValue())->toBeNull()
+        ->and($global->getCell('C6')->getValue())->toBeNull()
+        ->and($global->getCell('D6')->getValue())->toBeNull()
         ->and($stub->getCell('B2')->getValue())->toBeNull()
         ->and($stub->getCell('B3')->getValue())->toBeNull()
         ->and($stub->getCell('A9')->getValue())->toBeNull()
@@ -385,26 +387,45 @@ test('global and employee exports expose canonical immutable snapshot columns', 
     ]);
 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
-    $global = IOFactory::load($globalPath)->getActiveSheet();
+    $workbook = IOFactory::load($globalPath);
+    $global = $workbook->getSheetByName('Asistencia');
+    $audit = $workbook->getSheetByName('Auditoría');
 
-    expect($global->rangeToArray('K5:AD5')[0])->toBe([
-        'Fecha laboral', 'Estado de fila', 'Minutos observados', 'Marcas observadas', 'Revisiones de marcas',
-        'Minutos ordinarios', 'Minutos Ext 25%', 'Minutos Ext 50%', 'Minutos Ext 75%', 'Minutos Ext 100%',
-        'Déficit minutos', 'Déficit estado', 'Déficit motivo', 'Hora extra detectada', 'Hora extra aprobada',
-        'Hora extra rechazada', 'Variación', 'Reconocimiento de variación', 'Transferencia excluida', 'Versión de reglas',
-    ])->and($global->rangeToArray('A6:AD6')[0])->toMatchArray([
-        0 => 'SNAP-7', 1 => 'Frozen Employee', 10 => '2026-07-07', 11 => 'CURRENT', 12 => 625,
-        15 => 480, 16 => 30, 17 => 30, 18 => 0, 19 => 0, 20 => 60, 21 => 'rejected',
-        22 => 'Unpaid audited shortfall', 28 => 25, 29 => 'duration-first-v2',
-    ])->and($global->getCell('N6')->getValue())->toContain('2026-07-07 06:00:00')
-        ->and($global->getCell('O6')->getValue())->toContain('2026-07-07 06:01:00')
-        ->and($global->getCell('X6')->getValue())->toContain('2026-07-07 14:00:00')
-        ->and($global->getCell('Y6')->getValue())->toContain('2026-07-07 15:00:00')
-        ->and($global->getCell('Z6')->getValue())->toContain('2026-07-07 16:00:00')
-        ->and($global->getCell('AA6')->getValue())->toContain('schedule_entry')
-        ->and($global->getCell('AB6')->getValue())->toContain('Reviewed')
-        ->and($global->getCell('AE6')->getValue())->toBe('00042')
-        ->and($global->getCell('AF6')->getValue())->toBe('Frozen title');
+    expect($global)->not->toBeNull()
+        ->and($audit)->not->toBeNull()
+        ->and($global->rangeToArray('A5:M5')[0])->toBe([
+            'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas',
+            'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral',
+        ])->and($global->rangeToArray('A6:M6')[0])->toBe([
+            'SNAP-7', '00042', 'Frozen Employee', 'Frozen title', '2026-07-07 06:00:00', '2026-07-07 16:25:00',
+            '10.42', '8.00', '0.50', '0.50', '0.00', '0.00', '2026-07-07',
+        ])->and($audit->rangeToArray('A5:Z5')[0])->toBe([
+            'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Fecha laboral', 'Estado de fila', 'Entrada', 'Salida',
+            'Minutos observados', 'Marcas observadas', 'Revisiones de marcas', 'Minutos ordinarios', 'Minutos Ext 25%',
+            'Minutos Ext 50%', 'Minutos Ext 75%', 'Minutos Ext 100%', 'Déficit minutos', 'Déficit estado', 'Déficit motivo',
+            'Hora extra detectada', 'Hora extra aprobada', 'Hora extra rechazada', 'Variación', 'Reconocimiento de variación',
+            'Transferencia excluida', 'Versión de reglas',
+        ])->and($audit->rangeToArray('A6:Z6')[0])->toMatchArray([
+            0 => 'SNAP-7', 1 => '00042', 2 => 'Frozen Employee', 3 => 'Frozen title', 4 => '2026-07-07', 5 => 'CURRENT',
+            8 => 625, 11 => 480, 12 => 30, 13 => 30, 14 => 0, 15 => 0, 16 => 60, 17 => 'rejected',
+            18 => 'Unpaid audited shortfall', 24 => 25, 25 => 'duration-first-v2',
+        ])->and($audit->getCell('J6')->getValue())->toBe('2026-07-07 06:00:00 — valid — clock')
+        ->and($audit->getCell('K6')->getValue())->toBe('Revisión — 2026-07-07 06:01:00')
+        ->and($audit->getCell('T6')->getValue())->toBe('2026-07-07 14:00:00 — 2026-07-07 16:00:00 — 120 min')
+        ->and($audit->getCell('U6')->getValue())->toBe('2026-07-07 14:00:00 — 2026-07-07 15:00:00 — 60 min')
+        ->and($audit->getCell('V6')->getValue())->toBe('2026-07-07 15:00:00 — 2026-07-07 16:00:00 — 60 min')
+        ->and($audit->getCell('W6')->getValue())->toBe('schedule_entry — 2026-07-07 07:00:00')
+        ->and($audit->getCell('X6')->getValue())->toBe('Reviewed');
+
+    foreach ([$global, $audit] as $sheet) {
+        foreach ($sheet->toArray() as $row) {
+            foreach ($row as $value) {
+                if (is_string($value)) {
+                    expect($value)->not->toMatch('/^\\s*[\\[{]/');
+                }
+            }
+        }
+    }
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
@@ -458,17 +479,17 @@ test('payroll exports provide employee subtotals and document grand totals', fun
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $global = IOFactory::load($globalPath)->getActiveSheet();
 
-    expect($global->getCell('B7')->getValue())->toBe('EMPLOYEE SUBTOTAL')
-        ->and($global->getCell('M7')->getValue())->toBe(60)
-        ->and($global->getCell('P7')->getValue())->toBe(60)
-        ->and($global->getCell('B9')->getValue())->toBe('EMPLOYEE SUBTOTAL')
-        ->and($global->getCell('M9')->getValue())->toBe(150)
-        ->and($global->getCell('P9')->getValue())->toBe(120)
-        ->and($global->getCell('Q9')->getValue())->toBe(30)
-        ->and($global->getCell('B10')->getValue())->toBe('GRAND TOTAL')
-        ->and($global->getCell('M10')->getValue())->toBe(210)
-        ->and($global->getCell('P10')->getValue())->toBe(180)
-        ->and($global->getCell('Q10')->getValue())->toBe(30);
+    expect($global->getCell('C7')->getValue())->toBe('EMPLOYEE SUBTOTAL')
+        ->and($global->getCell('G7')->getValue())->toBe('=60/60')
+        ->and($global->getCell('H7')->getValue())->toBe('=60/60')
+        ->and($global->getCell('C9')->getValue())->toBe('EMPLOYEE SUBTOTAL')
+        ->and($global->getCell('G9')->getValue())->toBe('=150/60')
+        ->and($global->getCell('H9')->getValue())->toBe('=120/60')
+        ->and($global->getCell('I9')->getValue())->toBe('=30/60')
+        ->and($global->getCell('C10')->getValue())->toBe('GRAND TOTAL')
+        ->and($global->getCell('G10')->getValue())->toBe('=210/60')
+        ->and($global->getCell('H10')->getValue())->toBe('=180/60')
+        ->and($global->getCell('I10')->getValue())->toBe('=30/60');
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employeeB);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
@@ -505,15 +526,11 @@ test('payroll exports derive exact hours and totals from canonical minutes', fun
     $payrollPath = (new PayrollExcelExporter)->export($payPeriod);
     $payrollSheet = IOFactory::load($payrollPath)->getActiveSheet();
 
-    expect($payrollSheet->getCell('M8')->getValue())->toBe(2)
-        ->and($payrollSheet->getCell('P8')->getValue())->toBe(2)
-        ->and($payrollSheet->getCell('Q8')->getValue())->toBe(2)
-        ->and($payrollSheet->getCell('E8')->getValue())->toBe('=M8/60')
-        ->and($payrollSheet->getCell('F8')->getValue())->toBe('=P8/60')
-        ->and($payrollSheet->getCell('G8')->getValue())->toBe('=Q8/60')
-        ->and(round((float) $payrollSheet->getCell('E8')->getCalculatedValue() * 60, 8))->toBe(2.0)
-        ->and($payrollSheet->getCell('M9')->getValue())->toBe(2)
-        ->and($payrollSheet->getCell('E9')->getValue())->toBe('=M9/60');
+    expect($payrollSheet->getCell('G8')->getValue())->toBe('=2/60')
+        ->and($payrollSheet->getCell('H8')->getValue())->toBe('=2/60')
+        ->and($payrollSheet->getCell('I8')->getValue())->toBe('=2/60')
+        ->and(round((float) $payrollSheet->getCell('G8')->getCalculatedValue() * 60, 8))->toBe(2.0)
+        ->and($payrollSheet->getCell('G9')->getValue())->toBe('=2/60');
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stubSheet = IOFactory::load($stubPath)->getActiveSheet();
@@ -540,10 +557,11 @@ test('payroll exports frozen payment code as text and frozen job title', functio
 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $global = IOFactory::load($globalPath)->getActiveSheet();
-    expect($global->getCell('AE5')->getValue())->toBe('Código de pago')
-        ->and($global->getCell('AF5')->getValue())->toBe('Cargo')
-        ->and($global->getCell('AE6')->getValue())->toBe('00042')
-        ->and($global->getCell('AF6')->getValue())->toBe('Operador');
+    expect($global->getCell('B5')->getValue())->toBe('Código de pago')
+        ->and($global->getCell('D5')->getValue())->toBe('Cargo')
+        ->and($global->getCell('B6')->getValue())->toBe('00042')
+        ->and($global->getCell('B6')->getDataType())->toBe('s')
+        ->and($global->getCell('D6')->getValue())->toBe('Operador');
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();

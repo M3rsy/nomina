@@ -10,6 +10,7 @@ use App\Models\EmployeeScheduleAssignment;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
+use App\Models\VacationDay;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfilePublication;
 use Carbon\CarbonImmutable;
@@ -36,6 +37,8 @@ final readonly class PayrollPeriodSnapshotData
 
     private Collection $variationAcknowledgementsByEmployeeAndDate;
 
+    private Collection $vacationDaysByEmployeeAndDate;
+
     public function __construct(
         private Collection $assignments,
         private Collection $schedules,
@@ -45,6 +48,7 @@ final readonly class PayrollPeriodSnapshotData
         private Collection $decisions,
         private Collection $exceptions,
         private Collection $variationAcknowledgements,
+        private Collection $vacationDays,
     ) {
         $this->assignmentsByEmployee = $assignments->groupBy('employee_id');
         $this->schedulesByProfileAndDay = $schedules->groupBy(
@@ -65,6 +69,9 @@ final readonly class PayrollPeriodSnapshotData
         );
         $this->variationAcknowledgementsByEmployeeAndDate = $variationAcknowledgements->groupBy(
             fn (AttendanceVariationAcknowledgement $acknowledgement): string => $this->employeeDateKey($acknowledgement->employee_id, $acknowledgement->work_date),
+        );
+        $this->vacationDaysByEmployeeAndDate = $vacationDays->groupBy(
+            fn (VacationDay $vacationDay): string => $this->employeeDateKey($vacationDay->employee_id, $vacationDay->work_date),
         );
     }
 
@@ -131,8 +138,18 @@ final readonly class PayrollPeriodSnapshotData
             ->whereDate('work_date', '<=', $period->end_date->toDateString())
             ->with('acknowledger')
             ->get();
+        $vacationDays = VacationDay::withoutCompanyScope()
+            ->where('company_id', $period->company_id)
+            ->whereIn('employee_id', $employeeIds)
+            ->whereDate('work_date', '>=', CarbonImmutable::parse($period->start_date)->toDateString())
+            ->whereDate('work_date', '<=', CarbonImmutable::parse($period->end_date)->toDateString())
+            ->active()
+            ->orderBy('employee_id')
+            ->orderBy('work_date')
+            ->orderBy('id')
+            ->get();
 
-        return new self($assignments, $schedules, $publications, $marks, $factGenerations, $decisions, $exceptions, $variationAcknowledgements);
+        return new self($assignments, $schedules, $publications, $marks, $factGenerations, $decisions, $exceptions, $variationAcknowledgements, $vacationDays);
     }
 
     public function assignment(Employee $employee, CarbonImmutable $date): ?EmployeeScheduleAssignment
@@ -231,6 +248,14 @@ final readonly class PayrollPeriodSnapshotData
         return $this->variationAcknowledgementsByEmployeeAndDate
             ->get($this->employeeDateKey($employee->id, $date), collect())
             ->values();
+    }
+
+    public function vacationDay(Employee $employee, CarbonImmutable $date): ?VacationDay
+    {
+        $days = $this->vacationDaysByEmployeeAndDate
+            ->get($this->employeeDateKey($employee->id, $date), collect());
+
+        return $days->count() === 1 ? $days->sole() : null;
     }
 
     private function profileDayKey(int $profileId, int $dayOfWeek): string

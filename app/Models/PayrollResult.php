@@ -47,6 +47,9 @@ class PayrollResult extends Model
         'is_absence',
         'is_justified',
         'unjustified',
+        'day_type',
+        'vacation_id',
+        'vacation_day_id',
         'notes',
         'rules_version',
         'calendar_generation',
@@ -85,6 +88,8 @@ class PayrollResult extends Model
             'is_absence' => 'boolean',
             'is_justified' => 'boolean',
             'unjustified' => 'boolean',
+            'vacation_id' => 'integer',
+            'vacation_day_id' => 'integer',
             'calendar_generation' => 'integer',
             'day_snapshot' => 'array',
             'metadata' => 'array',
@@ -116,5 +121,15 @@ class PayrollResult extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function vacation(): BelongsTo
+    {
+        return $this->belongsTo(Vacation::class);
+    }
+
+    public function vacationDay(): BelongsTo
+    {
+        return $this->belongsTo(VacationDay::class);
     }
 }

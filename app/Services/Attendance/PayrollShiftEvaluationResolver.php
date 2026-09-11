@@ -7,6 +7,7 @@ use App\Models\AttendanceVariationAcknowledgement;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
+use App\Models\VacationDay;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use InvalidArgumentException;
@@ -35,6 +36,8 @@ class PayrollShiftEvaluationResolver
             $review->analysis,
             $review->currentDecisions,
             $review->currentExceptions,
+            $review->vacationDay,
+            $review->vacationIsStale,
         );
     }
 
@@ -84,6 +87,13 @@ class PayrollShiftEvaluationResolver
                 ->whereDate('work_date', $date->toDateString())
                 ->with('acknowledger')
                 ->get();
+        $vacationDay = $snapshot !== null
+            ? $snapshot->vacationDay($employee, $date)
+            : VacationDay::withoutCompanyScope()
+                ->where('company_id', $payPeriod->company_id)
+                ->forEmployeeDate($employee->id, $date->toDateString())
+                ->active()
+                ->first();
 
         return new PayrollShiftReview(
             $employee,
@@ -93,6 +103,36 @@ class PayrollShiftEvaluationResolver
             $exceptions,
             $variationAcknowledgements,
             $this->decisionMatcher,
+            $vacationDay,
+            $vacationDay !== null && ! $this->vacationMatches(
+                $vacationDay,
+                $occurrence,
+                $analysis,
+                $calendarContext->generation($date),
+            ),
         );
+    }
+
+    private function vacationMatches(
+        VacationDay $vacationDay,
+        ShiftOccurrence $occurrence,
+        AttendanceShiftAnalysis $analysis,
+        int $holidayGeneration,
+    ): bool {
+        try {
+            $current = FullDayAbsenceSnapshot::from($occurrence, $analysis);
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        return hash_equals($vacationDay->snapshot_fingerprint, $current->fingerprint)
+            && $vacationDay->planned_minutes === $current->scheduledMinutes
+            && $vacationDay->rate_minutes == $current->rateMinutes
+            && $vacationDay->scheduled_start?->equalTo($current->scheduledStart)
+            && $vacationDay->scheduled_end?->equalTo($current->scheduledEnd)
+            && $vacationDay->holiday_generation === $holidayGeneration
+            && $vacationDay->employee_schedule_assignment_id === $occurrence->assignment?->id
+            && $vacationDay->work_schedule_id === $occurrence->schedule?->id
+            && $vacationDay->work_schedule_profile_publication_id === $occurrence->publicationId;
     }
 }
