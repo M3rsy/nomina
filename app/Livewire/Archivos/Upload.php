@@ -7,10 +7,8 @@ use App\Models\PayPeriod;
 use App\Models\UploadedFile;
 use App\Models\User;
 use App\Services\CurrentCompany;
-use App\Services\FileValidator;
-use App\Services\Parsers\ParserFactory;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
+use App\Services\Parsers\UnsupportedFileException;
+use App\Services\UploadedAttendanceFileIngestor;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -94,52 +92,18 @@ class Upload extends Component
             return;
         }
 
-        $file = $this->upload;
-        $originalName = $file->getClientOriginalName();
-        $extension = strtolower($file->getClientOriginalExtension());
-        $storedName = strtolower((string) Str::ulid()).'.'.$extension;
-        $relativePath = "uploads/{$company->slug}/{$payPeriod->slug}/{$storedName}";
-
-        $path = $file->storeAs(dirname($relativePath), basename($relativePath), 'local');
-        $fullPath = Storage::disk('local')->path($path);
-        $sha256 = hash_file('sha256', $fullPath);
-
-        $existing = UploadedFile::where('company_id', $company->id)
-            ->where('sha256', $sha256)
-            ->first();
-
-        if ($existing !== null) {
-            Storage::disk('local')->delete($path);
-            $this->addError('upload', 'Este archivo ya fue cargado anteriormente.');
+        try {
+            $uploadedFile = app(UploadedAttendanceFileIngestor::class)->ingest(
+                $company,
+                $payPeriod,
+                $user,
+                $this->upload,
+            );
+        } catch (UnsupportedFileException) {
+            $this->addError('upload', 'El archivo seleccionado no corresponde a un formato de asistencia soportado.');
 
             return;
         }
-
-        $contents = Storage::disk('local')->get($path);
-        $encoding = mb_detect_encoding($contents, ['ASCII', 'UTF-8'], true) ?: 'ASCII';
-
-        $uploadedFile = UploadedFile::create([
-            'company_id' => $company->id,
-            'pay_period_id' => $payPeriod->id,
-            'original_name' => $originalName,
-            'stored_name' => $storedName,
-            'disk' => 'local',
-            'path' => $path,
-            'mime' => $file->getMimeType(),
-            'extension' => $extension,
-            'size_bytes' => $file->getSize(),
-            'encoding' => $encoding,
-            'sha256' => $sha256,
-            'status' => 'pending',
-            'user_id' => $user->id,
-            'validation_summary' => null,
-        ]);
-
-        $parser = ParserFactory::make($originalName);
-        $parsedFile = $parser->parse($contents);
-
-        $validator = app(FileValidator::class);
-        $validator->validate($uploadedFile, $parsedFile->records);
 
         $this->redirect('/archivos/'.$uploadedFile->id, navigate: true);
     }
