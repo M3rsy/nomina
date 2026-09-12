@@ -37,7 +37,7 @@ class PayrollExportController extends Controller
 
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        ])->deleteFileAfterSend(true);
     }
 
     public function stub(PayPeriod $payPeriod, string $empleado): BinaryFileResponse
@@ -62,7 +62,7 @@ class PayrollExportController extends Controller
 
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        ])->deleteFileAfterSend(true);
     }
 
     /**

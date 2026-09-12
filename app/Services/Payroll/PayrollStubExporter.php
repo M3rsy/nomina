@@ -44,11 +44,10 @@ class PayrollStubExporter
         $this->writeTotalsRows($sheet, $totals);
         $this->applyHeaderStyle($sheet);
 
-        $path = tempnam(sys_get_temp_dir(), 'payroll_stub_').'.xlsx';
-        $writer = new Xlsx($spreadsheet);
-        $writer->save($path);
-
-        return $path;
+        return TemporaryXlsxFile::write('payroll_stub_', function (string $path) use ($spreadsheet): void {
+            $writer = new Xlsx($spreadsheet);
+            $writer->save($path);
+        });
     }
 
     public function filename(PayPeriod $payPeriod, Employee $employee): string
