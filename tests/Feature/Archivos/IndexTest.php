@@ -10,34 +10,79 @@ use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Livewire;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
-test('super admin paginates all company files with stable ordering', function () {
-    $companies = Company::factory()->count(2)->create();
-    $payPeriods = $companies->map(fn (Company $company) => PayPeriod::factory()->forCompany($company)->create());
+test('super admin cannot list uploaded files without an active company context', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'original_name' => 'GLOBAL-LEAK.TXT',
+    ]);
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
-
-    $files = collect(range(1, 11))->map(fn (int $number) => UploadedFile::factory()
-        ->forCompany($companies[$number % 2])
-        ->forPayPeriod($payPeriods[$number % 2])
-        ->create([
-            'original_name' => sprintf('FILE-%02d.TXT', $number),
-            'created_at' => '2026-01-01 12:00:00',
-        ]));
 
     $this->actingAs($superAdmin);
     app(CurrentCompany::class)->set(null);
 
     Livewire::test(Index::class)
+        ->assertForbidden();
+});
+
+test('super admin stale company selection is cleared and never lists global files', function (?Closure $staleSelection) {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'original_name' => 'GLOBAL-LEAK.TXT',
+    ]);
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->actingAs($superAdmin);
+    session(['active_company_id' => $staleSelection?->call($this) ?? Company::factory()->inactive()->create()->id]);
+
+    Livewire::test(Index::class)
+        ->assertForbidden()
+        ->assertDontSee('GLOBAL-LEAK.TXT');
+
+    expect(session()->has('active_company_id'))->toBeFalse();
+})->with([
+    'inactive company' => null,
+    'missing company' => fn () => Company::query()->max('id') + 1000,
+]);
+
+test('super admin lists only the active company files', function () {
+    $activeCompany = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $activePayPeriod = PayPeriod::factory()->forCompany($activeCompany)->create();
+    $otherPayPeriod = PayPeriod::factory()->forCompany($otherCompany)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $files = collect(range(1, 11))->map(fn (int $number) => UploadedFile::factory()
+        ->forCompany($activeCompany)
+        ->forPayPeriod($activePayPeriod)
+        ->create([
+            'original_name' => sprintf('FILE-%02d.TXT', $number),
+            'created_at' => '2026-01-01 12:00:00',
+        ]));
+    UploadedFile::factory()->forCompany($otherCompany)->forPayPeriod($otherPayPeriod)->create([
+        'original_name' => 'OTHER-COMPANY.TXT',
+        'created_at' => '2026-01-01 12:00:00',
+    ]);
+
+    $this->actingAs($superAdmin);
+    app(CurrentCompany::class)->set($activeCompany);
+
+    Livewire::test(Index::class)
         ->assertSeeInOrder($files->reverse()->take(10)->pluck('original_name')->all())
         ->assertDontSee('FILE-01.TXT')
+        ->assertDontSee('OTHER-COMPANY.TXT')
         ->assertSeeHtml('wire:click="nextPage(\'page\')"')
         ->call('setPage', 2)
         ->assertSee('FILE-01.TXT')
         ->assertDontSee('FILE-11.TXT')
+        ->assertDontSee('OTHER-COMPANY.TXT')
         ->assertSeeHtml('wire:click="previousPage(\'page\')"');
 });
 
