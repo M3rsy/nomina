@@ -55,17 +55,26 @@ function processorEmployee(Company $company): Employee
         WorkSchedule::factory()->forProfile($profile)->create($schedule + ['day_of_week' => $day]);
     }
 
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada para nómina');
 
     return $employee;
 }
 
+test('processor employee fixture creates an employee hired before fixed payroll periods', function () {
+    fake()->seed(676);
+
+    $employee = processorEmployee(Company::factory()->create());
+
+    expect($employee->hired_at?->toDateString())->toBe('2020-01-01');
+});
+
 test('processor excludes employees hired after the period end', function () {
     $company = Company::factory()->create();
     $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
     $eligible = processorEmployee($company);
-    $eligible->update(['hired_at' => '2020-01-01']);
     Employee::factory()->forCompany($company)->create([
         'hired_at' => '2026-02-01',
         'payment_code' => null,

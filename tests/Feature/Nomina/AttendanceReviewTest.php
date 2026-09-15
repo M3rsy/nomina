@@ -24,6 +24,16 @@ beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
+test('attendance review fixtures create employees hired before fixed review periods', function () {
+    fake()->seed(676);
+
+    $context = attendanceReviewPageFixture();
+    $addedEmployee = addAttendanceReviewEmployee($context, 'Ana', 'Ronda', 'SEG-102', ['2026-07-20']);
+
+    expect($context['employee']->hired_at?->toDateString())->toBe('2026-07-01')
+        ->and($addedEmployee->hired_at?->toDateString())->toBe('2026-07-20');
+});
+
 test('shows exact server-calculated overtime candidates beside attendance and scheduled time', function () {
     $context = attendanceReviewPageFixture();
     $this->actingAs($context['actor']);
@@ -505,6 +515,7 @@ function attendanceReviewPageFixture(
         'first_name' => 'María',
         'last_name' => 'Guardia',
         'external_id' => 'SEG-101',
+        'hired_at' => '2026-07-01',
     ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada diurna');
     $period = PayPeriod::factory()->forCompany($company)->create([
@@ -540,6 +551,7 @@ function addAttendanceReviewEmployee(
         'first_name' => $firstName,
         'last_name' => $lastName,
         'external_id' => $externalId,
+        'hired_at' => $context['period']->start_date,
     ]);
     app(EmployeeScheduleAssigner::class)->assign(
         $employee,
