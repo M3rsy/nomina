@@ -35,3 +35,19 @@ test('attlog parser stores trailing fixed columns as metadata', function () use 
     $first = $parsed->records->first();
     expect($first->metadata)->toBe(['1', '0', '1', '0']);
 });
+
+test('attlog parser uses physical line numbers after blank malformed and invalid date lines', function () {
+    $contents = implode("\r\n", [
+        '',
+        'malformed',
+        "TEST-001\t2026-01-05 08:15:00\t1\t0\t1\t0",
+        "TEST-002\tnot-a-date\t0\t1\t0\t1",
+        "TEST-003\t2026-01-06 17:30:00\t0\t1\t0\t1",
+    ]);
+
+    $parser = new AttlogParser;
+    $parsed = $parser->parse($contents);
+
+    expect($parsed->records)->toHaveCount(2);
+    expect($parsed->records->pluck('row_number')->all())->toBe([3, 5]);
+});

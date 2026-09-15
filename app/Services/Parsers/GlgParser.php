@@ -3,7 +3,6 @@
 namespace App\Services\Parsers;
 
 use Carbon\Carbon;
-use Illuminate\Support\Collection;
 
 class GlgParser implements Parser
 {
@@ -11,9 +10,8 @@ class GlgParser implements Parser
     {
         $lines = $this->splitLines($contents);
         $records = collect();
-        $rowNumber = 1;
 
-        foreach ($lines as $line) {
+        foreach ($lines as $index => $line) {
             $line = trim($line, "\r\n");
 
             if ($this->isHeader($line)) {
@@ -41,11 +39,9 @@ class GlgParser implements Parser
                 employee_external_id: $employeeExternalId,
                 event_at: $dateTime,
                 raw_line: $line,
-                row_number: $rowNumber,
+                row_number: $index + 1,
                 source: 'glg',
             ));
-
-            $rowNumber++;
         }
 
         return new ParsedFile(

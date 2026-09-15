@@ -8,9 +8,14 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
 const PAYROLL_RESULT_TENANT_INVARIANTS_MIGRATION = 'database/migrations/2026_07_24_000001_enforce_payroll_result_tenant_invariants.php';
+const PAYROLL_RESULT_VACATION_TENANT_MIGRATION = 'database/migrations/2026_09_12_000001_enforce_vacation_tenant_invariants.php';
 
 function rollbackPayrollResultTenantInvariantsMigration(): void
 {
+    Artisan::call('migrate:rollback', [
+        '--path' => PAYROLL_RESULT_VACATION_TENANT_MIGRATION,
+        '--force' => true,
+    ]);
     Artisan::call('migrate:rollback', [
         '--path' => PAYROLL_RESULT_TENANT_INVARIANTS_MIGRATION,
         '--force' => true,
@@ -174,11 +179,16 @@ test('aborts before changing the catalog when a historical tenant reference is i
         $exception = $caught;
     }
 
-    expect($exception)->not->toBeNull()
-        ->and($exception?->getMessage())
-        ->toBe('Cannot enforce payroll result tenant invariants: historical cross-company references exist.')
-        ->and(payrollResultConstraintDefinitions())->toBe($constraintsBefore)
-        ->and(DB::table('payroll_results')->count())->toBe(1);
+    try {
+        expect($exception)->not->toBeNull()
+            ->and($exception?->getMessage())
+            ->toBe('Cannot enforce payroll result tenant invariants: historical cross-company references exist.')
+            ->and(payrollResultConstraintDefinitions())->toBe($constraintsBefore)
+            ->and(DB::table('payroll_results')->count())->toBe(1);
+    } finally {
+        DB::statement('truncate table payroll_results restart identity');
+        Artisan::call('migrate', ['--force' => true]);
+    }
 })->with([
     'pay period' => 'pay_period_id',
     'employee' => 'employee_id',
