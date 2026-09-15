@@ -79,11 +79,10 @@ class PayrollExcelExporter
         $this->writeAuditRows($auditSheet, $payPeriod, $results);
         $spreadsheet->setActiveSheetIndex(0);
 
-        $path = tempnam(sys_get_temp_dir(), 'payroll_export_').'.xlsx';
-        $writer = new Xlsx($spreadsheet);
-        $writer->save($path);
-
-        return $path;
+        return TemporaryXlsxFile::write('payroll_export_', function (string $path) use ($spreadsheet): void {
+            $writer = new Xlsx($spreadsheet);
+            $writer->save($path);
+        });
     }
 
     public function filename(PayPeriod $payPeriod): string

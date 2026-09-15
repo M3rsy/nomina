@@ -19,3 +19,7 @@ test('factory throws for unsupported extensions', function () {
     expect(fn () => ParserFactory::make('report.pdf'))->toThrow(UnsupportedFileException::class);
     expect(fn () => ParserFactory::make('data.csv'))->toThrow(UnsupportedFileException::class);
 });
+
+test('factory throws for allowed extension without supported attendance filename', function () {
+    expect(fn () => ParserFactory::make('attendance.txt'))->toThrow(UnsupportedFileException::class);
+});
