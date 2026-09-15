@@ -2,8 +2,8 @@
 
 namespace App\Livewire\Archivos;
 
-use App\Models\UploadedFile;
 use App\Models\PayPeriod;
+use App\Models\UploadedFile;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;

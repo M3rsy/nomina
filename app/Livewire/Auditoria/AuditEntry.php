@@ -16,6 +16,5 @@ readonly class AuditEntry
         public ?string $userEmail,
         public string $description,
         public array $metadata = []
-    ) {
-    }
+    ) {}
 }

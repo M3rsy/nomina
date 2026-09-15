@@ -2,8 +2,6 @@
 
 namespace App\Services\Parsers;
 
-use Illuminate\Support\Str;
-
 class ParserFactory
 {
     public static function make(string $filename): Parser

@@ -3,7 +3,7 @@
 use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Services\CurrentCompany;
-use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Database\QueryException;
 
 test('pay period belongs to a company and can be created', function () {
     $company = Company::factory()->create();
@@ -76,5 +76,5 @@ test('pay period slug is unique per company', function () {
         'start_date' => '2026-02-01',
         'end_date' => '2026-02-28',
         'status' => 'draft',
-    ]))->toThrow(\Illuminate\Database\QueryException::class);
+    ]))->toThrow(QueryException::class);
 });
