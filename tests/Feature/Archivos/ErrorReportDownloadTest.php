@@ -61,6 +61,19 @@ test('company admin can download csv error report', function () {
     expect($content)->not->toContain('valid');
 });
 
+test('super admin cannot download report without an active company context', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->actingAs($superAdmin);
+    app(CurrentCompany::class)->set(null);
+
+    $this->get('/archivos/'.$uploadedFile->id.'/reporte')
+        ->assertForbidden();
+});
+
 test('company admin cannot download report from other company file', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
