@@ -10,9 +10,8 @@ class AttlogParser implements Parser
     {
         $lines = $this->splitLines($contents);
         $records = collect();
-        $rowNumber = 1;
 
-        foreach ($lines as $line) {
+        foreach ($lines as $index => $line) {
             $line = trim($line, "\r\n");
 
             if ($line === '') {
@@ -36,12 +35,10 @@ class AttlogParser implements Parser
                 employee_external_id: $employeeExternalId,
                 event_at: $dateTime,
                 raw_line: $line,
-                row_number: $rowNumber,
+                row_number: $index + 1,
                 source: 'attlog',
                 metadata: array_slice(array_map('trim', $columns), 2, 4),
             ));
-
-            $rowNumber++;
         }
 
         return new ParsedFile(
