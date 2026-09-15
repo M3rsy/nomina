@@ -4,13 +4,18 @@ use App\Livewire\Archivos\Upload;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
+use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
 use App\Services\CurrentCompany;
+use App\Services\FileValidator;
+use App\Services\UploadedAttendanceFileIngestor;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Http\UploadedFile as LaravelUploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -101,6 +106,200 @@ test('upload selector shows every uploadable status and excludes all other statu
         ->assertDontSee('Ineligible approved')
         ->assertDontSee('Ineligible exported')
         ->assertDontSee('Ineligible cancelled');
+});
+
+test('unsupported txt upload is rejected without persisted records or files', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $admin = actingAsCompanyAdmin($company);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $file = LaravelUploadedFile::fake()->createWithContent(
+        'attendance.txt',
+        "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n",
+    );
+
+    Livewire::test(Upload::class)
+        ->set('pay_period_id', (string) $payPeriod->id)
+        ->set('upload', $file)
+        ->call('store')
+        ->assertHasErrors('upload');
+
+    expect(UploadedFile::count())->toBe(0)
+        ->and(RawMark::count())->toBe(0)
+        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
+});
+
+test('validator failure after persisted rows rolls back database and cleans up storage', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $admin = actingAsCompanyAdmin($company);
+    $expected = new RuntimeException('validator failed after rows');
+
+    $validator = Mockery::mock(FileValidator::class);
+    $validator->shouldReceive('validate')->once()->andReturnUsing(function (UploadedFile $uploadedFile, $records) use ($company, $expected): never {
+        $record = $records->first();
+
+        RawMark::create([
+            'company_id' => $company->id,
+            'pay_period_id' => $uploadedFile->pay_period_id,
+            'uploaded_file_id' => $uploadedFile->id,
+            'employee_external_id' => $record->employee_external_id,
+            'employee_id' => null,
+            'event_at' => $record->event_at,
+            'raw_line' => $record->raw_line,
+            'source' => $record->source,
+            'row_number' => $record->row_number,
+            'status' => 'pending',
+            'notes' => null,
+            'metadata' => $record->metadata,
+        ]);
+
+        expect(UploadedFile::count())->toBe(1)
+            ->and(RawMark::count())->toBe(1);
+
+        throw $expected;
+    });
+    app()->instance(FileValidator::class, $validator);
+
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $file = LaravelUploadedFile::fake()->createWithContent(
+        'GLG_001.TXT',
+        "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n",
+    );
+
+    expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $file))
+        ->toThrow($expected::class, $expected->getMessage());
+
+    expect(UploadedFile::count())->toBe(0)
+        ->and(RawMark::count())->toBe(0)
+        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
+});
+
+test('ingestor fails clearly when storage returns no path', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $admin = actingAsCompanyAdmin($company);
+
+    $file = Mockery::mock(LaravelUploadedFile::class);
+    $file->shouldReceive('getClientOriginalName')->andReturn('GLG_001.TXT');
+    $file->shouldReceive('getClientOriginalExtension')->andReturn('txt');
+    $file->shouldReceive('storeAs')->once()->andReturn(false);
+
+    expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $file))
+        ->toThrow(RuntimeException::class, 'Attendance upload could not be stored.');
+
+    expect(UploadedFile::count())->toBe(0)
+        ->and(RawMark::count())->toBe(0)
+        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
+});
+
+test('ingestor preserves valid glg and attlog uploads', function (string $filename, string $fixture) {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-001']);
+    Employee::factory()->forCompany($company)->create(['external_id' => 'TEST-002']);
+    $admin = actingAsCompanyAdmin($company);
+
+    $contents = file_get_contents(__DIR__.'/../../Fixtures/Attendance/'.$fixture);
+    $file = LaravelUploadedFile::fake()->createWithContent($filename, $contents);
+
+    $uploadedFile = app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $file);
+
+    expect($uploadedFile->status)->toBe('valid')
+        ->and($uploadedFile->rawMarks()->count())->toBe(2)
+        ->and(Storage::disk('local')->exists($uploadedFile->path))->toBeTrue();
+})->with([
+    'glg' => ['GLG_001.TXT', 'GLG_minimal.txt'],
+    'attlog' => ['attlog.dat', 'ATTLOG_minimal.dat'],
+]);
+
+test('ingestor rejects duplicate sha and removes only the duplicate file', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $admin = actingAsCompanyAdmin($company);
+
+    $contents = "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n";
+    $firstFile = LaravelUploadedFile::fake()->createWithContent('GLG_001.TXT', $contents);
+    $stored = app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $firstFile);
+
+    $secondFile = LaravelUploadedFile::fake()->createWithContent('GLG_002.TXT', $contents);
+    expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $secondFile))
+        ->toThrow(ValidationException::class);
+
+    expect(UploadedFile::count())->toBe(1)
+        ->and(RawMark::count())->toBe(1)
+        ->and(Storage::disk('local')->exists($stored->path))->toBeTrue()
+        ->and(Storage::disk('local')->allFiles('uploads'))->toHaveCount(1);
+});
+
+test('ingestor maps a duplicate sha unique race to validation and cleans up storage', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $admin = actingAsCompanyAdmin($company);
+    $seededRace = false;
+
+    UploadedFile::creating(function (UploadedFile $uploadedFile) use (&$seededRace): void {
+        if ($seededRace) {
+            return;
+        }
+
+        $seededRace = true;
+
+        UploadedFile::withoutEvents(fn () => UploadedFile::create([
+            'company_id' => $uploadedFile->company_id,
+            'pay_period_id' => $uploadedFile->pay_period_id,
+            'original_name' => 'race-'.$uploadedFile->original_name,
+            'stored_name' => 'race-'.$uploadedFile->stored_name,
+            'disk' => 'local',
+            'path' => 'uploads/race/'.$uploadedFile->stored_name,
+            'mime' => $uploadedFile->mime,
+            'extension' => $uploadedFile->extension,
+            'size_bytes' => $uploadedFile->size_bytes,
+            'encoding' => $uploadedFile->encoding,
+            'sha256' => $uploadedFile->sha256,
+            'status' => 'pending',
+            'user_id' => $uploadedFile->user_id,
+            'validation_summary' => null,
+        ]));
+    });
+
+    $file = LaravelUploadedFile::fake()->createWithContent(
+        'GLG_001.TXT',
+        "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n",
+    );
+
+    expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $file))
+        ->toThrow(ValidationException::class);
+
+    expect(UploadedFile::count())->toBe(0)
+        ->and(RawMark::count())->toBe(0)
+        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
 });
 
 test('ready period cannot receive attendance uploads', function () {
