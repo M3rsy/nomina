@@ -125,8 +125,8 @@ test('period review preserves canonical rates for custom bands, repeats, and com
         ]);
     }
 
-    $canonicalEmployee = Employee::factory()->forCompany($company)->create();
-    $customEmployee = Employee::factory()->forCompany($company)->create();
+    $canonicalEmployee = Employee::factory()->forCompany($company)->create(['hired_at' => '2026-07-01']);
+    $customEmployee = Employee::factory()->forCompany($company)->create(['hired_at' => '2026-07-01']);
     $outsideEmployee = Employee::factory()->forCompany($outsideCompany)->create();
 
     app(EmployeeScheduleAssigner::class)->assign($canonicalEmployee, $canonicalProfile, '2026-07-01', 'Canonical schedule');
