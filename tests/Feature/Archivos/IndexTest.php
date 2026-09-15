@@ -206,8 +206,14 @@ test('index filters by pay period', function () {
     $payPeriodA = PayPeriod::factory()->forCompany($company)->create();
     $payPeriodB = PayPeriod::factory()->forCompany($company)->create();
 
-    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriodA)->create(['original_name' => 'a.txt']);
-    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriodB)->create(['original_name' => 'b.txt']);
+    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriodA)->create([
+        'original_name' => 'PERIOD-ALPHA-UPLOAD.CSV',
+        'stored_name' => 'stored-alpha-visible-row.csv',
+    ]);
+    UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriodB)->create([
+        'original_name' => 'PERIOD-BRAVO-HIDDEN.CSV',
+        'stored_name' => 'stored-bravo-filtered-row.csv',
+    ]);
 
     $admin = User::factory()->create([
         'company_id' => $company->id,
@@ -220,8 +226,10 @@ test('index filters by pay period', function () {
 
     $response = $this->get('/archivos?pay_period_id='.$payPeriodA->id);
     $response->assertOk();
-    $response->assertSee('a.txt');
-    $response->assertDontSee('b.txt');
+    $response->assertSee('PERIOD-ALPHA-UPLOAD.CSV');
+    $response->assertSee('stored-alpha-visible-row.csv');
+    $response->assertDontSee('PERIOD-BRAVO-HIDDEN.CSV');
+    $response->assertDontSee('stored-bravo-filtered-row.csv');
 });
 
 test('index search filters by original name', function () {
