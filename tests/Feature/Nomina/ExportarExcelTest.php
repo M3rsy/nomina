@@ -15,6 +15,14 @@ beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
+function payrollExcelResponseDeletesFileAfterSend($response): bool
+{
+    $property = new ReflectionProperty($response->baseResponse, 'deleteFileAfterSend');
+    $property->setAccessible(true);
+
+    return $property->getValue($response->baseResponse) === true;
+}
+
 function setupExportScenario(string $status = 'approved'): array
 {
     $company = Company::factory()->create();
@@ -49,6 +57,19 @@ test('company admin can download excel export for approved pay period', function
     $response->assertOk();
     $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     $response->assertHeader('content-disposition', 'attachment; filename="Asistencia 20260105 hasta 20260111.xlsx"');
+});
+
+test('excel export schedules temporary file deletion after sending', function () {
+    [$company, $payPeriod, $employee, $admin] = setupExportScenario('approved');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $response = $this->get("/nomina/{$payPeriod->id}/excel");
+
+    $response->assertOk();
+
+    expect(payrollExcelResponseDeletesFileAfterSend($response))->toBeTrue();
 });
 
 test('excel export sets pay period status to exported', function () {
