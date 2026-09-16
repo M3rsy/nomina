@@ -5,10 +5,11 @@ use App\Models\Employee;
 use App\Models\JustifiedAbsence;
 use App\Models\PayPeriod;
 use App\Services\CurrentCompany;
+use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\QueryException;
 
 beforeEach(function () {
-    $this->seed(\Database\Seeders\PermissionRoleSeeder::class);
+    $this->seed(PermissionRoleSeeder::class);
 });
 
 test('justified absence belongs to company, pay period, employee and justifier', function () {

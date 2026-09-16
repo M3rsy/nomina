@@ -5,9 +5,10 @@ use App\Models\Holiday;
 use App\Services\CurrentCompany;
 use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
+use Database\Seeders\PermissionRoleSeeder;
 
 beforeEach(function () {
-    $this->seed(\Database\Seeders\PermissionRoleSeeder::class);
+    $this->seed(PermissionRoleSeeder::class);
 });
 
 test('holiday is scoped to company', function () {

@@ -2,7 +2,6 @@
 
 use App\Livewire\Archivos\Upload;
 use App\Models\Company;
-use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\UploadedFile;
 use App\Models\User;

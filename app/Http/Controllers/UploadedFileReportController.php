@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\UploadedFile;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 

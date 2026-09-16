@@ -1,5 +1,7 @@
 <?php
 
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Tests\Concerns\DatabaseMigrationsSafely;
 use Tests\Concerns\RefreshDatabaseSafely;
 use Tests\TestCase;
@@ -22,6 +24,11 @@ uses(
 
 uses(TestCase::class, DatabaseMigrationsSafely::class)->in('PostgreSQL');
 
+uses()->afterEach(function (): void {
+    Carbon::setTestNow();
+    CarbonImmutable::setTestNow();
+})->in('Feature', 'PostgreSQL', 'Unit');
+
 /*
 |--------------------------------------------------------------------------
 | Expectations
@@ -36,19 +43,3 @@ uses(TestCase::class, DatabaseMigrationsSafely::class)->in('PostgreSQL');
 expect()->extend('toBeOne', function () {
     return $this->toBe(1);
 });
-
-/*
-|--------------------------------------------------------------------------
-| Functions
-|--------------------------------------------------------------------------
-|
-| While Pest is very powerful out-of-the-box, you may have some testing code specific to your
-| project that you don't want to repeat in every file. Here you can also expose helpers as
-| global functions to help you to reduce the number of lines of code in your test files.
-|
-*/
-
-function something()
-{
-    // ..
-}

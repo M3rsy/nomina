@@ -57,13 +57,23 @@ test('production seeder is idempotent', function () {
 
 test('production seeder respects SUPER_ADMIN_EMAIL env', function () {
     $customEmail = 'prod-admin@example.com';
+    $previousEmail = getenv('SUPER_ADMIN_EMAIL');
+    $previousEnvironment = config('app.env');
 
-    putenv("SUPER_ADMIN_EMAIL={$customEmail}");
-    config()->set('app.env', 'production');
+    try {
+        putenv("SUPER_ADMIN_EMAIL={$customEmail}");
+        config()->set('app.env', 'production');
 
-    $this->seed(ProductionSeeder::class);
+        $this->seed(ProductionSeeder::class);
 
-    expect(User::where('email', $customEmail)->exists())->toBeTrue();
+        expect(User::where('email', $customEmail)->exists())->toBeTrue();
+    } finally {
+        if ($previousEmail === false) {
+            putenv('SUPER_ADMIN_EMAIL');
+        } else {
+            putenv("SUPER_ADMIN_EMAIL={$previousEmail}");
+        }
 
-    putenv('SUPER_ADMIN_EMAIL');
+        config()->set('app.env', $previousEnvironment);
+    }
 });
