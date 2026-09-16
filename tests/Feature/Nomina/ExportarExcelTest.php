@@ -23,6 +23,20 @@ function payrollExcelResponseDeletesFileAfterSend($response): bool
     return $property->getValue($response->baseResponse) === true;
 }
 
+function payrollExportTempArtifacts(): array
+{
+    return glob(sys_get_temp_dir().DIRECTORY_SEPARATOR.'payroll_export_*') ?: [];
+}
+
+function deletePayrollExcelResponseFile($response): void
+{
+    $path = $response->baseResponse->getFile()->getPathname();
+
+    if (is_file($path)) {
+        unlink($path);
+    }
+}
+
 function setupExportScenario(string $status = 'approved'): array
 {
     $company = Company::factory()->create();
@@ -54,9 +68,13 @@ test('company admin can download excel export for approved pay period', function
 
     $response = $this->get("/nomina/{$payPeriod->id}/excel");
 
-    $response->assertOk();
-    $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    $response->assertHeader('content-disposition', 'attachment; filename="Asistencia 20260105 hasta 20260111.xlsx"');
+    try {
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $response->assertHeader('content-disposition', 'attachment; filename="Asistencia 20260105 hasta 20260111.xlsx"');
+    } finally {
+        deletePayrollExcelResponseFile($response);
+    }
 });
 
 test('excel export schedules temporary file deletion after sending', function () {
@@ -67,9 +85,13 @@ test('excel export schedules temporary file deletion after sending', function ()
 
     $response = $this->get("/nomina/{$payPeriod->id}/excel");
 
-    $response->assertOk();
+    try {
+        $response->assertOk();
 
-    expect(payrollExcelResponseDeletesFileAfterSend($response))->toBeTrue();
+        expect(payrollExcelResponseDeletesFileAfterSend($response))->toBeTrue();
+    } finally {
+        deletePayrollExcelResponseFile($response);
+    }
 });
 
 test('excel export sets pay period status to exported', function () {
@@ -78,10 +100,41 @@ test('excel export sets pay period status to exported', function () {
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $this->get("/nomina/{$payPeriod->id}/excel")
-        ->assertOk();
+    $response = $this->get("/nomina/{$payPeriod->id}/excel");
 
-    expect($payPeriod->fresh()->status)->toBe('exported');
+    try {
+        $response->assertOk();
+
+        expect($payPeriod->fresh()->status)->toBe('exported');
+    } finally {
+        deletePayrollExcelResponseFile($response);
+    }
+});
+
+test('excel export removes its temporary file when the status transition fails', function () {
+    [$company, $payPeriod, $employee, $admin] = setupExportScenario('approved');
+    $before = payrollExportTempArtifacts();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    PayPeriod::updating(function (PayPeriod $updatingPeriod) use ($payPeriod): void {
+        if ($updatingPeriod->is($payPeriod)) {
+            throw new RuntimeException('controlled transition failure');
+        }
+    });
+
+    try {
+        expect(fn () => $this->withoutExceptionHandling()
+            ->get("/nomina/{$payPeriod->id}/excel"))
+            ->toThrow(RuntimeException::class, 'controlled transition failure');
+
+        expect(array_values(array_diff(payrollExportTempArtifacts(), $before)))->toBe([]);
+    } finally {
+        foreach (array_diff(payrollExportTempArtifacts(), $before) as $artifact) {
+            @unlink($artifact);
+        }
+    }
 });
 
 test('excel export cannot overwrite a period changed before the transition lock', function () {
@@ -119,10 +172,15 @@ test('excel export is idempotent and does not downgrade from exported', function
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $this->get("/nomina/{$payPeriod->id}/excel")
-        ->assertOk();
+    $response = $this->get("/nomina/{$payPeriod->id}/excel");
 
-    expect($payPeriod->fresh()->status)->toBe('exported');
+    try {
+        $response->assertOk();
+
+        expect($payPeriod->fresh()->status)->toBe('exported');
+    } finally {
+        deletePayrollExcelResponseFile($response);
+    }
 });
 
 test('excel export rejects a pay period outside the approved workflow', function (string $status) {

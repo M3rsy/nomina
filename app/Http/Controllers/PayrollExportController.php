@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollStubExporter;
+use App\Services\Payroll\TemporaryXlsxFile;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -23,17 +24,27 @@ class PayrollExportController extends Controller
         Gate::authorize('payroll.export');
         Gate::authorize('view', $payPeriod);
 
-        [$path, $filename] = DB::transaction(function () use ($payPeriod): array {
-            $lockedPeriod = $this->lockPeriodInState($payPeriod, ['approved', 'exported']);
-            $path = $this->excelExporter->export($lockedPeriod);
-            $filename = $this->excelExporter->filename($lockedPeriod);
+        $path = null;
 
-            if ($lockedPeriod->status === 'approved') {
-                $lockedPeriod->update(['status' => 'exported']);
+        try {
+            [$path, $filename] = DB::transaction(function () use ($payPeriod, &$path): array {
+                $lockedPeriod = $this->lockPeriodInState($payPeriod, ['approved', 'exported']);
+                $path = $this->excelExporter->export($lockedPeriod);
+                $filename = $this->excelExporter->filename($lockedPeriod);
+
+                if ($lockedPeriod->status === 'approved') {
+                    $lockedPeriod->update(['status' => 'exported']);
+                }
+
+                return [$path, $filename];
+            });
+        } catch (\Throwable $throwable) {
+            if ($path !== null) {
+                TemporaryXlsxFile::delete($path);
             }
 
-            return [$path, $filename];
-        });
+            throw $throwable;
+        }
 
         return response()->download($path, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

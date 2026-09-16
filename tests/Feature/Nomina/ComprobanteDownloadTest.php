@@ -22,6 +22,15 @@ function comprobanteResponseDeletesFileAfterSend($response): bool
     return $property->getValue($response->baseResponse) === true;
 }
 
+function deleteComprobanteResponseFile($response): void
+{
+    $path = $response->baseResponse->getFile()->getPathname();
+
+    if (is_file($path)) {
+        unlink($path);
+    }
+}
+
 function setupStubScenario(): array
 {
     $company = Company::factory()->create();
@@ -53,9 +62,13 @@ test('company admin can download comprobante for own employee', function () {
 
     $response = $this->get("/nomina/{$payPeriod->id}/empleado/{$employee->id}/comprobante");
 
-    $response->assertOk();
-    $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    $response->assertHeader('content-disposition', 'attachment; filename="Comprobante '.$employee->external_id.' '.$payPeriod->slug.'.xlsx"');
+    try {
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $response->assertHeader('content-disposition', 'attachment; filename="Comprobante '.$employee->external_id.' '.$payPeriod->slug.'.xlsx"');
+    } finally {
+        deleteComprobanteResponseFile($response);
+    }
 });
 
 test('comprobante download schedules temporary file deletion after sending', function () {
@@ -66,9 +79,13 @@ test('comprobante download schedules temporary file deletion after sending', fun
 
     $response = $this->get("/nomina/{$payPeriod->id}/empleado/{$employee->id}/comprobante");
 
-    $response->assertOk();
+    try {
+        $response->assertOk();
 
-    expect(comprobanteResponseDeletesFileAfterSend($response))->toBeTrue();
+        expect(comprobanteResponseDeletesFileAfterSend($response))->toBeTrue();
+    } finally {
+        deleteComprobanteResponseFile($response);
+    }
 });
 
 test('comprobante is unavailable before the official payroll export', function (string $status) {
