@@ -15,8 +15,10 @@ class VacationDayFactory extends Factory
     {
         return [
             'vacation_id' => Vacation::factory(),
-            'company_id' => fn (array $attributes) => Vacation::find($attributes['vacation_id'])->company_id,
-            'employee_id' => fn (array $attributes) => Vacation::find($attributes['vacation_id'])->employee_id,
+            'company_id' => fn (array $attributes) => Vacation::withoutCompanyScope()
+                ->findOrFail($attributes['vacation_id'])->company_id,
+            'employee_id' => fn (array $attributes) => Vacation::withoutCompanyScope()
+                ->findOrFail($attributes['vacation_id'])->employee_id,
             'work_date' => fake()->date(),
             'scheduled_start' => fake()->dateTime(),
             'scheduled_end' => fn (array $attributes) => (clone $attributes['scheduled_start'])->modify('+8 hours'),
