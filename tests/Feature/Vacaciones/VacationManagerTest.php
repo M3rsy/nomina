@@ -16,6 +16,7 @@ use App\Services\CurrentCompany;
 use App\Services\Vacations\VacationManager;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
@@ -84,6 +85,27 @@ test('overlap and locked payroll periods prevent approval atomically', function 
         ->and(Vacation::withoutCompanyScope()->where('company_id', $context['company']->id)->count())->toBe(1);
 });
 
+test('vacation cancellation requires an active matching company context', function () {
+    $context = vacationContext();
+    $manager = app(VacationManager::class);
+    $vacation = $manager->approve(
+        $context['company'], $context['employee'], '2026-09-10', '2026-09-10', null, $context['actor'],
+    );
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->actingAs($superAdmin);
+    app(CurrentCompany::class)->set(null);
+
+    expect(fn () => $manager->cancel($vacation, 'Intento sin contexto', $superAdmin))
+        ->toThrow(AuthorizationException::class)
+        ->and($vacation->fresh()->status)->toBe(Vacation::APPROVED);
+
+    app(CurrentCompany::class)->set($context['company']);
+    $manager->cancel($vacation, 'Contexto válido', $superAdmin);
+
+    expect($vacation->fresh()->status)->toBe(Vacation::CANCELLED);
+});
+
 test('company administrators cannot manage another company vacations', function () {
     $context = vacationContext();
     $other = Company::factory()->create();
@@ -92,6 +114,29 @@ test('company administrators cannot manage another company vacations', function 
     expect(fn () => app(VacationManager::class)->adjustBalance(
         $other, $otherEmployee, 5, 'Intento cruzado', $context['actor'],
     ))->toThrow(AuthorizationException::class);
+});
+
+test('vacations page rejects a super admin without active company context', function () {
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->actingAs($superAdmin);
+    app(CurrentCompany::class)->set(null);
+
+    Livewire::test(Index::class)->assertForbidden();
+});
+
+test('vacation cancellation modal cannot load an id outside the active company', function () {
+    $activeCompany = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $otherEmployee = Employee::factory()->forCompany($otherCompany)->create();
+    $otherVacation = Vacation::factory()->for($otherCompany)->for($otherEmployee)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    $this->actingAs($superAdmin);
+    app(CurrentCompany::class)->set($activeCompany);
+
+    expect(fn () => Livewire::test(Index::class)->call('confirmCancellation', $otherVacation->id))
+        ->toThrow(ModelNotFoundException::class);
 });
 
 test('vacations page requires permissions and renders company data', function () {

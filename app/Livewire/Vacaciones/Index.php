@@ -129,7 +129,7 @@ class Index extends Component
 
     public function confirmCancellation(int $vacationId): void
     {
-        $vacation = Vacation::withoutCompanyScope()->findOrFail($vacationId);
+        $vacation = Vacation::query()->findOrFail($vacationId);
         $this->authorize('cancel', $vacation);
         $this->cancellingId = $vacationId;
         $this->cancellationReason = '';
@@ -140,7 +140,7 @@ class Index extends Component
     public function cancel(VacationManager $manager): void
     {
         $validated = $this->validate(['cancellationReason' => ['required', 'string', 'max:2000']]);
-        $vacation = Vacation::withoutCompanyScope()->findOrFail($this->cancellingId);
+        $vacation = Vacation::query()->findOrFail($this->cancellingId);
         $this->authorize('cancel', $vacation);
         $manager->cancel($vacation, $validated['cancellationReason'], auth()->user());
         $this->showCancelModal = false;
