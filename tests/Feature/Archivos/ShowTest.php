@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Archivos\Show;
 use App\Models\Company;
 use App\Models\PayPeriod;
 use App\Models\UploadedFile;
@@ -7,6 +8,7 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Livewire;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -48,6 +50,33 @@ test('company admin can view uploaded file detail with counts', function () {
         'payPeriod' => $payPeriod,
         'uploaded_file_id' => $uploadedFile->id,
     ]), false);
+});
+
+test('super admin cannot view file detail without an active company context', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set(null);
+
+    Livewire::actingAs($superAdmin)
+        ->test(Show::class, ['uploadedFile' => $uploadedFile])
+        ->assertForbidden();
+});
+
+test('super admin cannot view file detail from another company context', function () {
+    $activeCompany = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $otherPayPeriod = PayPeriod::factory()->forCompany($otherCompany)->create();
+    $uploadedFile = UploadedFile::factory()->forCompany($otherCompany)->forPayPeriod($otherPayPeriod)->create();
+    $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    app(CurrentCompany::class)->set($activeCompany);
+
+    Livewire::actingAs($superAdmin)
+        ->test(Show::class, ['uploadedFile' => $uploadedFile])
+        ->assertForbidden();
 });
 
 test('file viewer without mark management cannot see the correction link', function () {

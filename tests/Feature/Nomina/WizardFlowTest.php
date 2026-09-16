@@ -165,7 +165,9 @@ test('continueToReady with pending marks opens confirmation modal and does not a
 
 test('an unreviewed overtime candidate cannot be bypassed when advancing to ready', function () {
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2026-01-04',
+    ]);
     assignWizardSchedule($company, $employee);
 
     foreach (['2026-01-05 06:00:00', '2026-01-05 14:30:00'] as $eventAt) {

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Schema;
 const PAYROLL_POLICY_IDENTITY_MIGRATION = 'database/migrations/2026_07_30_000001_create_work_schedule_profile_publications.php';
 const VACATIONS_MIGRATION = 'database/migrations/2026_09_10_010000_create_vacations_tables.php';
 const PAYROLL_VACATION_IDENTITY_MIGRATION = 'database/migrations/2026_09_10_010001_add_vacation_identity_to_payroll_results.php';
+const PAYROLL_POLICY_VACATION_TENANT_MIGRATION = 'database/migrations/2026_09_12_000001_enforce_vacation_tenant_invariants.php';
 
 function payrollPolicySqlState(Closure $operation): ?string
 {
@@ -38,6 +39,7 @@ function remigratePayrollPolicyIdentity(): void
 
 function rollbackVacationMigrationDependencies(): void
 {
+    Artisan::call('migrate:rollback', ['--path' => PAYROLL_POLICY_VACATION_TENANT_MIGRATION, '--force' => true]);
     Artisan::call('migrate:rollback', ['--path' => PAYROLL_VACATION_IDENTITY_MIGRATION, '--force' => true]);
     Artisan::call('migrate:rollback', ['--path' => VACATIONS_MIGRATION, '--force' => true]);
 }
@@ -46,6 +48,7 @@ function migrateVacationMigrationDependencies(): void
 {
     Artisan::call('migrate', ['--path' => VACATIONS_MIGRATION, '--force' => true]);
     Artisan::call('migrate', ['--path' => PAYROLL_VACATION_IDENTITY_MIGRATION, '--force' => true]);
+    Artisan::call('migrate', ['--path' => PAYROLL_POLICY_VACATION_TENANT_MIGRATION, '--force' => true]);
 }
 
 test('backfills future legacy coverage for an unassigned pre-existing active profile', function () {
@@ -160,10 +163,16 @@ test('rejects invalid legacy assignment history before writing publication schem
     $exception = null;
     try {
         Artisan::call('migrate', ['--path' => PAYROLL_POLICY_IDENTITY_MIGRATION, '--force' => true]);
+
+        expect($exception)->not->toBeNull();
     } catch (RuntimeException $caught) {
         $exception = $caught;
-    }
 
-    expect($exception?->getMessage())->toBe('Cannot publish legacy payroll policy identity: invalid assignment history.')
-        ->and(Schema::hasTable('work_schedule_profile_publications'))->toBeFalse();
+        expect($exception->getMessage())->toBe('Cannot publish legacy payroll policy identity: invalid assignment history.')
+            ->and(Schema::hasTable('work_schedule_profile_publications'))->toBeFalse();
+    } finally {
+        DB::table('employee_schedule_assignments')->where('reason', 'Invalid tenant history')->delete();
+        Artisan::call('migrate', ['--path' => PAYROLL_POLICY_IDENTITY_MIGRATION, '--force' => true]);
+        migrateVacationMigrationDependencies();
+    }
 });
