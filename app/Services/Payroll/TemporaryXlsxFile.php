@@ -35,17 +35,24 @@ final class TemporaryXlsxFile
 
             return $path;
         } catch (\Throwable $throwable) {
-            $cleanupFailure = self::cleanupBestEffort($path, $reservation);
-
-            if ($cleanupFailure !== null) {
-                try {
-                    report($cleanupFailure);
-                } catch (\Throwable) {
-                    // Reporting cleanup failure must not mask the writer exception.
-                }
-            }
+            self::delete($path);
 
             throw $throwable;
+        }
+    }
+
+    public static function delete(string $path): void
+    {
+        $cleanupFailure = self::cleanupBestEffort($path);
+
+        if ($cleanupFailure === null) {
+            return;
+        }
+
+        try {
+            report($cleanupFailure);
+        } catch (\Throwable) {
+            // Reporting cleanup failure must not mask the original exception.
         }
     }
 
