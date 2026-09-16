@@ -206,7 +206,9 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
             'end_time' => '14:00',
         ]);
     }
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',
@@ -270,7 +272,9 @@ test('variation acknowledgement writes nothing for foreign unauthorized stale or
         'start_time' => '06:00',
         'end_time' => '14:00',
     ]);
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',
@@ -348,7 +352,9 @@ test('daily shortfall stays pending until the complete audited deficit is grante
             'end_time' => '14:00',
         ]);
     }
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',
@@ -480,7 +486,9 @@ test('partial overtime approval preserves exact rejected complements and payable
         'start_time' => '06:00',
         'end_time' => '14:00',
     ]);
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',

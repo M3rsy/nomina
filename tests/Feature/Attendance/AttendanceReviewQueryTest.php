@@ -108,7 +108,9 @@ function attendanceReviewFixture(): array
         'end_time' => '14:00',
         'base_ordinary_hours' => 8,
     ]);
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada diurna');
     $period = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-07-20',

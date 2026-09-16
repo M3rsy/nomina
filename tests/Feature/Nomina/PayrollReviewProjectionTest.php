@@ -205,6 +205,7 @@ function payrollReviewProjectionFixture(): array
         'first_name' => 'María',
         'last_name' => 'Guardia',
         'external_id' => 'SEG-101',
+        'hired_at' => '2020-01-01',
     ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada diurna');
     $period = PayPeriod::factory()->forCompany($company)->create([
