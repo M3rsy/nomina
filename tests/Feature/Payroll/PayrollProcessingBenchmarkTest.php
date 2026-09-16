@@ -58,7 +58,9 @@ test('benchmarks payroll processing and review with an opt-in profile', function
         'status' => 'uploaded',
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
-    $employees = Employee::factory()->count($employeeCount)->forCompany($company)->create();
+    $employees = Employee::factory()->count($employeeCount)->forCompany($company)->create([
+        'hired_at' => $start->subDay(),
+    ]);
     $rowNumber = 1;
 
     foreach ($employees as $employee) {
@@ -194,7 +196,9 @@ test('reports stream review metrics with outputs matching materialized reviews',
         'status' => 'uploaded',
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
-    $employees = Employee::factory()->count(2)->forCompany($company)->create();
+    $employees = Employee::factory()->count(2)->forCompany($company)->create([
+        'hired_at' => $start->subDay(),
+    ]);
     $rowNumber = 1;
 
     foreach ($employees as $employee) {
@@ -257,7 +261,9 @@ test('bounds snapshot writer lookup queries as payroll rows grow', function (int
         'status' => 'ready',
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
-    $employees = Employee::factory()->count($employeeCount)->forCompany($company)->create();
+    $employees = Employee::factory()->count($employeeCount)->forCompany($company)->create([
+        'hired_at' => $start->subDay(),
+    ]);
     $rowNumber = 1;
 
     foreach ($employees as $employee) {

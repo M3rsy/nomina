@@ -45,7 +45,9 @@ function payrollRunWorkerFixture(): array
     foreach ($company->defaultWorkSchedules() as $day => $schedule) {
         WorkSchedule::factory()->forProfile($profile)->create($schedule + ['day_of_week' => $day]);
     }
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => $period->start_date->copy()->subDay(),
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Payroll run worker');
     $run = app(PayrollRunRequester::class)->request($period, $actor, (string) Str::uuid());
 
