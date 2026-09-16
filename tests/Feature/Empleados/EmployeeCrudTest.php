@@ -27,11 +27,16 @@ test('company admin can list only own company employees', function () {
     ]);
     $admin->assignRole('company_admin');
 
-    Employee::factory()->count(2)->forCompany($companyA)->create();
-    Employee::factory()->count(3)->forCompany($companyB)->create();
-
-    $own = $companyA->employees()->first();
-    $other = $companyB->employees()->first();
+    $own = Employee::factory()->forCompany($companyA)->create([
+        'external_id' => 'OWN-EMPLOYEE-001',
+        'first_name' => 'Own',
+        'last_name' => 'Employee',
+    ]);
+    $other = Employee::factory()->forCompany($companyB)->create([
+        'external_id' => 'FOREIGN-EMPLOYEE-001',
+        'first_name' => 'Foreign',
+        'last_name' => 'Employee',
+    ]);
 
     $this->actingAs($admin);
     $response = $this->get('/empleados');
@@ -69,11 +74,16 @@ test('super admin can see employees of active company', function () {
     ]);
     $admin->assignRole('super_admin');
 
-    Employee::factory()->count(2)->forCompany($companyA)->create();
-    Employee::factory()->count(3)->forCompany($companyB)->create();
-
-    $own = $companyA->employees()->first();
-    $other = $companyB->employees()->first();
+    $own = Employee::factory()->forCompany($companyA)->create([
+        'external_id' => 'ACTIVE-EMPLOYEE-001',
+        'first_name' => 'Active',
+        'last_name' => 'Employee',
+    ]);
+    $other = Employee::factory()->forCompany($companyB)->create([
+        'external_id' => 'INACTIVE-EMPLOYEE-001',
+        'first_name' => 'Inactive',
+        'last_name' => 'Employee',
+    ]);
 
     $this->actingAs($admin);
     session(['active_company_id' => $companyA->id]);

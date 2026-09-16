@@ -25,7 +25,9 @@ test('payroll process command processes a ready pay period', function () {
         WorkSchedule::factory()->forProfile($profile)->create($schedule + ['day_of_week' => $day]);
     }
 
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada para nómina');
 
     app(CurrentCompany::class)->set($company);

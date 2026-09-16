@@ -96,7 +96,9 @@ test('saveDraft cannot overwrite a period processed after its initial status rea
 test('continueToReady sets status to ready when all marks are clean', function () {
     Queue::fake();
     [$company, $payPeriod, $file, $admin] = setUpCompanyAndPayPeriod('validating');
-    $employee = Employee::factory()->forCompany($company)->create();
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     assignWizardSchedule($company, $employee);
 
     RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([

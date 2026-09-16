@@ -47,6 +47,7 @@ test('approves overtime within a bounded query budget for a representative perio
     foreach (range(1, 4) as $number) {
         $employee = Employee::factory()->forCompany($company)->create([
             'external_id' => "PERF-{$number}",
+            'hired_at' => '2020-01-01',
         ]);
         app(EmployeeScheduleAssigner::class)->assign($employee, $profile, $start, 'Performance fixture');
         $employees->push($employee);

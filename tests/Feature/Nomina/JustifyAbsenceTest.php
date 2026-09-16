@@ -311,8 +311,12 @@ test('detectFaltas follows each employee assigned schedule', function () {
         'end_time' => null,
         'base_ordinary_hours' => 0,
     ]);
-    $workingEmployee = Employee::factory()->forCompany($company)->create();
-    $restingEmployee = Employee::factory()->forCompany($company)->create();
+    $workingEmployee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
+    $restingEmployee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
     app(EmployeeScheduleAssigner::class)->assign($workingEmployee, $workingProfile, '2020-01-01', 'Turno diurno');
     app(EmployeeScheduleAssigner::class)->assign($restingEmployee, $restProfile, '2020-01-01', 'Día libre');
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
