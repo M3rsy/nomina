@@ -15,6 +15,7 @@ use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\FullDayAbsenceSnapshot;
 use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Attendance\ShiftOccurrenceResolver;
+use App\Services\CurrentCompany;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -309,8 +310,16 @@ final class VacationManager
 
     private function authorizeActor(User $actor, Company $company): void
     {
+        $activeCompany = app(CurrentCompany::class)->get();
+        $activeCompanyId = $activeCompany !== null
+            && Company::query()->whereKey($activeCompany->id)->where('is_active', true)->exists()
+                ? $activeCompany->id
+                : null;
+
         if (! $actor->can('vacations.manage')
-            || (! $actor->hasRole('super_admin') && $actor->company_id !== $company->id)) {
+            || $activeCompanyId === null
+            || $company->id !== $activeCompanyId
+            || (! $actor->hasRole('super_admin') && $actor->company_id !== $activeCompanyId)) {
             throw new AuthorizationException('No tenés permiso para gestionar vacaciones de esta empresa.');
         }
     }
