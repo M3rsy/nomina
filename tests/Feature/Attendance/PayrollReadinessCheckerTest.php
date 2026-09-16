@@ -110,7 +110,9 @@ test('checks a representative payroll period within a bounded query budget', fun
     ]);
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
 
-    foreach (Employee::factory()->forCompany($company)->count(4)->create() as $employee) {
+    foreach (Employee::factory()->forCompany($company)->count(4)->create([
+        'hired_at' => '2020-01-01',
+    ]) as $employee) {
         app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2020-01-01', 'Jornada diurna');
 
         for ($date = CarbonImmutable::parse($period->start_date); $date->lte($period->end_date); $date = $date->addDay()) {
