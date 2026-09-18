@@ -11,13 +11,11 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\PayrollPeriodSnapshotData;
 use App\Services\CurrentCompany;
-use App\Services\Payroll\PayrollExcelExporter;
 use App\Services\Payroll\PayrollProcessor;
 use App\Services\Vacations\VacationManager;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\Eloquent\Collection;
-use PhpOffice\PhpSpreadsheet\IOFactory;
 
 test('an approved vacation is persisted as a paid non-absence payroll result', function () {
     $this->seed(PermissionRoleSeeder::class);
@@ -60,18 +58,10 @@ test('an approved vacation is persisted as a paid non-absence payroll result', f
         ->and($result->unjustified)->toBeFalse()
         ->and($result->day_snapshot['schema_version'])->toBe(3)
         ->and($result->day_snapshot['day_type'])->toBe('paid_vacation')
+        ->and($result->day_snapshot['vacation']['id'])->toBe($vacation->id)
         ->and($result->day_snapshot['vacation']['day_id'])->toBe($day->id)
+        ->and($result->day_snapshot['vacation']['planned_minutes'])->toBe(480)
         ->and($result->notes)->toContain('Vacación pagada');
-
-    $path = app(PayrollExcelExporter::class)->export($period->fresh());
-    $audit = IOFactory::load($path)->getSheetByName('Auditoría');
-
-    expect($audit)->not->toBeNull()
-        ->and($audit->getCell('AA6')->getValue())->toBe('paid_vacation')
-        ->and($audit->getCell('AB6')->getValue())->toBe($vacation->id)
-        ->and($audit->getCell('AC6')->getValue())->toContain('480 min pagados');
-
-    unlink($path);
 });
 
 /** @return array{company: Company, actor: User, employee: Employee} */

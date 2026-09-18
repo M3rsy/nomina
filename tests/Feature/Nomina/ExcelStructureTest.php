@@ -85,7 +85,7 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
 
     // Reference layout: row 1 empty, row 2 title (merged), row 3 week label,
     // row 4 empty, row 5 header (bold/centered), row 6 onwards data rows.
-    expect($spreadsheet->getSheetNames())->toBe(['Asistencia', 'Auditoría'])
+    expect($spreadsheet->getSheetNames())->toBe(['Asistencia'])
         ->and($sheet->getTitle())->toBe('Asistencia')
         ->and($data[1][0])->toMatch('/^REPORTE DEL/')
         ->and($data[2][0])->toMatch('/^SEMANA/')
@@ -231,7 +231,7 @@ test('PayrollStubExporter keeps employee identity snapshot after employee change
     unlink($path);
 });
 
-test('payroll exports label legacy rows and leave unavailable snapshot facts blank', function () {
+test('pay-stub exports label legacy rows and leave unavailable snapshot facts blank', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2024-01-20',
@@ -248,17 +248,6 @@ test('payroll exports label legacy rows and leave unavailable snapshot facts bla
         'day_snapshot' => null,
     ]);
 
-    $globalPath = (new PayrollExcelExporter)->export($payPeriod);
-    $global = IOFactory::load($globalPath)->getActiveSheet();
-
-    $audit = IOFactory::load($globalPath)->getSheetByName('Auditoría');
-    expect($audit)->not->toBeNull()
-        ->and($audit->getCell('F6')->getValue())->toBe('LEGACY')
-        ->and($audit->getCell('J6')->getValue())->toBeNull()
-        ->and($audit->getCell('K6')->getValue())->toBeNull()
-        ->and($audit->getCell('Y6')->getValue())->toBeNull()
-        ->and($audit->getCell('Z6')->getValue())->toBe('schedule-overlap-v1');
-
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
 
@@ -269,7 +258,6 @@ test('payroll exports label legacy rows and leave unavailable snapshot facts bla
         ->and($stub->getCell('AF9')->getValue())->toBeNull()
         ->and($stub->getCell('AG9')->getValue())->toBe('schedule-overlap-v1');
 
-    unlink($globalPath);
     unlink($stubPath);
 });
 
@@ -389,40 +377,20 @@ test('global and employee exports expose canonical immutable snapshot columns', 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $workbook = IOFactory::load($globalPath);
     $global = $workbook->getSheetByName('Asistencia');
-    $audit = $workbook->getSheetByName('Auditoría');
 
     expect($global)->not->toBeNull()
-        ->and($audit)->not->toBeNull()
         ->and($global->rangeToArray('A5:M5')[0])->toBe([
             'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas',
             'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral',
         ])->and($global->rangeToArray('A6:M6')[0])->toBe([
             'SNAP-7', '00042', 'Frozen Employee', 'Frozen title', '2026-07-07 06:00:00', '2026-07-07 16:25:00',
             '10.42', '8.00', '0.50', '0.50', '0.00', '0.00', '2026-07-07',
-        ])->and($audit->rangeToArray('A5:Z5')[0])->toBe([
-            'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Fecha laboral', 'Estado de fila', 'Entrada', 'Salida',
-            'Minutos observados', 'Marcas observadas', 'Revisiones de marcas', 'Minutos ordinarios', 'Minutos Ext 25%',
-            'Minutos Ext 50%', 'Minutos Ext 75%', 'Minutos Ext 100%', 'Déficit minutos', 'Déficit estado', 'Déficit motivo',
-            'Hora extra detectada', 'Hora extra aprobada', 'Hora extra rechazada', 'Variación', 'Reconocimiento de variación',
-            'Transferencia excluida', 'Versión de reglas',
-        ])->and($audit->rangeToArray('A6:Z6')[0])->toMatchArray([
-            0 => 'SNAP-7', 1 => '00042', 2 => 'Frozen Employee', 3 => 'Frozen title', 4 => '2026-07-07', 5 => 'CURRENT',
-            8 => 625, 11 => 480, 12 => 30, 13 => 30, 14 => 0, 15 => 0, 16 => 60, 17 => 'rejected',
-            18 => 'Unpaid audited shortfall', 24 => 25, 25 => 'duration-first-v2',
-        ])->and($audit->getCell('J6')->getValue())->toBe('2026-07-07 06:00:00 — valid — clock')
-        ->and($audit->getCell('K6')->getValue())->toBe('Revisión — 2026-07-07 06:01:00')
-        ->and($audit->getCell('T6')->getValue())->toBe('2026-07-07 14:00:00 — 2026-07-07 16:00:00 — 120 min')
-        ->and($audit->getCell('U6')->getValue())->toBe('2026-07-07 14:00:00 — 2026-07-07 15:00:00 — 60 min')
-        ->and($audit->getCell('V6')->getValue())->toBe('2026-07-07 15:00:00 — 2026-07-07 16:00:00 — 60 min')
-        ->and($audit->getCell('W6')->getValue())->toBe('schedule_entry — 2026-07-07 07:00:00')
-        ->and($audit->getCell('X6')->getValue())->toBe('Reviewed');
+        ]);
 
-    foreach ([$global, $audit] as $sheet) {
-        foreach ($sheet->toArray() as $row) {
-            foreach ($row as $value) {
-                if (is_string($value)) {
-                    expect($value)->not->toMatch('/^\\s*[\\[{]/');
-                }
+    foreach ($global->toArray() as $row) {
+        foreach ($row as $value) {
+            if (is_string($value)) {
+                expect($value)->not->toMatch('/^\\s*[\\[{]/');
             }
         }
     }
