@@ -39,6 +39,8 @@ class PayPeriod extends Model
         'status',
         'notes',
         'metadata',
+        'deletion_reason',
+        'deleted_by',
     ];
 
     protected function casts(): array
@@ -48,6 +50,7 @@ class PayPeriod extends Model
             'end_date' => 'date',
             'metadata' => 'array',
             'deleted_at' => 'datetime',
+            'deleted_by' => 'integer',
         ];
     }
 

@@ -45,4 +45,10 @@ class PayPeriodPolicy
 
         return $user->company_id === $payPeriod->company_id;
     }
+
+    public function delete(User $user, PayPeriod $payPeriod): bool
+    {
+        return $this->manage($user, $payPeriod)
+            && app(CurrentCompany::class)->get()?->id === $payPeriod->company_id;
+    }
 }

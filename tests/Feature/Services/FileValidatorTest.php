@@ -184,6 +184,33 @@ test('validator detects duplicate observations across payroll periods', function
         ->and(RawMark::where('uploaded_file_id', $currentFile->id)->sole()->status)->toBe('duplicate');
 });
 
+test('validator ignores duplicate marks from soft-deleted uploaded files', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
+    $deletedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $currentFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+
+    RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)
+        ->forUploadedFile($deletedFile)->forEmployee($employee)->create([
+            'employee_external_id' => $employee->external_id,
+            'event_at' => '2026-01-19 14:53:50',
+            'status' => 'valid',
+        ]);
+    $deletedFile->delete();
+
+    $report = app(FileValidator::class)->validate($currentFile, collect([
+        buildPayload('13767', '2026-01-19 14:53:50', 1),
+    ]));
+
+    expect($report->counts['duplicate'])->toBe(0)
+        ->and($report->counts['valid'])->toBe(1)
+        ->and(RawMark::where('uploaded_file_id', $currentFile->id)->sole()->status)->toBe('valid');
+});
+
 test('validator marks out of period records', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([

@@ -149,7 +149,9 @@ class PayrollReviewProjection
     {
         $payload = [
             'pay_period' => [$payPeriod->id, $payPeriod->updated_at?->toJSON(), $payPeriod->start_date?->toDateString(), $payPeriod->end_date?->toDateString()],
-            'raw_marks' => $this->tableVersion(RawMark::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)),
+            'raw_marks' => $this->tableVersion(RawMark::withoutCompanyScope()
+                ->activeForAttendance()
+                ->where('pay_period_id', $payPeriod->id)),
             'overtime_decisions' => $this->tableVersion(OvertimeDecision::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)),
             'attendance_exceptions' => $this->tableVersion(AttendanceException::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)),
             'employees' => $this->tableVersion(Employee::withoutCompanyScope()->where('company_id', $payPeriod->company_id)),

@@ -206,8 +206,9 @@ class Revisar extends Component
             ->orderBy('name')
             ->get();
         $snapshot = $this->periodReviewSnapshot();
-        $faltas = $this->detectFaltas($snapshot);
-        $summary = $this->summaryCounts($faltas);
+        $allFaltas = $this->detectFaltas($snapshot);
+        $faltas = $this->filterFaltasByStatus($allFaltas);
+        $summary = $this->summaryCounts($allFaltas);
         $isBlocked = $this->isBlocked();
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
@@ -1327,6 +1328,7 @@ class Revisar extends Component
     private function queryRawMarks()
     {
         return RawMark::query()
+            ->activeForAttendance()
             ->where('pay_period_id', $this->payPeriod->id)
             ->with(['employee', 'uploadedFile'])
             ->when($this->search, function ($query) {
@@ -1340,6 +1342,13 @@ class Revisar extends Component
                 });
             })
             ->when($this->status, function ($query) {
+                if ($this->status === 'justified') {
+                    // `justified` belongs to attendance absences, not raw marks.
+                    $query->whereRaw('1 = 0');
+
+                    return;
+                }
+
                 $query->where('status', $this->status);
             })
             ->when($this->uploaded_file_id, function ($query) {
@@ -1355,6 +1364,7 @@ class Revisar extends Component
     private function summaryCounts(Collection $faltas): array
     {
         $counts = RawMark::query()
+            ->activeForAttendance()
             ->where('pay_period_id', $this->payPeriod->id)
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
@@ -1371,6 +1381,17 @@ class Revisar extends Component
             'deleted' => $counts['deleted'] ?? 0,
             'justified' => $faltas->whereNotNull('attendance_exception')->count(),
         ];
+    }
+
+    private function filterFaltasByStatus(Collection $faltas): Collection
+    {
+        if ($this->status !== 'justified') {
+            return $faltas;
+        }
+
+        return $faltas
+            ->filter(fn (array $falta): bool => $falta['attendance_exception'] !== null)
+            ->values();
     }
 
     private function detectFaltas(?PayrollPeriodReviewSnapshotContext $snapshot = null): Collection
@@ -1401,6 +1422,7 @@ class Revisar extends Component
     private function readinessMessage(): ?string
     {
         $invalidStatuses = RawMark::query()
+            ->activeForAttendance()
             ->where('pay_period_id', $this->payPeriod->id)
             ->whereIn('status', ['pending', 'unknown_employee', 'out_of_period', 'duplicate'])
             ->exists();

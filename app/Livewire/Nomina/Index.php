@@ -3,10 +3,14 @@
 namespace App\Livewire\Nomina;
 
 use App\Models\PayPeriod;
+use App\Models\AuditLogEntry;
+use App\Models\UploadedFile;
 use App\Services\Payroll\PayPeriodRangeGuard;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -24,6 +28,10 @@ class Index extends Component
     public string $end_date = '';
 
     public bool $showCreateForm = false;
+
+    public ?int $deletingPeriodId = null;
+
+    public string $deletionReason = '';
 
     public function mount(): void
     {
@@ -124,5 +132,81 @@ class Index extends Component
         $this->redirectRoute('archivos.upload', [
             'pay_period_id' => $payPeriod->id,
         ], navigate: true);
+    }
+
+    public function openDeleteConfirmation(int $payPeriodId): void
+    {
+        $payPeriod = PayPeriod::query()->findOrFail($payPeriodId);
+        $this->authorize('delete', $payPeriod);
+
+        $this->deletingPeriodId = $payPeriod->id;
+        $this->deletionReason = '';
+        $this->resetValidation();
+    }
+
+    public function closeDeleteConfirmation(): void
+    {
+        $this->reset('deletingPeriodId', 'deletionReason');
+        $this->resetValidation();
+    }
+
+    public function deletePeriod(): void
+    {
+        $validated = $this->validate([
+            'deletingPeriodId' => ['required', 'integer'],
+            'deletionReason' => ['required', 'string', 'max:500'],
+        ], [
+            'deletionReason.required' => 'El motivo es obligatorio.',
+            'deletionReason.max' => 'El motivo no puede superar los 500 caracteres.',
+        ]);
+
+        $payPeriod = PayPeriod::query()->findOrFail($validated['deletingPeriodId']);
+        $this->authorize('delete', $payPeriod);
+        $reason = trim($validated['deletionReason']);
+
+        if ($reason === '') {
+            $this->addError('deletionReason', 'El motivo es obligatorio.');
+            return;
+        }
+
+        DB::transaction(function () use ($payPeriod, $reason): void {
+            $actorId = Auth::id();
+            $files = UploadedFile::query()->where('pay_period_id', $payPeriod->id)->get();
+
+            foreach ($files as $file) {
+                $file->forceFill(['deletion_reason' => $reason, 'deleted_by' => $actorId])->saveQuietly();
+                $file->delete();
+                $this->auditDeletion($file, $reason, $actorId);
+            }
+
+            $payPeriod->forceFill(['deletion_reason' => $reason, 'deleted_by' => $actorId])->saveQuietly();
+            $payPeriod->delete();
+            $this->auditDeletion($payPeriod, $reason, $actorId);
+        });
+
+        session()->flash('success', 'La nomina y sus archivos asociados fueron eliminados.');
+        $this->closeDeleteConfirmation();
+    }
+
+    private function auditDeletion(object $subject, string $reason, ?int $actorId): void
+    {
+        if (! Schema::hasTable('audit_entries')) {
+            return;
+        }
+
+        AuditLogEntry::query()->updateOrCreate(
+            ['source_type' => $subject::class, 'source_id' => $subject->getKey(), 'source_revision' => 'deleted'],
+            [
+                'company_id' => $subject->company_id,
+                'type' => 'deletion',
+                'occurred_at' => now(),
+                'actor_id' => $actorId,
+                'user_identifier' => Auth::user()?->email,
+                'description' => 'Eliminacion de '.($subject instanceof PayPeriod ? 'nomina '.$subject->name : 'archivo '.$subject->original_name).'. Motivo: '.$reason,
+                'metadata' => ['reason' => $reason, 'subject' => $subject::class],
+                'subject_type' => $subject::class,
+                'subject_id' => $subject->getKey(),
+            ],
+        );
     }
 }

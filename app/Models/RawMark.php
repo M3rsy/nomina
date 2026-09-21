@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Services\Auditoria\AuditEntryProjector;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -61,6 +62,17 @@ class RawMark extends Model
         static::deleting(function (): never {
             throw new LogicException('Attendance records must be deleted logically.');
         });
+    }
+
+    public function scopeActiveForAttendance(Builder $query): Builder
+    {
+        return $query
+            ->where('raw_marks.status', '!=', 'deleted')
+            ->where(function (Builder $query): void {
+                $query->whereNull('raw_marks.uploaded_file_id')
+                    ->orWhereHas('uploadedFile', fn (Builder $uploadedFiles) => $uploadedFiles
+                        ->withoutGlobalScope('company'));
+            });
     }
 
     public function company(): BelongsTo

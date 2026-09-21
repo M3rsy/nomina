@@ -67,6 +67,7 @@ class ShiftOccurrenceResolver
         [$scheduledStart, $scheduledEnd, $windowStart, $windowEnd] = $this->bounds($employee, $date, $schedule);
         $marks = $this->snapshot?->marks($employee, $windowStart, $windowEnd)
             ?? RawMark::withoutCompanyScope()
+                ->activeForAttendance()
                 ->where('company_id', $employee->company_id)
                 ->where('employee_id', $employee->id)
                 ->whereIn('status', ['valid', 'corrected'])
@@ -226,6 +227,7 @@ class ShiftOccurrenceResolver
                 ->when($ignoreRawMarkId !== null, fn (Collection $marks) => $marks->where('id', '!=', $ignoreRawMarkId))
                 ->pluck('event_at')
             : RawMark::withoutCompanyScope()
+                ->activeForAttendance()
                 ->where('company_id', $employee->company_id)
                 ->where('employee_id', $employee->id)
                 ->whereIn('status', ['valid', 'corrected'])
