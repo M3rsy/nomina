@@ -99,6 +99,7 @@ final readonly class PayrollPeriodSnapshotData
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhereDate('effective_to', '>', $start))
             ->get();
         $marks = RawMark::withoutCompanyScope()
+            ->activeForAttendance()
             ->where('company_id', $period->company_id)
             ->whereIn('employee_id', $employeeIds)
             ->whereIn('status', ['valid', 'corrected'])

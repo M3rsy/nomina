@@ -72,6 +72,7 @@ class FileValidator
         $employees = $context->employees->keyBy('external_id');
 
         $existingMarks = RawMark::withoutCompanyScope()
+            ->activeForAttendance()
             ->where('company_id', $companyId)
             ->where('uploaded_file_id', '!=', $uploadedFile->id)
             ->whereIn('status', ['valid', 'corrected'])

@@ -125,6 +125,7 @@ test('table shows raw mark rows with badges', function () {
 });
 
 test('search filter narrows raw marks by employee external id', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -149,6 +150,7 @@ test('search filter narrows raw marks by employee external id', function () {
 });
 
 test('status filter narrows raw marks by status', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -173,6 +175,7 @@ test('status filter narrows raw marks by status', function () {
 });
 
 test('uploaded file filter narrows raw marks by source file', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $fileA = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -196,6 +199,7 @@ test('uploaded file filter narrows raw marks by source file', function () {
 });
 
 test('variation transfer tail is auditable and pay neutral in payroll review', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -264,6 +268,7 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
 });
 
 test('variation acknowledgement writes nothing for foreign unauthorized stale or locked requests', function (string $threat) {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -342,6 +347,7 @@ test('variation acknowledgement writes nothing for foreign unauthorized stale or
 })->with(['foreign', 'unauthorized', 'stale', 'locked']);
 
 test('daily shortfall stays pending until the complete audited deficit is granted or rejected', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -478,6 +484,7 @@ test('daily shortfall stays pending until the complete audited deficit is grante
 });
 
 test('partial overtime approval preserves exact rejected complements and payable bands', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);

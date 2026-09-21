@@ -2,8 +2,12 @@
 
 namespace App\Livewire\Archivos;
 
+use App\Models\AuditLogEntry;
 use App\Models\PayPeriod;
 use App\Models\UploadedFile;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -39,9 +43,83 @@ class Index extends Component
     #[Url]
     public string $to = '';
 
+    public ?int $deletingFileId = null;
+
+    public string $deletionReason = '';
+
     public function updatingSearch(): void
     {
         $this->resetPage();
+    }
+
+    public function openDeleteConfirmation(int $fileId): void
+    {
+        $file = UploadedFile::query()->findOrFail($fileId);
+        $this->authorize('delete', $file);
+
+        $this->deletingFileId = $file->id;
+        $this->deletionReason = '';
+        $this->resetValidation();
+    }
+
+    public function closeDeleteConfirmation(): void
+    {
+        $this->reset('deletingFileId', 'deletionReason');
+        $this->resetValidation();
+    }
+
+    public function deleteFile(): void
+    {
+        $validated = $this->validate([
+            'deletingFileId' => ['required', 'integer'],
+            'deletionReason' => ['required', 'string', 'max:500'],
+        ], [
+            'deletionReason.required' => 'El motivo es obligatorio.',
+            'deletionReason.max' => 'El motivo no puede superar los 500 caracteres.',
+        ]);
+
+        $file = UploadedFile::query()->findOrFail($validated['deletingFileId']);
+        $this->authorize('delete', $file);
+        $reason = trim($validated['deletionReason']);
+
+        if ($reason === '') {
+            $this->addError('deletionReason', 'El motivo es obligatorio.');
+            return;
+        }
+
+        DB::transaction(function () use ($file, $reason): void {
+            $actorId = Auth::id();
+            $file->rawMarks()->get()->each(function ($rawMark) use ($reason): void {
+                $rawMark->status = 'deleted';
+                $rawMark->notes = collect([
+                    $rawMark->notes,
+                    "Archivo eliminado: {$reason}",
+                ])->filter()->implode("\n");
+                $rawMark->save();
+            });
+            $file->forceFill(['deletion_reason' => $reason, 'deleted_by' => $actorId])->saveQuietly();
+            $file->delete();
+
+            if (Schema::hasTable('audit_entries')) {
+                AuditLogEntry::query()->updateOrCreate(
+                    ['source_type' => UploadedFile::class, 'source_id' => $file->id, 'source_revision' => 'deleted'],
+                    [
+                        'company_id' => $file->company_id,
+                        'type' => 'deletion',
+                        'occurred_at' => now(),
+                        'actor_id' => $actorId,
+                        'user_identifier' => Auth::user()?->email,
+                        'description' => "Eliminacion de archivo {$file->original_name}. Motivo: {$reason}",
+                        'metadata' => ['reason' => $reason, 'subject' => UploadedFile::class],
+                        'subject_type' => UploadedFile::class,
+                        'subject_id' => $file->id,
+                    ],
+                );
+            }
+        });
+
+        session()->flash('success', 'El archivo fue eliminado.');
+        $this->closeDeleteConfirmation();
     }
 
     public function updatingStatus(): void

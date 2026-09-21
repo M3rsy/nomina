@@ -253,3 +253,44 @@ test('index search filters by original name', function () {
     $response->assertSee('GLG_001.TXT');
     $response->assertDontSee('attlog.dat');
 });
+
+test('company admin deletes an uploaded file and deactivates its marks with a reason', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $mark = RawMark::factory()->forCompany($company)->forPayPeriod($payPeriod)->forUploadedFile($file)->create([
+        'status' => 'valid',
+        'notes' => 'Original validation note',
+    ]);
+    $evidence = $mark->only([
+        'company_id',
+        'pay_period_id',
+        'uploaded_file_id',
+        'employee_external_id',
+        'raw_line',
+        'source',
+        'row_number',
+    ]);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->call('openDeleteConfirmation', $file->id)
+        ->call('deleteFile')
+        ->assertHasErrors(['deletionReason' => 'required'])
+        ->set('deletionReason', 'Archivo duplicado')
+        ->call('deleteFile')
+        ->assertHasNoErrors();
+
+    $deletedFile = UploadedFile::withTrashed()->findOrFail($file->id);
+    $mark->refresh();
+
+    expect($deletedFile->trashed())->toBeTrue()
+        ->and($deletedFile->deletion_reason)->toBe('Archivo duplicado')
+        ->and($mark->status)->toBe('deleted')
+        ->and($mark->notes)->toContain('Original validation note')
+        ->and($mark->notes)->toContain('Archivo eliminado: Archivo duplicado')
+        ->and($mark->only(array_keys($evidence)))->toBe($evidence);
+});

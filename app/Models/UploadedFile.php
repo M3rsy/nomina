@@ -44,6 +44,8 @@ class UploadedFile extends Model
         'status',
         'user_id',
         'validation_summary',
+        'deletion_reason',
+        'deleted_by',
     ];
 
     protected function casts(): array
@@ -52,6 +54,7 @@ class UploadedFile extends Model
             'size_bytes' => 'integer',
             'validation_summary' => 'array',
             'deleted_at' => 'datetime',
+            'deleted_by' => 'integer',
         ];
     }
 

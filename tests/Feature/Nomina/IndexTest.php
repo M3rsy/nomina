@@ -412,3 +412,26 @@ test('user without pay periods view permission cannot access nomina index', func
         ->get('/nomina')
         ->assertForbidden();
 });
+
+test('company admin deletes a payroll period and its files with a reason', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
+    $file = \App\Models\UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->call('openDeleteConfirmation', $payPeriod->id)
+        ->call('deletePeriod')
+        ->assertHasErrors(['deletionReason' => 'required'])
+        ->set('deletionReason', 'Periodo creado por error')
+        ->call('deletePeriod')
+        ->assertHasNoErrors();
+
+    expect($payPeriod->fresh()->trashed())->toBeTrue()
+        ->and($payPeriod->fresh()->deletion_reason)->toBe('Periodo creado por error')
+        ->and($file->fresh()->trashed())->toBeTrue()
+        ->and($file->fresh()->deletion_reason)->toBe('Periodo creado por error');
+});

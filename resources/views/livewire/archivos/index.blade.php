@@ -175,6 +175,9 @@
                                                 Reemplazar
                                             </a>
                                         @endcan
+                                        @can('delete', $file)
+                                            <button type="button" wire:click="openDeleteConfirmation({{ $file->id }})" class="inline-flex min-h-9 items-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100">Eliminar</button>
+                                        @endcan
                                     </div>
                                 </td>
                             </tr>
@@ -191,5 +194,26 @@
         <div class="pt-1">
             {{ $files->links() }}
         </div>
+
+        @if ($deletingFileId)
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation">
+                <div class="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="delete-file-heading">
+                    <p class="text-xs font-semibold uppercase tracking-[0.16em] text-rose-600">Accion irreversible</p>
+                    <h2 id="delete-file-heading" class="mt-1 text-xl font-bold text-slate-950">Eliminar archivo</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">El archivo se ocultara de la lista y la eliminacion quedara registrada en auditoria.</p>
+                    <form wire:submit="deleteFile" class="mt-5 space-y-4">
+                        <div>
+                            <label for="file-deletion-reason" class="block text-sm font-semibold text-slate-800">Motivo de eliminacion</label>
+                            <textarea id="file-deletion-reason" wire:model="deletionReason" rows="4" maxlength="500" required class="mt-2 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-rose-500 focus:outline-none focus:ring-rose-500/30" placeholder="Explica por que se elimina este archivo"></textarea>
+                            @error('deletionReason') <p class="mt-1 text-sm text-rose-700">{{ $message }}</p> @enderror
+                        </div>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" wire:click="closeDeleteConfirmation" class="inline-flex min-h-10 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                            <x-ui.loading-button type="submit" target="deleteFile" loading-label="Eliminando..." class="inline-flex min-h-10 items-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar archivo</x-ui.loading-button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        @endif
     </div>
 </div>
