@@ -213,8 +213,10 @@ class Revisar extends Component
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
             ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
-        $deficitReviews = $this->projectedReviewData()['deficits'] ?? $attendanceReviews
-            ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty());
+        $deficitReviews = $this->status === 'justified'
+            ? collect()
+            : ($this->projectedReviewData()['deficits'] ?? $attendanceReviews
+                ->filter(fn ($review) => $review->analysis->deficits->isNotEmpty()));
 
         return view('livewire.nomina.revisar', [
             'records' => $records,
@@ -1293,6 +1295,7 @@ class Revisar extends Component
             'missing_assignment' => 'El empleado no tiene una jornada asignada',
             'missing_schedule' => 'La jornada asignada no define este día',
             'invalid_rate_bands' => 'Las bandas salariales no cubren las 24 horas correctamente',
+            'vacation_has_marks' => 'El empleado tiene vacaciones registradas y marcas de asistencia el mismo día',
             default => 'La asistencia necesita revisión',
         };
     }
