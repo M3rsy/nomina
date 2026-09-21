@@ -257,7 +257,10 @@
         />
     @endif
 
-    <livewire:nomina.overtime-review-panel :pay-period="$payPeriod" :uploaded-file-id="$uploaded_file_id" :is-blocked="$isBlocked" />
+    @if ($status !== 'justified')
+        <livewire:nomina.overtime-review-panel :pay-period="$payPeriod" :uploaded-file-id="$uploaded_file_id" :is-blocked="$isBlocked" />
+    @endif
+
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
