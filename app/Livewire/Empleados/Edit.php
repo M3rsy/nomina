@@ -3,9 +3,12 @@
 namespace App\Livewire\Empleados;
 
 use App\Models\Employee;
+use App\Models\User;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
+use App\Services\Employees\EmployeePositionAssigner;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -50,6 +53,10 @@ class Edit extends Component
 
     public string $schedule_reason = '';
 
+    public string $position_effective_from = '';
+
+    public string $position_reason = '';
+
     public function mount(Employee $employee): void
     {
         $this->authorize('update', $employee);
@@ -70,6 +77,7 @@ class Edit extends Component
         $this->hired_at = $employee->hired_at?->format('Y-m-d');
         $this->notes = $employee->notes;
         $this->schedule_effective_from = now()->toDateString();
+        $this->position_effective_from = now()->toDateString();
 
         if (! $employee->scheduleAssignments()->exists()) {
             $this->schedule_profile_id = $this->scheduleProfiles()->first()?->id;
@@ -83,6 +91,11 @@ class Edit extends Component
         $companyId = $this->employee->company_id;
         $requiresSchedule = ! $this->employee->scheduleAssignments()->exists();
         $assigningSchedule = $this->schedule_profile_id !== null;
+        $normalizedTitle = trim((string) $this->job_title);
+        $normalizedTitle = $normalizedTitle === '' ? null : $normalizedTitle;
+        $currentTitle = trim((string) $this->employee->job_title);
+        $currentTitle = $currentTitle === '' ? null : $currentTitle;
+        $changingPosition = $normalizedTitle !== $currentTitle;
 
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
@@ -111,6 +124,17 @@ class Edit extends Component
             $rules['schedule_reason'] = ['required', 'string', 'max:255'];
         }
 
+        if ($changingPosition) {
+            $rules['job_title'] = ['required', 'string', 'max:100'];
+            $rules['position_effective_from'] = [
+                'required',
+                'date',
+                Rule::unique('employee_position_assignments', 'effective_from')
+                    ->where(fn ($query) => $query->where('employee_id', $this->employee->id)),
+            ];
+            $rules['position_reason'] = ['required', 'string', 'max:255'];
+        }
+
         $rules['company_id'] = ['required', 'integer', Rule::in([$companyId])];
 
         $validated = $this->validate($rules, $this->messages());
@@ -118,34 +142,69 @@ class Edit extends Component
         $validated['payment_code'] = blank($validated['payment_code'] ?? null)
             ? null
             : $validated['payment_code'];
+        $validated['job_title'] = $normalizedTitle;
         $validated['company_id'] = $companyId;
         $validated['metadata'] = $this->employee->metadata;
 
         $profileId = $validated['schedule_profile_id'] ?? null;
         $effectiveFrom = $validated['schedule_effective_from'] ?? null;
         $reason = $validated['schedule_reason'] ?? null;
-        unset($validated['schedule_profile_id'], $validated['schedule_effective_from'], $validated['schedule_reason']);
-
-        if ($profileId === null || $effectiveFrom === null || $reason === null) {
-            $this->employee->update($validated);
-
-        } else {
-            $profile = app(GeneralWorkScheduleResolver::class)->resolve($companyId, $effectiveFrom);
-            if ($profile->id !== $profileId) {
-                throw ValidationException::withMessages([
-                    'schedule_profile_id' => 'La jornada seleccionada no es la jornada general vigente para esa fecha.',
-                ]);
-            }
-            app(EmployeeScheduleAssigner::class)->assign(
-                $this->employee,
-                $profile,
-                $effectiveFrom,
-                $reason,
-                Auth::user(),
-                mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update($validated),
-                allowHistoricalProfile: true,
-            );
+        $newTitle = $normalizedTitle;
+        $positionEffectiveFrom = $validated['position_effective_from'] ?? null;
+        $positionReason = $validated['position_reason'] ?? null;
+        unset(
+            $validated['schedule_profile_id'],
+            $validated['schedule_effective_from'],
+            $validated['schedule_reason'],
+            $validated['position_effective_from'],
+            $validated['position_reason'],
+        );
+        if ($changingPosition) {
+            unset($validated['job_title']);
         }
+
+        DB::transaction(function () use (
+            $profileId,
+            $effectiveFrom,
+            $reason,
+            $validated,
+            $companyId,
+            $changingPosition,
+            $newTitle,
+            $positionEffectiveFrom,
+            $positionReason,
+        ): void {
+            if ($profileId === null || $effectiveFrom === null || $reason === null) {
+                $this->employee->update($validated);
+            } else {
+                $profile = app(GeneralWorkScheduleResolver::class)->resolve($companyId, $effectiveFrom);
+                if ($profile->id !== $profileId) {
+                    throw ValidationException::withMessages([
+                        'schedule_profile_id' => 'La jornada seleccionada no es la jornada general vigente para esa fecha.',
+                    ]);
+                }
+
+                app(EmployeeScheduleAssigner::class)->assign(
+                    $this->employee,
+                    $profile,
+                    $effectiveFrom,
+                    $reason,
+                    Auth::user(),
+                    mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update($validated),
+                    allowHistoricalProfile: true,
+                );
+            }
+
+            if ($changingPosition && $newTitle !== null && $positionEffectiveFrom !== null && $positionReason !== null) {
+                app(EmployeePositionAssigner::class)->assign(
+                    $this->employee,
+                    $newTitle,
+                    $positionEffectiveFrom,
+                    $positionReason,
+                    Auth::user(),
+                );
+            }
+        });
 
         $this->redirect('/empleados', navigate: true);
     }
@@ -159,7 +218,7 @@ class Edit extends Component
 
     public function render()
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
         $isSuperAdmin = $user->hasRole('super_admin');
 
@@ -169,6 +228,10 @@ class Edit extends Component
             'scheduleAssignments' => $this->employee->scheduleAssignments()
                 ->with('profile')
                 ->orderByDesc('effective_from')
+                ->get(),
+            'positionAssignments' => $this->employee->positionAssignments()
+                ->orderByDesc('effective_from')
+                ->orderByDesc('id')
                 ->get(),
         ]);
     }
@@ -204,6 +267,10 @@ class Edit extends Component
             'schedule_profile_id.exists' => 'La jornada seleccionada no está disponible para esta empresa.',
             'schedule_effective_from.required' => 'Ingresá desde qué fecha rige la jornada.',
             'schedule_reason.required' => 'Ingresá el motivo de la asignación.',
+            'job_title.required' => 'Ingresá el nuevo cargo.',
+            'position_effective_from.required' => 'Ingresá desde qué fecha rige el cargo.',
+            'position_effective_from.unique' => 'Ya existe un cargo asignado desde esa fecha.',
+            'position_reason.required' => 'Ingresá el motivo del cambio de cargo.',
         ];
     }
 }

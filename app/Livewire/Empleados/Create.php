@@ -4,9 +4,13 @@ namespace App\Livewire\Empleados;
 
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\User;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
+use App\Services\Employees\EmployeePositionAssigner;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -53,7 +57,7 @@ class Create extends Component
     {
         $this->authorize('create', Employee::class);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
         $this->company_id = $user->hasRole('super_admin')
             ? current_company_id()
@@ -76,7 +80,7 @@ class Create extends Component
     {
         $this->authorize('create', Employee::class);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
         $isSuperAdmin = $user->hasRole('super_admin');
         $companyId = $isSuperAdmin ? ($this->company_id ?? current_company_id()) : $user->company_id;
@@ -122,6 +126,13 @@ class Create extends Component
         $validated['payment_code'] = blank($validated['payment_code'] ?? null)
             ? null
             : $validated['payment_code'];
+        $positionTitle = trim((string) ($validated['job_title'] ?? ''));
+        $positionTitle = $positionTitle === '' ? null : $positionTitle;
+        $positionEffectiveFrom = $validated['hired_at'] ?? now()->toDateString();
+        $validated['job_title'] = $positionTitle !== null
+            && CarbonImmutable::parse($positionEffectiveFrom)->startOfDay()->lte(CarbonImmutable::today())
+                ? $positionTitle
+                : null;
         $validated['company_id'] = $companyId;
         $validated['is_active'] = true;
         $validated['metadata'] = null;
@@ -136,19 +147,38 @@ class Create extends Component
         }
         unset($validated['schedule_profile_id'], $validated['schedule_effective_from'], $validated['schedule_reason']);
 
-        app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
+        DB::transaction(function () use (
             $validated,
             $effectiveFrom,
             $reason,
             $user,
-        );
+            $positionTitle,
+            $positionEffectiveFrom,
+        ): void {
+            $scheduleAssignment = app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
+                $validated,
+                $effectiveFrom,
+                $reason,
+                $user,
+            );
+
+            if ($positionTitle !== null) {
+                app(EmployeePositionAssigner::class)->assign(
+                    $scheduleAssignment->employee,
+                    $positionTitle,
+                    $positionEffectiveFrom,
+                    $reason,
+                    $user,
+                );
+            }
+        });
 
         $this->redirect('/empleados', navigate: true);
     }
 
     public function render()
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
         $isSuperAdmin = $user->hasRole('super_admin');
 
@@ -166,7 +196,7 @@ class Create extends Component
 
     private function scheduleProfiles()
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
         $companyId = $user->hasRole('super_admin')
             ? ($this->company_id ?? current_company_id())
