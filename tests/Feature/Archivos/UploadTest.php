@@ -108,13 +108,14 @@ test('upload selector shows every uploadable status and excludes all other statu
         ->assertDontSee('Ineligible cancelled');
 });
 
-test('unsupported txt upload is rejected without persisted records or files', function () {
+test('generic txt upload is parsed and persisted', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-01',
         'end_date' => '2026-01-31',
         'status' => 'draft',
     ]);
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
     $admin = actingAsCompanyAdmin($company);
 
     $this->actingAs($admin);
@@ -129,11 +130,11 @@ test('unsupported txt upload is rejected without persisted records or files', fu
         ->set('pay_period_id', (string) $payPeriod->id)
         ->set('upload', $file)
         ->call('store')
-        ->assertHasErrors('upload');
+        ->assertHasNoErrors();
 
-    expect(UploadedFile::count())->toBe(0)
-        ->and(RawMark::count())->toBe(0)
-        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
+    expect(UploadedFile::count())->toBe(1)
+        ->and(RawMark::count())->toBe(1)
+        ->and(Storage::disk('local')->allFiles('uploads'))->toHaveCount(1);
 });
 
 test('validator failure after persisted rows rolls back database and cleans up storage', function () {
@@ -227,11 +228,11 @@ test('ingestor preserves valid glg and attlog uploads', function (string $filena
         ->and($uploadedFile->rawMarks()->count())->toBe(2)
         ->and(Storage::disk('local')->exists($uploadedFile->path))->toBeTrue();
 })->with([
-    'glg' => ['GLG_001.TXT', 'GLG_minimal.txt'],
-    'attlog' => ['attlog.dat', 'ATTLOG_minimal.dat'],
+    'glg' => ['attendance.TXT', 'GLG_minimal.txt'],
+    'attlog' => ['attendance.DAT', 'ATTLOG_minimal.dat'],
 ]);
 
-test('ingestor rejects duplicate sha and removes only the duplicate file', function () {
+test('ingestor rejects an active duplicate sha and removes only the duplicate file', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-01',
@@ -246,7 +247,7 @@ test('ingestor rejects duplicate sha and removes only the duplicate file', funct
 
     $secondFile = LaravelUploadedFile::fake()->createWithContent('GLG_002.TXT', $contents);
     expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $secondFile))
-        ->toThrow(ValidationException::class);
+        ->toThrow(ValidationException::class, 'Este archivo ya fue cargado anteriormente.');
 
     expect(UploadedFile::count())->toBe(1)
         ->and(RawMark::count())->toBe(1)
@@ -254,7 +255,7 @@ test('ingestor rejects duplicate sha and removes only the duplicate file', funct
         ->and(Storage::disk('local')->allFiles('uploads'))->toHaveCount(1);
 });
 
-test('ingestor maps a duplicate sha unique race to validation and cleans up storage', function () {
+test('ingestor accepts the same content after its previous upload is soft deleted', function () {
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-01',
@@ -262,44 +263,28 @@ test('ingestor maps a duplicate sha unique race to validation and cleans up stor
     ]);
     Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
     $admin = actingAsCompanyAdmin($company);
-    $seededRace = false;
+    $contents = "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n";
 
-    UploadedFile::creating(function (UploadedFile $uploadedFile) use (&$seededRace): void {
-        if ($seededRace) {
-            return;
-        }
+    $deletedUpload = app(UploadedAttendanceFileIngestor::class)->ingest(
+        $company,
+        $payPeriod,
+        $admin,
+        LaravelUploadedFile::fake()->createWithContent('GLG_001.TXT', $contents),
+    );
+    $deletedUpload->delete();
 
-        $seededRace = true;
-
-        UploadedFile::withoutEvents(fn () => UploadedFile::create([
-            'company_id' => $uploadedFile->company_id,
-            'pay_period_id' => $uploadedFile->pay_period_id,
-            'original_name' => 'race-'.$uploadedFile->original_name,
-            'stored_name' => 'race-'.$uploadedFile->stored_name,
-            'disk' => 'local',
-            'path' => 'uploads/race/'.$uploadedFile->stored_name,
-            'mime' => $uploadedFile->mime,
-            'extension' => $uploadedFile->extension,
-            'size_bytes' => $uploadedFile->size_bytes,
-            'encoding' => $uploadedFile->encoding,
-            'sha256' => $uploadedFile->sha256,
-            'status' => 'pending',
-            'user_id' => $uploadedFile->user_id,
-            'validation_summary' => null,
-        ]));
-    });
-
-    $file = LaravelUploadedFile::fake()->createWithContent(
-        'GLG_001.TXT',
-        "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n",
+    $replacement = app(UploadedAttendanceFileIngestor::class)->ingest(
+        $company,
+        $payPeriod,
+        $admin,
+        LaravelUploadedFile::fake()->createWithContent('GLG_002.TXT', $contents),
     );
 
-    expect(fn () => app(UploadedAttendanceFileIngestor::class)->ingest($company, $payPeriod, $admin, $file))
-        ->toThrow(ValidationException::class);
-
-    expect(UploadedFile::count())->toBe(0)
-        ->and(RawMark::count())->toBe(0)
-        ->and(Storage::disk('local')->allFiles('uploads'))->toBe([]);
+    expect($deletedUpload->fresh()->trashed())->toBeTrue()
+        ->and($replacement->id)->not->toBe($deletedUpload->id)
+        ->and($replacement->sha256)->toBe($deletedUpload->sha256)
+        ->and(UploadedFile::count())->toBe(1)
+        ->and(UploadedFile::withTrashed()->count())->toBe(2);
 });
 
 test('ready period cannot receive attendance uploads', function () {
@@ -341,8 +326,9 @@ test('guided upload explains real file contracts and enables submission only whe
         ->assertSeeHtml('id="upload-step-period"')
         ->assertSeeHtml('id="upload-step-file"')
         ->assertSeeHtml('id="upload-step-result"')
-        ->assertSee('GLG*.txt')
-        ->assertSee('ATTLOG: *.dat')
+        ->assertSee('Archivos .txt')
+        ->assertSee('Archivos .dat')
+        ->assertSee('El nombre no importa')
         ->assertSee('5 MB')
         ->assertSee('empleados no encontrados')
         ->assertSee('fuera del rango de fechas')

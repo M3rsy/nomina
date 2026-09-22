@@ -27,7 +27,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->unique(['company_id', 'sha256']);
+            $table->index(['company_id', 'sha256'], 'uploaded_files_company_id_sha256_index');
             $table->index('sha256');
             $table->index('company_id');
             $table->index('pay_period_id');
