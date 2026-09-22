@@ -792,10 +792,24 @@
                         @error('assignReason') <span class="mt-1 block text-xs text-rose-600">{{ $message }}</span> @enderror
                     </label>
 
-                    <div class="flex justify-end gap-2 pt-2">
-                        <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
-                        <x-ui.loading-button type="submit" target="saveAssign" loading-label="Asignando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</x-ui.loading-button>
-                    </div>
+                        <div class="flex flex-wrap justify-end gap-2 pt-2">
+                            @if ($canCreateEmployeeFromAssignModal)
+                                @can('create', \App\Models\Employee::class)
+                                    <x-ui.loading-button
+                                        type="button"
+                                        wire:click="openCreateEmployeeModal({{ $assignRawMarkId }})"
+                                        target="openCreateEmployeeModal({{ $assignRawMarkId }})"
+                                        loading-label="Abriendo…"
+                                        :disabled="$isBlocked"
+                                        class="mr-auto rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40"
+                                    >
+                                        Crear nuevo empleado
+                                    </x-ui.loading-button>
+                                @endcan
+                            @endif
+                            <button type="button" wire:click="closeAssignModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
+                            <x-ui.loading-button type="submit" target="saveAssign" loading-label="Asignando…" :disabled="$isBlocked" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Guardar</x-ui.loading-button>
+                        </div>
                 </form>
             </div>
         </div>
@@ -808,13 +822,19 @@
                 <p class="mt-1 text-sm text-slate-600">Código de empleado: <strong>{{ $createEmployeeExternalId }}</strong></p>
                 @error('createEmployeeRawMarkId')<p class="mt-2 text-sm text-rose-600">{{ $message }}</p>@enderror
                 <form wire:submit.prevent="saveCreatedEmployee" class="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label class="text-sm"><span class="font-semibold">Código de pago</span><input wire:model="createEmployeePaymentCode" maxlength="50" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeePaymentCode')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Clave</span><input wire:model="createEmployeePaymentCode" maxlength="50" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeePaymentCode')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Identidad</span><input wire:model="createEmployeeDni" maxlength="32" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeDni')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Nombre</span><input wire:model="createEmployeeFirstName" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeFirstName')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Apellido</span><input wire:model="createEmployeeLastName" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeLastName')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Sexo</span><select wire:model="createEmployeeSex" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3"><option value="">Seleccionar</option><option value="M">Masculino</option><option value="F">Femenino</option><option value="O">Otro</option></select>@error('createEmployeeSex')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Fecha de nacimiento</span><input type="date" wire:model="createEmployeeBirthDate" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeBirthDate')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Dirección</span><input wire:model="createEmployeeAddress" maxlength="255" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeAddress')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Teléfono</span><input wire:model="createEmployeePhone" maxlength="32" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeePhone')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Cargo</span><input wire:model="createEmployeeJobTitle" maxlength="100" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeJobTitle')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm"><span class="font-semibold">Salario esperado</span><input type="number" step="0.01" wire:model="createEmployeeExpectedSalary" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeExpectedSalary')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm"><span class="font-semibold">Fecha de contratación</span><input type="date" wire:model="createEmployeeHiredAt" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('createEmployeeHiredAt')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm sm:col-span-2"><span class="font-semibold">Jornada</span><select wire:model="createEmployeeScheduleProfileId" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3"><option value="">Seleccionar jornada</option>@foreach($scheduleProfiles as $profile)<option value="{{ $profile->id }}">{{ $profile->name }}</option>@endforeach</select>@error('createEmployeeScheduleProfileId')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
+                    <label class="text-sm sm:col-span-2"><span class="font-semibold">Notas</span><textarea wire:model="createEmployeeNotes" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>@error('createEmployeeNotes')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="text-sm sm:col-span-2"><span class="font-semibold">Motivo</span><textarea wire:model="createEmployeeReason" rows="3" maxlength="500" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>@error('createEmployeeReason')<span class="text-xs text-rose-600">{{ $message }}</span>@enderror</label>
                     <label class="inline-flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" wire:model="createEmployeeAssignAll"><span>Asignar todas las marcas de este código</span></label>
                     <div class="flex justify-end gap-2 sm:col-span-2">

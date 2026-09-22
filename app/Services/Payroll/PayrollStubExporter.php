@@ -133,7 +133,7 @@ class PayrollStubExporter
             'AE8' => 'Minutos extra aprobados',
             'AF8' => 'Transferencia excluida',
             'AG8' => 'Versión de reglas',
-            'AH8' => 'Código de pago',
+            'AH8' => 'Clave',
             'AI8' => 'Cargo',
         ];
 
@@ -218,7 +218,7 @@ class PayrollStubExporter
                 $sheet->setCellValue("{$column}{$row}", $reportingRow[$key]);
             }
 
-            $this->assertPaymentIdentity($reportingRow);
+            $this->assertJobTitle($reportingRow);
             $sheet->setCellValueExplicit("AH{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
             $sheet->setCellValue("AI{$row}", $reportingRow['employee_job_title']);
 
@@ -296,14 +296,14 @@ class PayrollStubExporter
     }
 
     /** @param array<string, mixed> $row */
-    private function assertPaymentIdentity(array $row): void
+    private function assertJobTitle(array $row): void
     {
         if ($row['status'] === 'LEGACY') {
             return;
         }
 
-        if (($row['employee_payment_code'] ?? '') === '' || ($row['employee_job_title'] ?? '') === '') {
-            throw new \LogicException('Payroll result is missing payment code or job title.');
+        if (($row['employee_job_title'] ?? '') === '') {
+            throw new \LogicException('Payroll result is missing job title.');
         }
     }
 

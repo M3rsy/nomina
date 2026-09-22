@@ -5,6 +5,7 @@ namespace App\Livewire\Empleados;
 use App\Models\Employee;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -85,7 +86,7 @@ class Edit extends Component
 
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
-            'payment_code' => ['nullable', 'string', 'max:50', Rule::unique('employees', 'payment_code')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($this->employee->id)],
+            'payment_code' => ['nullable', 'string', 'max:50'],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'dni' => ['nullable', 'string', 'max:32', 'regex:/^\d*$/'],
@@ -114,6 +115,9 @@ class Edit extends Component
 
         $validated = $this->validate($rules, $this->messages());
 
+        $validated['payment_code'] = blank($validated['payment_code'] ?? null)
+            ? null
+            : $validated['payment_code'];
         $validated['company_id'] = $companyId;
         $validated['metadata'] = $this->employee->metadata;
 
@@ -137,7 +141,7 @@ class Edit extends Component
                 $profile,
                 $effectiveFrom,
                 $reason,
-                auth()->user(),
+                Auth::user(),
                 mutateEmployee: fn (Employee $lockedEmployee) => $lockedEmployee->update($validated),
                 allowHistoricalProfile: true,
             );
@@ -155,7 +159,9 @@ class Edit extends Component
 
     public function render()
     {
-        $isSuperAdmin = auth()->user()->hasRole('super_admin');
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $isSuperAdmin = $user->hasRole('super_admin');
 
         return view('livewire.empleados.edit', [
             'isSuperAdmin' => $isSuperAdmin,
@@ -188,7 +194,6 @@ class Edit extends Component
         return [
             'external_id.required' => 'El código de empleado es obligatorio.',
             'external_id.unique' => 'El código de empleado ya existe en esta empresa.',
-            'payment_code.unique' => 'El código de pago ya existe en esta empresa.',
             'first_name.required' => 'El nombre es obligatorio.',
             'last_name.required' => 'El apellido es obligatorio.',
             'dni.regex' => 'La identidad debe contener solo números.',

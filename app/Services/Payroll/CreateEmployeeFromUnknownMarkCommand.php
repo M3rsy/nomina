@@ -16,5 +16,11 @@ final readonly class CreateEmployeeFromUnknownMarkCommand
         public string $hiredAt,
         public string $reason,
         public bool $assignAll = true,
+        public ?string $sex = null,
+        public ?string $birthDate = null,
+        public ?string $address = null,
+        public ?string $phone = null,
+        public ?string $expectedSalary = null,
+        public ?string $notes = null,
     ) {}
 }

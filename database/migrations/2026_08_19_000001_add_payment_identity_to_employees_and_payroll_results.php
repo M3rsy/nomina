@@ -10,7 +10,6 @@ return new class extends Migration
     {
         Schema::table('employees', function (Blueprint $table): void {
             $table->string('payment_code', 50)->nullable()->after('external_id');
-            $table->unique(['company_id', 'payment_code'], 'employees_company_payment_code_unique');
         });
 
         Schema::table('payroll_results', function (Blueprint $table): void {
@@ -26,7 +25,6 @@ return new class extends Migration
             $table->dropColumn(['employee_payment_code', 'employee_job_title']);
         });
         Schema::table('employees', function (Blueprint $table): void {
-            $table->dropUnique('employees_company_payment_code_unique');
             $table->dropColumn('payment_code');
         });
     }

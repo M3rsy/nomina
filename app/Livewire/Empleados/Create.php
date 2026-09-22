@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
@@ -52,9 +53,11 @@ class Create extends Component
     {
         $this->authorize('create', Employee::class);
 
-        $this->company_id = auth()->user()->hasRole('super_admin')
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $this->company_id = $user->hasRole('super_admin')
             ? current_company_id()
-            : auth()->user()->company_id;
+            : $user->company_id;
         $this->schedule_effective_from = now()->toDateString();
         $this->selectDefaultScheduleProfile();
     }
@@ -73,8 +76,10 @@ class Create extends Component
     {
         $this->authorize('create', Employee::class);
 
-        $isSuperAdmin = auth()->user()->hasRole('super_admin');
-        $companyId = $isSuperAdmin ? ($this->company_id ?? current_company_id()) : auth()->user()->company_id;
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $isSuperAdmin = $user->hasRole('super_admin');
+        $companyId = $isSuperAdmin ? ($this->company_id ?? current_company_id()) : $user->company_id;
 
         if ($companyId === null) {
             $this->addError('company_id', 'Debe seleccionar una empresa.');
@@ -84,7 +89,7 @@ class Create extends Component
 
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))],
-            'payment_code' => ['nullable', 'string', 'max:50', Rule::unique('employees', 'payment_code')->where(fn ($query) => $query->where('company_id', $companyId))],
+            'payment_code' => ['nullable', 'string', 'max:50'],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'dni' => ['nullable', 'string', 'max:32', 'regex:/^\d*$/'],
@@ -109,11 +114,14 @@ class Create extends Component
         if ($isSuperAdmin) {
             $rules['company_id'] = ['nullable', 'exists:companies,id'];
         } else {
-            $rules['company_id'] = ['required', 'in:'.auth()->user()->company_id];
+            $rules['company_id'] = ['required', 'in:'.$user->company_id];
         }
 
         $validated = $this->validate($rules, $this->messages());
 
+        $validated['payment_code'] = blank($validated['payment_code'] ?? null)
+            ? null
+            : $validated['payment_code'];
         $validated['company_id'] = $companyId;
         $validated['is_active'] = true;
         $validated['metadata'] = null;
@@ -132,7 +140,7 @@ class Create extends Component
             $validated,
             $effectiveFrom,
             $reason,
-            auth()->user(),
+            $user,
         );
 
         $this->redirect('/empleados', navigate: true);
@@ -140,7 +148,9 @@ class Create extends Component
 
     public function render()
     {
-        $isSuperAdmin = auth()->user()->hasRole('super_admin');
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $isSuperAdmin = $user->hasRole('super_admin');
 
         return view('livewire.empleados.create', [
             'companies' => $isSuperAdmin ? Company::orderBy('name')->get() : null,
@@ -156,9 +166,11 @@ class Create extends Component
 
     private function scheduleProfiles()
     {
-        $companyId = auth()->user()->hasRole('super_admin')
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $companyId = $user->hasRole('super_admin')
             ? ($this->company_id ?? current_company_id())
-            : auth()->user()->company_id;
+            : $user->company_id;
 
         if ($companyId === null || $this->schedule_effective_from === '') {
             return collect();
@@ -176,7 +188,6 @@ class Create extends Component
         return [
             'external_id.required' => 'El código de empleado es obligatorio.',
             'external_id.unique' => 'El código de empleado ya existe en esta empresa.',
-            'payment_code.unique' => 'El código de pago ya existe en esta empresa.',
             'first_name.required' => 'El nombre es obligatorio.',
             'last_name.required' => 'El apellido es obligatorio.',
             'dni.regex' => 'La identidad debe contener solo números.',
