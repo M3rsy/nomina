@@ -7,9 +7,8 @@ class ParserFactory
     public static function make(string $filename): Parser
     {
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        $basename = strtoupper(pathinfo($filename, PATHINFO_BASENAME));
 
-        if ($extension === 'txt' && str_starts_with($basename, 'GLG')) {
+        if ($extension === 'txt') {
             return new GlgParser;
         }
 
