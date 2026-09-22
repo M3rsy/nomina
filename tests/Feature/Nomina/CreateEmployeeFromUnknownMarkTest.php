@@ -20,7 +20,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
-beforeEach(fn () => $this->seed(PermissionRoleSeeder::class));
+beforeEach(function (): void {
+    /** @var \Tests\TestCase $this */
+    $this->seed(PermissionRoleSeeder::class);
+});
 
 /** @param array<string, mixed> $overrides */
 function unknownEmployeeCommand(RawMark $mark, WorkScheduleProfile $profile, User $actor, array $overrides = []): CreateEmployeeFromUnknownMarkCommand
@@ -34,13 +37,33 @@ function unknownEmployeeCommand(RawMark $mark, WorkScheduleProfile $profile, Use
         'hiredAt' => $mark->event_at->toDateString(),
         'reason' => 'Identidad verificada por Recursos Humanos.',
         'assignAll' => true,
+        'sex' => null,
+        'birthDate' => null,
+        'address' => null,
+        'phone' => null,
+        'expectedSalary' => null,
+        'notes' => null,
         ...$overrides,
     ];
 
     return new CreateEmployeeFromUnknownMarkCommand(
-        $mark->id, $profile->id, $actor->id,
-        $data['paymentCode'], $data['firstName'], $data['lastName'], $data['dni'],
-        $data['jobTitle'], $data['hiredAt'], $data['reason'], $data['assignAll'],
+        rawMarkId: $mark->id,
+        scheduleProfileId: $profile->id,
+        actorId: $actor->id,
+        paymentCode: $data['paymentCode'],
+        firstName: $data['firstName'],
+        lastName: $data['lastName'],
+        dni: $data['dni'],
+        jobTitle: $data['jobTitle'],
+        hiredAt: $data['hiredAt'],
+        reason: $data['reason'],
+        assignAll: $data['assignAll'],
+        sex: $data['sex'],
+        birthDate: $data['birthDate'],
+        address: $data['address'],
+        phone: $data['phone'],
+        expectedSalary: $data['expectedSalary'],
+        notes: $data['notes'],
     );
 }
 
@@ -55,16 +78,29 @@ test('keeps the existing payroll review workflow while delegating the write', fu
         'event_at' => $period->start_date->addDay()->setTime(8, 0),
         'status' => 'unknown_employee',
     ]);
+    /** @var \Tests\TestCase $this */
     $this->actingAs($actor);
     app(CurrentCompany::class)->set($company);
 
     $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('openAssignModal', $mark->id)
+        ->assertSet('showAssignModal', true)
+        ->assertSet('canCreateEmployeeFromAssignModal', true)
+        ->assertSee('Crear nuevo empleado')
         ->call('openCreateEmployeeModal', $mark->id)
+        ->assertSet('showAssignModal', false)
+        ->assertSet('showCreateEmployeeModal', true)
         ->set('createEmployeePaymentCode', 'PAY-LIVEWIRE')
         ->set('createEmployeeFirstName', 'Ana')
         ->set('createEmployeeLastName', 'López')
         ->set('createEmployeeDni', '0801-2000-00007')
+        ->set('createEmployeeSex', 'F')
+        ->set('createEmployeeBirthDate', '1990-05-12')
+        ->set('createEmployeeAddress', 'Calle Principal 123')
+        ->set('createEmployeePhone', '+504 9999-0000')
         ->set('createEmployeeJobTitle', 'Analista')
+        ->set('createEmployeeExpectedSalary', '12345.67')
+        ->set('createEmployeeNotes', 'Creada durante la revisión de nómina.')
         ->set('createEmployeeScheduleProfileId', $profile->id)
         ->set('createEmployeeReason', 'Identidad verificada desde nómina.');
 
@@ -80,7 +116,54 @@ test('keeps the existing payroll review workflow while delegating the write', fu
 
     $employee = Employee::withoutCompanyScope()->where('external_id', 'CLOCK-LIVEWIRE')->sole();
     expect($mark->refresh()->employee_id)->toBe($employee->id)
+        ->and($employee->external_id)->toBe($mark->employee_external_id)
+        ->and($employee->sex)->toBe('F')
+        ->and($employee->birth_date->toDateString())->toBe('1990-05-12')
+        ->and($employee->address)->toBe('Calle Principal 123')
+        ->and($employee->phone)->toBe('+504 9999-0000')
+        ->and($employee->expected_salary)->toBe('12345.67')
+        ->and($employee->notes)->toBe('Creada durante la revisión de nómina.')
         ->and($employee->scheduleAssignments()->count())->toBe(1);
+});
+
+test('validates optional employee fields inside the creation service', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create(['status' => 'draft']);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $mark = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)->create([
+        'employee_external_id' => 'CLOCK-INVALID-OPTIONALS',
+        'event_at' => $period->start_date->addDay()->setTime(8, 0),
+        'status' => 'unknown_employee',
+    ]);
+
+    try {
+        app(AuditedRawMarkRevision::class)->createEmployee(unknownEmployeeCommand(
+            $mark,
+            $profile,
+            $actor,
+            [
+                'sex' => 'X',
+                'birthDate' => 'not-a-date',
+                'address' => str_repeat('a', 256),
+                'phone' => str_repeat('1', 33),
+                'expectedSalary' => '123.456',
+            ],
+        ));
+        $this->fail('Expected optional employee field validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())->toHaveKeys([
+            'sex',
+            'birth_date',
+            'address',
+            'phone',
+            'expected_salary',
+        ]);
+    }
+
+    expect(Employee::withoutCompanyScope()->where('external_id', 'CLOCK-INVALID-OPTIONALS')->exists())->toBeFalse()
+        ->and($mark->refresh()->employee_id)->toBeNull();
 });
 
 test('shows refresh guidance when the source mark disappears', function () {
@@ -89,6 +172,7 @@ test('shows refresh guidance when the source mark disappears', function () {
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
     $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $mark = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)->create(['status' => 'unknown_employee']);
+    /** @var \Tests\TestCase $this */
     $this->actingAs($actor);
     app(CurrentCompany::class)->set($company);
 
@@ -305,6 +389,43 @@ test('rejects a schedule profile from another company before creating the employ
 
     expect(Employee::withoutCompanyScope()->where('external_id', 'CLOCK-FOREIGN')->exists())->toBeFalse()
         ->and($mark->refresh()->employee_id)->toBeNull();
+});
+
+test('allows shared and blank payment codes when creating employees from unknown marks', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create(['status' => 'draft']);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create(['payment_code' => 'SHARED-PAY']);
+    $sharedMark = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)->create([
+        'employee_external_id' => 'CLOCK-SHARED-PAY',
+        'event_at' => $period->start_date->addDay()->setTime(8, 0),
+        'status' => 'unknown_employee',
+    ]);
+    $blankMark = RawMark::factory()->forCompany($company)->forPayPeriod($period)->forUploadedFile($file)->create([
+        'employee_external_id' => 'CLOCK-BLANK-PAY',
+        'event_at' => $period->start_date->addDay()->setTime(9, 0),
+        'status' => 'unknown_employee',
+    ]);
+
+    app(AuditedRawMarkRevision::class)->createEmployee(unknownEmployeeCommand(
+        $sharedMark,
+        $profile,
+        $actor,
+        ['paymentCode' => 'SHARED-PAY', 'assignAll' => false],
+    ));
+    app(AuditedRawMarkRevision::class)->createEmployee(unknownEmployeeCommand(
+        $blankMark,
+        $profile,
+        $actor,
+        ['paymentCode' => '   ', 'assignAll' => false],
+    ));
+
+    expect(Employee::withoutCompanyScope()->where('external_id', 'CLOCK-SHARED-PAY')->sole()->payment_code)
+        ->toBe('SHARED-PAY')
+        ->and(Employee::withoutCompanyScope()->where('external_id', 'CLOCK-BLANK-PAY')->sole()->payment_code)
+        ->toBeNull();
 });
 
 test('rejects a duplicate employee identity without changing the source mark', function () {

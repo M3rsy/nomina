@@ -120,8 +120,14 @@ final readonly class AuditedRawMarkRevision
                     'first_name' => $input['first_name'],
                     'last_name' => $input['last_name'],
                     'dni' => $input['dni'],
+                    'sex' => $input['sex'],
+                    'birth_date' => $input['birth_date'],
+                    'address' => $input['address'],
+                    'phone' => $input['phone'],
                     'job_title' => $input['job_title'],
+                    'expected_salary' => $input['expected_salary'],
                     'hired_at' => $hiredAt->toDateString(),
+                    'notes' => $input['notes'],
                     'is_active' => true,
                 ];
             },
@@ -321,24 +327,38 @@ final readonly class AuditedRawMarkRevision
         return new RawMarkRevisionResult($results->count());
     }
 
-    /** @return array{payment_code: string, first_name: string, last_name: string, dni: string, job_title: string, hired_at: string, reason: string} */
+    /** @return array{payment_code: ?string, first_name: string, last_name: string, dni: string, sex: ?string, birth_date: ?string, address: ?string, phone: ?string, job_title: string, expected_salary: ?string, hired_at: string, notes: ?string, reason: string} */
     private function validateInput(CreateEmployeeFromUnknownMarkCommand $command): array
     {
+        $paymentCode = trim($command->paymentCode);
+
         return Validator::make([
-            'payment_code' => trim($command->paymentCode),
+            'payment_code' => $paymentCode === '' ? null : $paymentCode,
             'first_name' => trim($command->firstName),
             'last_name' => trim($command->lastName),
             'dni' => trim($command->dni),
+            'sex' => $command->sex,
+            'birth_date' => $command->birthDate,
+            'address' => $command->address === null ? null : trim($command->address),
+            'phone' => $command->phone === null ? null : trim($command->phone),
             'job_title' => trim($command->jobTitle),
+            'expected_salary' => $command->expectedSalary,
             'hired_at' => $command->hiredAt,
+            'notes' => $command->notes === null ? null : trim($command->notes),
             'reason' => trim($command->reason),
         ], [
-            'payment_code' => ['required', 'string', 'max:50'],
+            'payment_code' => ['nullable', 'string', 'max:50'],
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'dni' => ['required', 'string', 'max:32'],
+            'sex' => ['nullable', Rule::in(['M', 'F', 'O'])],
+            'birth_date' => ['nullable', 'date'],
+            'address' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:32'],
             'job_title' => ['required', 'string', 'max:100'],
+            'expected_salary' => ['nullable', 'numeric', 'decimal:0,2'],
             'hired_at' => ['required', 'date'],
+            'notes' => ['nullable', 'string'],
             'reason' => ['required', 'string', 'max:500'],
         ])->validate();
     }
@@ -418,7 +438,7 @@ final readonly class AuditedRawMarkRevision
         ]);
     }
 
-    /** @param array{payment_code: string, first_name: string, last_name: string, dni: string, job_title: string, hired_at: string, reason: string} $input */
+    /** @param array{payment_code: ?string, first_name: string, last_name: string, dni: string, sex: ?string, birth_date: ?string, address: ?string, phone: ?string, job_title: string, expected_salary: ?string, hired_at: string, notes: ?string, reason: string} $input */
     private function validateCreationState(
         LockedPayrollContext $context,
         PayPeriod $period,
@@ -446,14 +466,10 @@ final readonly class AuditedRawMarkRevision
 
         Validator::make([
             'external_id' => $sourceExternalId,
-            'payment_code' => $input['payment_code'],
         ], [
             'external_id' => [
                 'required', 'string', 'max:50',
                 Rule::unique('employees', 'external_id')->where('company_id', $context->company->id),
-            ],
-            'payment_code' => [
-                Rule::unique('employees', 'payment_code')->where('company_id', $context->company->id),
             ],
         ])->validate();
     }

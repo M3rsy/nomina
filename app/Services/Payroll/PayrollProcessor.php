@@ -56,7 +56,7 @@ class PayrollProcessor
                 $calendarContext = $context->holidayCalendar
                     ?? throw new InvalidArgumentException('Payroll context must include a holiday calendar.');
                 $employees = new EloquentCollection($context->employees->all());
-                $missingPaymentIdentity = $employees->first(fn (Employee $employee): bool => blank($employee->payment_code) || blank($employee->job_title));
+                $missingPaymentIdentity = $employees->first(fn (Employee $employee): bool => blank($employee->job_title));
                 if ($missingPaymentIdentity !== null) {
                     throw new PayrollProcessingBlocked([[
                         'employee_id' => $missingPaymentIdentity->id,

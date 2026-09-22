@@ -24,10 +24,7 @@ class PayrollReadinessChecker
             ->where('company_id', $payPeriod->company_id)
             ->where('is_active', true)
             ->where(fn ($query) => $query->whereNull('hired_at')->orWhereDate('hired_at', '<=', $payPeriod->end_date))
-            ->where(function ($query): void {
-                $query->whereNull('payment_code')->orWhere('payment_code', '')
-                    ->orWhereNull('job_title')->orWhere('job_title', '');
-            })
+            ->where(fn ($query) => $query->whereNull('job_title')->orWhere('job_title', ''))
             ->get();
 
         return $blockers->concat($missingIdentity->map(fn (Employee $employee): array => [

@@ -56,7 +56,7 @@
                     <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
                         <tr>
                             <th scope="col" class="px-5 py-3 text-left">Código de empleado</th>
-                            <th scope="col" class="px-5 py-3 text-left">Código de pago</th>
+                            <th scope="col" class="px-5 py-3 text-left">Clave</th>
                             <th scope="col" class="px-5 py-3 text-left">Nombre</th>
                             <th scope="col" class="px-5 py-3 text-left">Identidad</th>
                             <th scope="col" class="px-5 py-3 text-left">Cargo</th>

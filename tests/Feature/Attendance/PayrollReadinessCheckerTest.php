@@ -74,6 +74,18 @@ test('a rejected complete candidate is reviewed and no longer blocks readiness',
     expect(app(PayrollReadinessChecker::class)->blockers($context['period']))->toBeEmpty();
 });
 
+test('missing payment code does not block readiness but missing job title does', function () {
+    $context = readinessFixture([]);
+    $context['employee']->update(['payment_code' => null]);
+
+    expect(app(PayrollReadinessChecker::class)->blockers($context['period']))->toBeEmpty();
+
+    $context['employee']->update(['job_title' => null]);
+
+    expect(app(PayrollReadinessChecker::class)->blockers($context['period'])->sole()['code'])
+        ->toBe('missing_payment_identity');
+});
+
 test('reports ambiguous observed marks instead of guessing a pair', function () {
     $context = readinessFixture([
         '2026-01-05 06:00:00',

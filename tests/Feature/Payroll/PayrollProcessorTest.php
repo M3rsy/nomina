@@ -71,6 +71,25 @@ test('processor employee fixture creates an employee hired before fixed payroll 
     expect($employee->hired_at?->toDateString())->toBe('2020-01-01');
 });
 
+test('processor accepts a null payment code but still requires a job title', function () {
+    $company = Company::factory()->create();
+    $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
+    $employee = processorEmployee($company);
+    $employee->update(['payment_code' => null]);
+    app(CurrentCompany::class)->set($company);
+
+    app(PayrollProcessor::class)->processPayPeriod($payPeriod);
+
+    $result = PayrollResult::withoutCompanyScope()->where('pay_period_id', $payPeriod->id)->sole();
+    expect($result->employee_payment_code)->toBeNull();
+
+    $otherPeriod = readyPayPeriod($company, '2026-01-06', '2026-01-06');
+    $employee->update(['job_title' => null]);
+
+    expect(fn () => app(PayrollProcessor::class)->processPayPeriod($otherPeriod))
+        ->toThrow(PayrollProcessingBlocked::class);
+});
+
 test('processor excludes employees hired after the period end', function () {
     $company = Company::factory()->create();
     $payPeriod = readyPayPeriod($company, '2026-01-05', '2026-01-05');
