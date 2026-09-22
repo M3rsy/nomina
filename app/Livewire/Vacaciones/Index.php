@@ -7,6 +7,8 @@ use App\Models\Employee;
 use App\Models\Vacation;
 use App\Services\Vacations\VacationManager;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
@@ -23,6 +25,10 @@ class Index extends Component
 
     #[Url]
     public string $status = 'all';
+
+    public string $vacationEmployeeSearch = '';
+
+    public string $adjustmentEmployeeSearch = '';
 
     public bool $showCreateModal = false;
 
@@ -69,6 +75,12 @@ class Index extends Component
         $this->showCreateModal = true;
     }
 
+    public function closeCreateModal(): void
+    {
+        $this->showCreateModal = false;
+        $this->resetVacationForm();
+    }
+
     public function approve(VacationManager $manager): void
     {
         $this->authorize('create', Vacation::class);
@@ -89,8 +101,9 @@ class Index extends Component
             $validated['startDate'],
             $validated['endDate'],
             $validated['notes'],
-            auth()->user(),
+            Auth::user(),
         );
+
         $this->showCreateModal = false;
         $this->resetVacationForm();
         $this->dispatch('vacation-saved');
@@ -100,11 +113,14 @@ class Index extends Component
     {
         $this->authorize('create', Vacation::class);
         $this->ensureCompanySelected();
-        $this->employeeId = null;
-        $this->adjustmentDays = '';
-        $this->adjustmentReason = '';
-        $this->resetErrorBag();
+        $this->resetAdjustmentForm();
         $this->showAdjustmentModal = true;
+    }
+
+    public function closeAdjustmentModal(): void
+    {
+        $this->showAdjustmentModal = false;
+        $this->resetAdjustmentForm();
     }
 
     public function adjustBalance(VacationManager $manager): void
@@ -121,9 +137,10 @@ class Index extends Component
             Employee::withoutCompanyScope()->findOrFail((int) $validated['employeeId']),
             (int) $validated['adjustmentDays'],
             $validated['adjustmentReason'],
-            auth()->user(),
+            Auth::user(),
         );
         $this->showAdjustmentModal = false;
+        $this->resetAdjustmentForm();
         $this->dispatch('vacation-balance-adjusted');
     }
 
@@ -142,7 +159,7 @@ class Index extends Component
         $validated = $this->validate(['cancellationReason' => ['required', 'string', 'max:2000']]);
         $vacation = Vacation::query()->findOrFail($this->cancellingId);
         $this->authorize('cancel', $vacation);
-        $manager->cancel($vacation, $validated['cancellationReason'], auth()->user());
+        $manager->cancel($vacation, $validated['cancellationReason'], Auth::user());
         $this->showCancelModal = false;
         $this->cancellingId = null;
         $this->dispatch('vacation-cancelled');
@@ -151,11 +168,13 @@ class Index extends Component
     public function render()
     {
         $companyId = current_company_id();
-        $employees = Employee::query()->orderBy('first_name')->orderBy('last_name')->get();
+        $vacationEmployees = $this->employeePickerEmployees($companyId, $this->vacationEmployeeSearch, true);
+        $adjustmentEmployees = $this->employeePickerEmployees($companyId, $this->adjustmentEmployeeSearch);
         $vacations = Vacation::query()
             ->with(['employee', 'days'])
             ->when($this->status !== 'all', fn (Builder $query) => $query->where('status', $this->status))
             ->when(trim($this->search) !== '', function (Builder $query): void {
+
                 $term = '%'.trim($this->search).'%';
                 $query->whereHas('employee', fn (Builder $employee) => $employee
                     ->where(function (Builder $names) use ($term): void {
@@ -173,7 +192,9 @@ class Index extends Component
                 ->withSum('vacationBalanceMovements as vacation_balance', 'days')
                 ->get()->pluck('vacation_balance', 'id');
 
-        return view('livewire.vacaciones.index', compact('vacations', 'employees', 'balances', 'companyId'));
+        return view('livewire.vacaciones.index', compact(
+            'vacations', 'vacationEmployees', 'adjustmentEmployees', 'balances', 'companyId'
+        ));
     }
 
     private function ensureCompanySelected(): int
@@ -187,9 +208,45 @@ class Index extends Component
     private function resetVacationForm(): void
     {
         $this->employeeId = null;
+        $this->vacationEmployeeSearch = '';
         $this->startDate = '';
         $this->endDate = '';
         $this->notes = '';
         $this->resetErrorBag();
     }
+
+    private function resetAdjustmentForm(): void
+    {
+        $this->employeeId = null;
+        $this->adjustmentEmployeeSearch = '';
+        $this->adjustmentDays = '';
+        $this->adjustmentReason = '';
+        $this->resetErrorBag();
+    }
+
+    private function employeePickerEmployees(?int $companyId, string $search, bool $activeOnly = false): Collection
+    {
+        if ($companyId === null) {
+            return collect();
+        }
+
+        $term = trim($search);
+
+        return Employee::withoutCompanyScope()
+            ->where('company_id', $companyId)
+            ->when($activeOnly, fn (Builder $query) => $query->where('is_active', true))
+            ->when($term !== '', function (Builder $query) use ($term): void {
+                $like = '%'.$term.'%';
+                $query->where(function (Builder $employee) use ($like): void {
+                    $employee->where('first_name', 'like', $like)
+                        ->orWhere('last_name', 'like', $like)
+                        ->orWhere('external_id', 'like', $like)
+                        ->orWhere('payment_code', 'like', $like);
+                });
+            })
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get();
+    }
+
 }

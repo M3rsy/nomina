@@ -17,11 +17,12 @@ use App\Services\Vacations\VacationManager;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
-    $this->seed(PermissionRoleSeeder::class);
+    app(PermissionRoleSeeder::class)->run();
 });
 
 test('approval snapshots only scheduled non-holiday dates and consumes one balance day each', function () {
@@ -93,7 +94,7 @@ test('vacation cancellation requires an active matching company context', functi
     );
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    Auth::login($superAdmin);
     app(CurrentCompany::class)->set(null);
 
     expect(fn () => $manager->cancel($vacation, 'Intento sin contexto', $superAdmin))
@@ -119,7 +120,7 @@ test('company administrators cannot manage another company vacations', function 
 test('vacations page rejects a super admin without active company context', function () {
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    Auth::login($superAdmin);
     app(CurrentCompany::class)->set(null);
 
     Livewire::test(Index::class)->assertForbidden();
@@ -132,11 +133,75 @@ test('vacation cancellation modal cannot load an id outside the active company',
     $otherVacation = Vacation::factory()->for($otherCompany)->for($otherEmployee)->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    Auth::login($superAdmin);
     app(CurrentCompany::class)->set($activeCompany);
 
     expect(fn () => Livewire::test(Index::class)->call('confirmCancellation', $otherVacation->id))
         ->toThrow(ModelNotFoundException::class);
+});
+
+test('approve vacation modal filters active employees independently from the page search', function () {
+    $context = vacationContext();
+    $named = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Alicia',
+        'last_name' => 'Rivera',
+        'external_id' => 'EMP-101',
+        'payment_code' => 'PAY-101',
+        'is_active' => true,
+    ]);
+    $lastNamed = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Bruno',
+        'last_name' => 'Buscado',
+        'external_id' => 'EMP-202',
+        'payment_code' => 'PAY-202',
+        'is_active' => true,
+    ]);
+    $externalCode = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Carla',
+        'last_name' => 'Externa',
+        'external_id' => 'EXT-777',
+        'payment_code' => 'PAY-777',
+        'is_active' => true,
+    ]);
+    $paymentCode = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Diego',
+        'last_name' => 'Clave',
+        'external_id' => 'EMP-888',
+        'payment_code' => 'PAY-999',
+        'is_active' => true,
+    ]);
+    $inactive = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Inactivo',
+        'last_name' => 'Oculto',
+        'external_id' => 'HIDDEN-111',
+        'payment_code' => 'HIDDEN-999',
+        'is_active' => false,
+    ]);
+
+    $component = Livewire::actingAs($context['actor'])->test(Index::class)
+        ->set('search', 'page-level search')
+        ->call('openCreateModal')
+        ->assertSet('search', 'page-level search')
+        ->assertSee($named->full_name)
+        ->assertDontSee($inactive->full_name);
+
+    $component->set('vacationEmployeeSearch', 'Alicia')
+        ->assertSee($named->full_name)
+        ->assertDontSee($lastNamed->full_name)
+        ->set('vacationEmployeeSearch', 'Buscado')
+        ->assertSee($lastNamed->full_name)
+        ->assertDontSee($named->full_name)
+        ->set('vacationEmployeeSearch', 'EXT-777')
+        ->assertSee($externalCode->full_name)
+        ->assertDontSee($lastNamed->full_name)
+        ->set('vacationEmployeeSearch', 'PAY-999')
+        ->assertSee($paymentCode->full_name)
+        ->assertDontSee($externalCode->full_name)
+        ->set('vacationEmployeeSearch', 'HIDDEN-111')
+        ->assertDontSee($inactive->full_name)
+        ->call('closeCreateModal')
+        ->assertSet('vacationEmployeeSearch', '')
+        ->assertSet('search', 'page-level search');
 });
 
 test('vacations page requires permissions and renders company data', function () {
