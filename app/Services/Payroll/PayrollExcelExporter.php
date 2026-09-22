@@ -122,7 +122,7 @@ class PayrollExcelExporter
     {
         $headers = [
             'A5' => 'Código de empleado',
-            'B5' => 'Código de pago',
+            'B5' => 'Clave',
             'C5' => 'NOMBRE',
             'D5' => 'Cargo',
             'E5' => 'Entrada',
@@ -160,7 +160,7 @@ class PayrollExcelExporter
             $employeeId = $result->employee_id;
 
             $sheet->setCellValue("A{$row}", $reportingRow['employee_external_id']);
-            $this->assertPaymentIdentity($reportingRow);
+            $this->assertJobTitle($reportingRow);
             $sheet->setCellValueExplicit("B{$row}", $reportingRow['employee_payment_code'], DataType::TYPE_STRING);
             $sheet->setCellValue("C{$row}", $reportingRow['employee_name']);
             $sheet->setCellValue("D{$row}", $reportingRow['employee_job_title']);
@@ -272,14 +272,14 @@ class PayrollExcelExporter
     }
 
     /** @param array<string, mixed> $row */
-    private function assertPaymentIdentity(array $row): void
+    private function assertJobTitle(array $row): void
     {
         if ($row['status'] === 'LEGACY') {
             return;
         }
 
-        if (($row['employee_payment_code'] ?? '') === '' || ($row['employee_job_title'] ?? '') === '') {
-            throw new \LogicException('Payroll result is missing payment code or job title.');
+        if (($row['employee_job_title'] ?? '') === '') {
+            throw new \LogicException('Payroll result is missing job title.');
         }
     }
 

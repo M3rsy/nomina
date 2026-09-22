@@ -99,6 +99,8 @@ class Revisar extends Component
 
     public string $assignReason = '';
 
+    public bool $canCreateEmployeeFromAssignModal = false;
+
     public bool $showCreateEmployeeModal = false;
 
     public ?int $createEmployeeRawMarkId = null;
@@ -113,9 +115,21 @@ class Revisar extends Component
 
     public string $createEmployeeDni = '';
 
+    public ?string $createEmployeeSex = null;
+
+    public ?string $createEmployeeBirthDate = null;
+
+    public ?string $createEmployeeAddress = null;
+
+    public ?string $createEmployeePhone = null;
+
     public string $createEmployeeJobTitle = '';
 
+    public ?string $createEmployeeExpectedSalary = null;
+
     public string $createEmployeeHiredAt = '';
+
+    public ?string $createEmployeeNotes = null;
 
     public ?int $createEmployeeScheduleProfileId = null;
 
@@ -514,9 +528,11 @@ class Revisar extends Component
 
         $this->assignRawMarkId = $rawMark->id;
         $this->assignEmployeeId = $rawMark->employee_id;
-        $this->assignApplyAll = false;
-        $this->assignReason = '';
-        $this->showAssignModal = true;
+            $this->assignApplyAll = false;
+            $this->assignReason = '';
+            $this->canCreateEmployeeFromAssignModal = $rawMark->employee_id === null
+                && $rawMark->status === 'unknown_employee';
+            $this->showAssignModal = true;
     }
 
     public function closeAssignModal(): void
@@ -526,6 +542,7 @@ class Revisar extends Component
         $this->assignEmployeeId = null;
         $this->assignApplyAll = false;
         $this->assignReason = '';
+        $this->canCreateEmployeeFromAssignModal = false;
         $this->resetErrorBag();
     }
 
@@ -548,6 +565,8 @@ class Revisar extends Component
             $mark->event_at->toDateString(),
         );
         $this->createEmployeeAssignAll = true;
+        $this->showAssignModal = false;
+        $this->canCreateEmployeeFromAssignModal = false;
         $this->showCreateEmployeeModal = true;
     }
 
@@ -556,7 +575,9 @@ class Revisar extends Component
         $this->reset([
             'showCreateEmployeeModal', 'createEmployeeRawMarkId', 'createEmployeeExternalId',
             'createEmployeePaymentCode', 'createEmployeeFirstName', 'createEmployeeLastName',
-            'createEmployeeDni', 'createEmployeeJobTitle', 'createEmployeeHiredAt',
+            'createEmployeeDni', 'createEmployeeSex', 'createEmployeeBirthDate',
+            'createEmployeeAddress', 'createEmployeePhone', 'createEmployeeJobTitle',
+            'createEmployeeExpectedSalary', 'createEmployeeHiredAt', 'createEmployeeNotes',
             'createEmployeeScheduleProfileId', 'createEmployeeReason',
         ]);
         $this->createEmployeeAssignAll = true;
@@ -578,22 +599,29 @@ class Revisar extends Component
         }
 
         $validated = $this->validate([
-            'createEmployeePaymentCode' => ['required', 'string', 'max:50', Rule::unique('employees', 'payment_code')->where('company_id', $this->payPeriod->company_id)],
+            'createEmployeePaymentCode' => ['nullable', 'string', 'max:50'],
             'createEmployeeFirstName' => ['required', 'string', 'max:100'],
             'createEmployeeLastName' => ['required', 'string', 'max:100'],
             'createEmployeeDni' => ['required', 'string', 'max:32'],
+            'createEmployeeSex' => ['nullable', Rule::in(['M', 'F', 'O'])],
+            'createEmployeeBirthDate' => ['nullable', 'date'],
+            'createEmployeeAddress' => ['nullable', 'string', 'max:255'],
+            'createEmployeePhone' => ['nullable', 'string', 'max:32'],
             'createEmployeeJobTitle' => ['required', 'string', 'max:100'],
+            'createEmployeeExpectedSalary' => ['nullable', 'numeric', 'decimal:0,2'],
             'createEmployeeHiredAt' => ['required', 'date'],
+            'createEmployeeNotes' => ['nullable', 'string'],
             'createEmployeeScheduleProfileId' => ['required', 'integer', Rule::exists('work_schedule_profiles', 'id')->where('company_id', $this->payPeriod->company_id)],
             'createEmployeeReason' => ['required', 'string', 'max:500'],
             'createEmployeeAssignAll' => ['boolean'],
         ]);
+
         try {
             $result = app(AuditedRawMarkRevision::class)->createEmployee(new CreateEmployeeFromUnknownMarkCommand(
                 rawMarkId: $mark->id,
                 scheduleProfileId: (int) $validated['createEmployeeScheduleProfileId'],
                 actorId: (int) Auth::id(),
-                paymentCode: $validated['createEmployeePaymentCode'],
+                paymentCode: $validated['createEmployeePaymentCode'] ?? '',
                 firstName: $validated['createEmployeeFirstName'],
                 lastName: $validated['createEmployeeLastName'],
                 dni: $validated['createEmployeeDni'],
@@ -601,12 +629,24 @@ class Revisar extends Component
                 hiredAt: $validated['createEmployeeHiredAt'],
                 reason: $validated['createEmployeeReason'],
                 assignAll: (bool) $validated['createEmployeeAssignAll'],
+                sex: $validated['createEmployeeSex'] ?? null,
+                birthDate: $validated['createEmployeeBirthDate'] ?? null,
+                address: $validated['createEmployeeAddress'] ?? null,
+                phone: $validated['createEmployeePhone'] ?? null,
+                expectedSalary: $validated['createEmployeeExpectedSalary'] ?? null,
+                notes: $validated['createEmployeeNotes'] ?? null,
             ));
         } catch (ValidationException $exception) {
             $fields = [
                 'raw_mark' => 'createEmployeeRawMarkId',
                 'external_id' => 'createEmployeeRawMarkId',
                 'payment_code' => 'createEmployeePaymentCode',
+                'sex' => 'createEmployeeSex',
+                'birth_date' => 'createEmployeeBirthDate',
+                'address' => 'createEmployeeAddress',
+                'phone' => 'createEmployeePhone',
+                'expected_salary' => 'createEmployeeExpectedSalary',
+                'notes' => 'createEmployeeNotes',
                 'schedule_profile_id' => 'createEmployeeScheduleProfileId',
                 'hired_at' => 'createEmployeeHiredAt',
             ];

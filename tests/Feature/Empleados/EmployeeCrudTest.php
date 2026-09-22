@@ -12,12 +12,14 @@ use App\Services\Attendance\GeneralWorkSchedulePublisher;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
+use Livewire\Livewire;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
 test('company admin can list only own company employees', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -47,6 +49,7 @@ test('company admin can list only own company employees', function () {
 });
 
 test('company admin cannot edit employee of other company', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -65,6 +68,7 @@ test('company admin cannot edit employee of other company', function () {
 });
 
 test('super admin can see employees of active company', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -97,6 +101,7 @@ test('super admin can see employees of active company', function () {
 });
 
 test('create employee requires permission', function () {
+    /** @var \Tests\TestCase $this */
     $user = User::factory()->create([
         'company_id' => null,
         'password' => Hash::make('password'),
@@ -109,6 +114,7 @@ test('create employee requires permission', function () {
 });
 
 test('company admin create employee forces own company', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
@@ -131,6 +137,7 @@ test('company admin create employee forces own company', function () {
 });
 
 test('super admin can switch company and create employee', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($companyB)->create(['profile_key' => 'general']);
@@ -165,6 +172,7 @@ test('super admin can switch company and create employee', function () {
 });
 
 test('company admin creates an employee with an effective schedule assignment', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create([
         'profile_key' => 'general',
@@ -198,6 +206,7 @@ test('company admin creates an employee with an effective schedule assignment', 
 });
 
 test('employee forms expose only the date-effective general profile from the selected company', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
     WorkScheduleProfile::factory()->forCompany($company)->create([
@@ -233,6 +242,7 @@ test('employee forms expose only the date-effective general profile from the sel
 });
 
 test('duplicate external id within same company is rejected', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
 
     $admin = User::factory()->create([
@@ -251,10 +261,12 @@ test('duplicate external id within same company is rejected', function () {
         ->set('last_name', 'Gómez')
         ->set('dni', '1234567890123')
         ->call('save')
-        ->assertHasErrors('external_id');
+        ->assertHasErrors('external_id')
+        ->assertSee('El código de empleado ya existe en esta empresa.');
 });
 
 test('duplicate external id in other company is allowed', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create(['profile_key' => 'general']);
@@ -286,6 +298,7 @@ test('duplicate external id in other company is allowed', function () {
 });
 
 test('update employee audits sensitive fields', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
 
     $admin = User::factory()->create([
@@ -321,6 +334,7 @@ test('update employee audits sensitive fields', function () {
 });
 
 test('an employee cannot be transferred directly to another company', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create(['name' => 'Empresa histórica']);
     $companyB = Company::factory()->create(['name' => 'Empresa destino']);
     $profile = WorkScheduleProfile::factory()->forCompany($companyA)->create();
@@ -353,6 +367,7 @@ test('an employee cannot be transferred directly to another company', function (
 });
 
 test('company admin assigns the date-effective general schedule', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $previous = WorkScheduleProfile::factory()->forCompany($company)->create([
         'profile_key' => 'general', 'name' => 'Jornada general',
@@ -396,6 +411,7 @@ test('company admin assigns the date-effective general schedule', function () {
 });
 
 test('deactivate employee requires permission', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $employee = Employee::factory()->forCompany($company)->create();
 
@@ -411,6 +427,7 @@ test('deactivate employee requires permission', function () {
 });
 
 test('soft delete employee preserves revisions', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
 
     $admin = User::factory()->create([
@@ -437,6 +454,7 @@ test('soft delete employee preserves revisions', function () {
 });
 
 test('employee create resolves the sole general profile on the assignment date', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $previous = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
@@ -463,6 +481,7 @@ test('employee create resolves the sole general profile on the assignment date',
 });
 
 test('employee edit assigns an unassigned employee from date-effective general history', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $previous = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
@@ -485,7 +504,8 @@ test('employee edit assigns an unassigned employee from date-effective general h
     expect($employee->scheduleAssignments()->sole()->work_schedule_profile_id)->toBe($previous->id);
 });
 
-test('payment code is unique within a company and remains text', function () {
+test('payment code is optional, shared within a company, and normalized to null', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
     $admin = User::factory()->create(['company_id' => $company->id]);
@@ -503,5 +523,46 @@ test('payment code is unique within a company and remains text', function () {
         ->set('schedule_profile_id', $profile->id)
         ->set('schedule_reason', 'Asignación inicial')
         ->call('save')
-        ->assertHasErrors('payment_code');
+        ->assertHasNoErrors();
+
+    $employee = Employee::query()->where('external_id', 'PAY-2')->sole();
+    expect($employee->payment_code)->toBe('00042');
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->set('payment_code', '   ')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($employee->fresh()->payment_code)->toBeNull();
+});
+
+test('employee code remains required and employee screens distinguish it from clave', function () {
+    /** @var \Tests\TestCase $this */
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->assertSee('Código de empleado')
+        ->assertSee('Clave')
+        ->set('external_id', '')
+        ->set('first_name', 'Sin')
+        ->set('last_name', 'Clave')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
+        ->call('save')
+        ->assertHasErrors('external_id')
+        ->assertSee('El código de empleado es obligatorio.');
+
+    $employee = Employee::factory()->forCompany($company)->create();
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->assertSee('Código de empleado')
+        ->assertSee('Clave');
+
+    $this->get('/empleados')
+        ->assertOk()
+        ->assertSee('Código de empleado')
+        ->assertSee('Clave');
 });

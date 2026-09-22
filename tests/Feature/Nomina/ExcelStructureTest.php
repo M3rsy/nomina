@@ -11,6 +11,7 @@ use Database\Seeders\PermissionRoleSeeder;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 beforeEach(function () {
+    /** @var \Tests\TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
@@ -89,7 +90,7 @@ test('PayrollExcelExporter produces expected sheet structure', function () {
         ->and($sheet->getTitle())->toBe('Asistencia')
         ->and($data[1][0])->toMatch('/^REPORTE DEL/')
         ->and($data[2][0])->toMatch('/^SEMANA/')
-        ->and($sheet->rangeToArray('A5:M5')[0])->toBe(['Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral'])
+        ->and($sheet->rangeToArray('A5:M5')[0])->toBe(['Código de empleado', 'Clave', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas', 'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral'])
         ->and($data[5])->toContain(1, 'Juan Perez')
         ->and($data[5][4])->toContain('2024-01-22')
         ->and($data[5][6])->toBe(9.0)
@@ -380,7 +381,7 @@ test('global and employee exports expose canonical immutable snapshot columns', 
 
     expect($global)->not->toBeNull()
         ->and($global->rangeToArray('A5:M5')[0])->toBe([
-            'Código de empleado', 'Código de pago', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas',
+            'Código de empleado', 'Clave', 'NOMBRE', 'Cargo', 'Entrada', 'Salida', 'Cantidad Horas',
             'Horas Ordinarias', 'Horas Ext 25%', 'Horas Ext 50%', 'Horas Ext 75%', 'Horas Ext 100%', 'Fecha laboral',
         ])->and($global->rangeToArray('A6:M6')[0])->toBe([
             'SNAP-7', '00042', 'Frozen Employee', 'Frozen title', '2026-07-07 06:00:00', '2026-07-07 16:25:00',
@@ -525,7 +526,7 @@ test('payroll exports frozen payment code as text and frozen job title', functio
 
     $globalPath = (new PayrollExcelExporter)->export($payPeriod);
     $global = IOFactory::load($globalPath)->getActiveSheet();
-    expect($global->getCell('B5')->getValue())->toBe('Código de pago')
+    expect($global->getCell('B5')->getValue())->toBe('Clave')
         ->and($global->getCell('D5')->getValue())->toBe('Cargo')
         ->and($global->getCell('B6')->getValue())->toBe('00042')
         ->and($global->getCell('B6')->getDataType())->toBe('s')
@@ -533,9 +534,41 @@ test('payroll exports frozen payment code as text and frozen job title', functio
 
     $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
     $stub = IOFactory::load($stubPath)->getActiveSheet();
-    expect($stub->getCell('AH8')->getValue())->toBe('Código de pago')
+    expect($stub->getCell('AH8')->getValue())->toBe('Clave')
         ->and($stub->getCell('AI8')->getValue())->toBe('Cargo')
         ->and($stub->getCell('AH9')->getValue())->toBe('00042')
+        ->and($stub->getCell('AI9')->getValue())->toBe('Operador');
+
+    unlink($globalPath);
+    unlink($stubPath);
+});
+
+test('payroll exports allow blank clave while still requiring a job title', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'exported']);
+    $employee = Employee::factory()->forCompany($company)->create(['payment_code' => null, 'job_title' => 'Operador']);
+
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2026-09-01',
+        'employee_payment_code' => null,
+        'employee_job_title' => 'Operador',
+    ]);
+    PayrollResult::factory()->forCompany($company)->forPayPeriod($payPeriod)->forEmployee($employee)->create([
+        'date' => '2026-09-02',
+        'employee_payment_code' => '',
+        'employee_job_title' => 'Operador',
+    ]);
+
+    $globalPath = (new PayrollExcelExporter)->export($payPeriod);
+    $global = IOFactory::load($globalPath)->getActiveSheet();
+    expect($global->getCell('B6')->getValue())->toBeNull()
+        ->and($global->getCell('B7')->getValue())->toBeNull()
+        ->and($global->getCell('D6')->getValue())->toBe('Operador');
+
+    $stubPath = (new PayrollStubExporter)->export($payPeriod, $employee);
+    $stub = IOFactory::load($stubPath)->getActiveSheet();
+    expect($stub->getCell('AH9')->getValue())->toBeNull()
+        ->and($stub->getCell('AH10')->getValue())->toBeNull()
         ->and($stub->getCell('AI9')->getValue())->toBe('Operador');
 
     unlink($globalPath);
