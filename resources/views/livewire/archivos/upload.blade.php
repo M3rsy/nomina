@@ -62,12 +62,12 @@
 
                     <div id="attendance-file-contract" class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                         <div class="rounded-xl bg-slate-50 p-4 text-slate-700">
-                            <span class="block font-semibold text-slate-950">GLG*.txt</span>
-                            El nombre debe comenzar con GLG y usar la extensión .txt.
+                            <span class="block font-semibold text-slate-950">Archivos .txt</span>
+                            El nombre no importa; solo debe usar la extensión .txt.
                         </div>
                         <div class="rounded-xl bg-slate-50 p-4 text-slate-700">
-                            <span class="block font-semibold text-slate-950">ATTLOG: *.dat</span>
-                            Para ATTLOG se acepta cualquier nombre con la extensión .dat.
+                            <span class="block font-semibold text-slate-950">Archivos .dat</span>
+                            El nombre no importa; solo debe usar la extensión .dat.
                         </div>
                     </div>
 
@@ -82,7 +82,7 @@
                                     </span>
                                     <div class="min-w-0">
                                         <p class="text-sm font-semibold leading-6 text-slate-900">Subí el archivo de asistencia aquí o tocá el botón para abrir el selector</p>
-                                        <p class="mt-1 text-xs text-slate-500">GLG*.txt o ATTLOG *.dat · máximo 5 MB</p>
+                                        <p class="mt-1 text-xs text-slate-500">.txt o .dat · el nombre no importa · máximo 5 MB</p>
                                     </div>
                                 </div>
                                 <span class="inline-flex h-10 shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition group-hover:border-indigo-300 group-hover:bg-indigo-50 group-hover:text-indigo-700">

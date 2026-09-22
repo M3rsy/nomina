@@ -2,14 +2,21 @@
 
 use App\Livewire\Nomina\Index;
 use App\Models\Company;
+use App\Models\Employee;
 use App\Models\PayPeriod;
+use App\Models\UploadedFile;
 use App\Models\User;
 use App\Services\CurrentCompany;
+use App\Services\UploadedAttendanceFileIngestor;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Http\UploadedFile as LaravelUploadedFile;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 
 beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
+    Storage::fake('local');
 });
 
 test('company admin can view nomina index of own company', function () {
@@ -415,9 +422,19 @@ test('user without pay periods view permission cannot access nomina index', func
 
 test('company admin deletes a payroll period and its files with a reason', function () {
     $company = Company::factory()->create();
-    $payPeriod = PayPeriod::factory()->forCompany($company)->create();
-    $file = \App\Models\UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+    ]);
+    Employee::factory()->forCompany($company)->create(['external_id' => '13767']);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $contents = "1\t1\t13767\t\t1\t1\t01/19/2026 14:53:50\r\n";
+    $file = app(UploadedAttendanceFileIngestor::class)->ingest(
+        $company,
+        $payPeriod,
+        $admin,
+        LaravelUploadedFile::fake()->createWithContent('GLG_001.TXT', $contents),
+    );
 
     $this->actingAs($admin);
     app(CurrentCompany::class)->set($company);
@@ -434,4 +451,21 @@ test('company admin deletes a payroll period and its files with a reason', funct
         ->and($payPeriod->fresh()->deletion_reason)->toBe('Periodo creado por error')
         ->and($file->fresh()->trashed())->toBeTrue()
         ->and($file->fresh()->deletion_reason)->toBe('Periodo creado por error');
+
+    $replacementPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $replacement = app(UploadedAttendanceFileIngestor::class)->ingest(
+        $company,
+        $replacementPeriod,
+        $admin,
+        LaravelUploadedFile::fake()->createWithContent('GLG_002.TXT', $contents),
+    );
+
+    expect($replacement->sha256)->toBe($file->sha256)
+        ->and($replacement->pay_period_id)->toBe($replacementPeriod->id)
+        ->and(UploadedFile::count())->toBe(1)
+        ->and(UploadedFile::withTrashed()->count())->toBe(2);
 });

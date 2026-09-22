@@ -7,7 +7,6 @@ use App\Models\PayPeriod;
 use App\Models\UploadedFile;
 use App\Models\User;
 use App\Services\Parsers\ParserFactory;
-use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile as HttpUploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -19,8 +18,6 @@ use Throwable;
 class UploadedAttendanceFileIngestor
 {
     public function __construct(private FileValidator $validator) {}
-
-    private const DUPLICATE_SHA_CONSTRAINT = 'uploaded_files_company_id_sha256_unique';
 
     public function ingest(Company $company, PayPeriod $payPeriod, User $user, HttpUploadedFile $file): UploadedFile
     {
@@ -77,14 +74,6 @@ class UploadedAttendanceFileIngestor
 
                 return $uploadedFile;
             });
-        } catch (QueryException $exception) {
-            $this->cleanupStoredPath($path);
-
-            if ($this->isDuplicateShaConstraintViolation($exception)) {
-                throw $this->duplicateUploadException();
-            }
-
-            throw $exception;
         } catch (Throwable $throwable) {
             $this->cleanupStoredPath($path);
 
@@ -110,15 +99,5 @@ class UploadedAttendanceFileIngestor
         return ValidationException::withMessages([
             'upload' => 'Este archivo ya fue cargado anteriormente.',
         ]);
-    }
-
-    private function isDuplicateShaConstraintViolation(QueryException $exception): bool
-    {
-        $sqlState = (string) ($exception->errorInfo[0] ?? '');
-        $message = $exception->getMessage();
-
-        return in_array($sqlState, ['23000', '23505'], true)
-            && (str_contains($message, self::DUPLICATE_SHA_CONSTRAINT)
-                || str_contains($message, 'uploaded_files.company_id, uploaded_files.sha256'));
     }
 }
