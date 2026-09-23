@@ -34,12 +34,18 @@ test('loading button scopes accessible feedback to its action', function () {
 test('loading overlay starts hidden and is revealed only for scoped blocking actions', function () {
     $html = Blade::render(<<<'BLADE'
         <x-ui.loading-overlay
+            id="payroll-overlay"
             target="validate,process"
             message="Validando y procesando…"
+            data-scope="payroll"
+            class="rounded-3xl"
         />
     BLADE);
 
     expect($html)
+        ->toContain('id="payroll-overlay"')
+        ->toContain('data-scope="payroll"')
+        ->toContain('rounded-3xl')
         ->toContain('style="display: none;"')
         ->toContain('wire:loading.delay.short')
         ->toContain('wire:target="validate,process"')
