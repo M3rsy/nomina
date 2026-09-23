@@ -1,66 +1,59 @@
-<div class="max-w-2xl mx-auto py-8">
-    <h1 class="text-2xl font-bold mb-6">Cambiar contraseña</h1>
+<div class="mx-auto max-w-2xl space-y-6 py-8">
+    <x-ui.page-header
+        title="Cambiar contraseña"
+        description="Actualizá la contraseña de acceso de tu cuenta."
+    />
 
     @if (session('status'))
-        <div id="change-password-status" role="status" aria-live="polite" class="mb-4 text-green-600 text-sm">{{ session('status') }}</div>
+        <x-ui.alert id="change-password-status" variant="success">
+            {{ session('status') }}
+        </x-ui.alert>
     @endif
 
-    <form wire:submit="save" class="space-y-4 bg-white p-6 rounded-lg shadow">
-        <div>
-            <label for="current-password" class="block text-sm font-medium text-gray-700">Contraseña actual</label>
-            <input
+    <x-ui.card>
+        <form wire:submit="save" class="space-y-5">
+            <x-ui.input
                 id="current-password"
+                label="Contraseña actual"
                 type="password"
                 wire:model="current_password"
                 autocomplete="current-password"
-                @error('current_password') aria-describedby="current-password-error" aria-invalid="true" @else aria-invalid="false" @enderror
-                class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                :error="$errors->first('current_password')"
                 required
-            >
-            @error('current_password')
-                <p id="current-password-error" role="alert" class="text-red-600 text-sm">{{ $message }}</p>
-            @enderror
-        </div>
+            />
 
-        <div>
-            <label for="new-password" class="block text-sm font-medium text-gray-700">Nueva contraseña</label>
-            <input
+            <x-ui.input
                 id="new-password"
+                label="Nueva contraseña"
                 type="password"
                 wire:model="password"
                 autocomplete="new-password"
-                aria-describedby="new-password-hint @error('password') new-password-error @enderror"
-                @error('password') aria-invalid="true" @else aria-invalid="false" @enderror
-                class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                hint="Use al menos 8 caracteres."
+                :error="$errors->first('password')"
                 required
+            />
+
+            <div class="space-y-1.5">
+                <label for="new-password-confirmation" class="block text-sm font-semibold text-text">Confirmar nueva contraseña</label>
+                <input
+                    id="new-password-confirmation"
+                    type="password"
+                    wire:model="password_confirmation"
+                    autocomplete="new-password"
+                    @error('password') aria-describedby="new-password-error" aria-invalid="true" @else aria-invalid="false" @enderror
+                    class="min-h-11 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-text-muted"
+                    required
+                >
+            </div>
+
+            <x-ui.loading-button
+                type="submit"
+                target="save"
+                loading-label="Guardando contraseña..."
+                class="inline-flex min-h-11 items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
             >
-            <p id="new-password-hint" class="mt-1 text-xs text-gray-500">Use al menos 8 caracteres.</p>
-        </div>
-
-        <div>
-            <label for="new-password-confirmation" class="block text-sm font-medium text-gray-700">Confirmar nueva contraseña</label>
-            <input
-                id="new-password-confirmation"
-                type="password"
-                wire:model="password_confirmation"
-                autocomplete="new-password"
-                @error('password') aria-describedby="new-password-error" aria-invalid="true" @else aria-invalid="false" @enderror
-                class="mt-1 block w-full rounded border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                required
-            >
-        </div>
-
-        @error('password')
-            <p id="new-password-error" role="alert" class="text-red-600 text-sm">{{ $message }}</p>
-        @enderror
-
-        <x-ui.loading-button
-            type="submit"
-            target="save"
-            loading-label="Guardando contraseña..."
-            class="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition disabled:cursor-wait disabled:bg-indigo-400"
-        >
-            Guardar contraseña
-        </x-ui.loading-button>
-    </form>
+                Guardar contraseña
+            </x-ui.loading-button>
+        </form>
+    </x-ui.card>
 </div>
