@@ -142,6 +142,11 @@ class Employee extends Model
         return $this->hasMany(EmployeeScheduleAssignment::class);
     }
 
+    public function positionAssignments(): HasMany
+    {
+        return $this->hasMany(EmployeePositionAssignment::class);
+    }
+
     public function overtimeDecisions(): HasMany
     {
         return $this->hasMany(OvertimeDecision::class);
