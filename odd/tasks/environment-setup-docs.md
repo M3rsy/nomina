@@ -14,4 +14,4 @@ Document separate Docker and Lerd environment templates and improve cross-platfo
 - Added `.env.lerd.example` for Lerd/native services with `DB_HOST=lerd-postgres`.
 - Updated `README.md` with Windows/WSL, Linux, macOS Docker setup, clean/no-demo setup, and operational commands.
 - Docker services verified running after the environment correction.
-- Work-unit commit: `c076b50 docs: document docker and lerd setup`.
+- Work-unit commit: `4f8e380 docs: document docker and lerd setup`.
