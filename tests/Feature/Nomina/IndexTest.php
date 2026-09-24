@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Nomina\Index;
+use App\Models\AuditLogEntry;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
@@ -9,13 +10,27 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use App\Services\UploadedAttendanceFileIngestor;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile as LaravelUploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
+
+function indexTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    indexTestCase()->seed(PermissionRoleSeeder::class);
     Storage::fake('local');
 });
 
@@ -26,7 +41,7 @@ test('company admin can view nomina index of own company', function () {
 
     app(CurrentCompany::class)->set($company);
 
-    $this->actingAs($admin)
+    indexTestCase()->actingAs($admin)
         ->get('/nomina')
         ->assertOk()
         ->assertSee($payPeriod->name)
@@ -47,7 +62,7 @@ test('company admin paginates own periods with stable ordering', function () {
         ]));
     PayPeriod::factory()->forCompany($otherCompany)->create(['name' => 'Other company period']);
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -68,7 +83,7 @@ test('nomina index translates stored period statuses for display', function () {
 
     app(CurrentCompany::class)->set($company);
 
-    $this->actingAs($admin)
+    indexTestCase()->actingAs($admin)
         ->get(route('nomina.index'))
         ->assertOk()
         ->assertSee('Validación con errores');
@@ -81,7 +96,7 @@ test('ready period does not expose an attendance upload action', function () {
 
     app(CurrentCompany::class)->set($company);
 
-    $this->actingAs($admin)
+    indexTestCase()->actingAs($admin)
         ->get(route('nomina.index'))
         ->assertOk()
         ->assertSee($payPeriod->name)
@@ -96,7 +111,7 @@ test('company admin cannot view nomina index of other company', function () {
 
     app(CurrentCompany::class)->set($companyA);
 
-    $this->actingAs($admin)
+    indexTestCase()->actingAs($admin)
         ->get('/nomina')
         ->assertOk()
         ->assertDontSee('Empresa B');
@@ -109,7 +124,7 @@ test('super admin without active company receives a guided payroll state', funct
 
     app(CurrentCompany::class)->set(null);
 
-    $this->actingAs($superAdmin)
+    indexTestCase()->actingAs($superAdmin)
         ->get('/nomina')
         ->assertOk()
         ->assertSeeText('Seleccioná una empresa para continuar')
@@ -132,7 +147,7 @@ test('invalid active company context falls back to the guided payroll state', fu
         : 999999;
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->withSession(['active_company_id' => $companyId])
+    indexTestCase()->withSession(['active_company_id' => $companyId])
         ->actingAs($superAdmin)
         ->get('/nomina')
         ->assertOk()
@@ -144,7 +159,7 @@ test('company-scoped user without a resolvable company remains forbidden', funct
     $admin = User::factory()->create(['company_id' => null]);
     $admin->givePermissionTo('pay_periods.view');
 
-    $this->actingAs($admin)
+    indexTestCase()->actingAs($admin)
         ->get('/nomina')
         ->assertForbidden();
 });
@@ -156,7 +171,7 @@ test('create period control is enabled and connected to the inline form', functi
 
     app(CurrentCompany::class)->set($company);
 
-    $html = $this->actingAs($admin)
+    $html = indexTestCase()->actingAs($admin)
         ->get('/nomina')
         ->assertOk()
         ->assertSee('Crear período')
@@ -166,7 +181,7 @@ test('create period control is enabled and connected to the inline form', functi
 
     expect($button)->toHaveCount(1)
         ->and($button[0])->toContain('wire:click="openCreateForm"')
-        ->and($button[0])->not->toContain('disabled');
+        ->and($button[0])->not->toMatch('/\sdisabled(?:\s|=|>)/');
 
     Livewire::test(Index::class)
         ->call('openCreateForm')
@@ -178,7 +193,7 @@ test('period creation form exposes no client-controlled company or status fields
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -193,7 +208,7 @@ test('company admin can create a draft period for own company and continue to up
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     expect(PayPeriod::withoutCompanyScope()->count())->toBe(0);
@@ -225,7 +240,7 @@ test('super admin creates a period only for the selected active company', functi
     $otherCompany = Company::factory()->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    indexTestCase()->actingAs($superAdmin);
     app(CurrentCompany::class)->set($activeCompany);
 
     Livewire::test(Index::class)
@@ -247,10 +262,10 @@ test('super admin creates a period only for the selected active company', functi
 test('super admin without an active company cannot access period creation', function () {
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    indexTestCase()->actingAs($superAdmin);
     app(CurrentCompany::class)->set(null);
 
-    $this->get('/nomina')
+    indexTestCase()->get('/nomina')
         ->assertOk()
         ->assertDontSee('id="create-period-trigger"', escape: false);
 
@@ -269,7 +284,7 @@ test('company admin with an unresolvable company is denied period creation', fun
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $company->delete();
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set(null);
 
     expect(Gate::forUser($admin)->denies('create', PayPeriod::class))->toBeTrue()
@@ -281,7 +296,7 @@ test('user without manage permission cannot invoke period creation directly', fu
     $user = User::factory()->forCompany($company)->create();
     $user->givePermissionTo('pay_periods.view');
 
-    $this->actingAs($user);
+    indexTestCase()->actingAs($user);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -299,7 +314,7 @@ test('period creation rejects an end date before the start date', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -321,7 +336,7 @@ test('period creation rejects dates that overlap another company period', functi
     ]);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -343,7 +358,7 @@ test('period creation reports a same-company slug collision without adding a row
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $periodSnapshot = $existing->fresh()->getAttributes();
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -361,7 +376,7 @@ test('manual period creation validates its input contract', function (array $val
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
@@ -412,10 +427,152 @@ test('manual period creation validates its input contract', function (array $val
     ],
 ]);
 
+test('period overview renders canonical status copy and five workflow phases', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $statuses = [
+        'draft' => ['Borrador', 'El período fue creado y puede recibir archivos de asistencia.'],
+        'uploaded' => ['Archivo cargado', 'Hay un archivo cargado y se permite cargar otro; esto no confirma la validación.'],
+        'validating' => ['Validando', 'La asistencia está en revisión y deben resolverse los bloqueos visibles.'],
+        'validation_failed' => ['Validación con errores', 'La validación falló; corrija el archivo y vuelva a cargarlo.'],
+        'ready' => ['Listo', 'La revisión está lista y el procesamiento puede solicitarse si no hay bloqueos.'],
+        'processing' => ['Procesando', 'El cálculo está activo y la asistencia no puede editarse.'],
+        'processed' => ['Procesado', 'Los resultados actuales están congelados y disponibles para revisión y aprobación.'],
+        'approved' => ['Aprobado', 'La nómina está aprobada, bloqueada y disponible para exportar.'],
+        'exported' => ['Exportado', 'La nómina fue exportada, permanece bloqueada y puede exportarse nuevamente.'],
+        'cancelled' => ['Cancelado', 'El período está cancelado y no admite edición.'],
+    ];
+
+    foreach ($statuses as $status => $_) {
+        PayPeriod::factory()->forCompany($company)->create(['name' => "Estado {$status}", 'status' => $status]);
+    }
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Index::class)
+        ->assertSeeHtml('aria-label="Flujo de nómina"')
+        ->assertSee('Período')
+        ->assertSee('Carga')
+        ->assertSee('Revisión')
+        ->assertSee('Proceso')
+        ->assertSee('Aprobación y exportación');
+
+    foreach ($statuses as [$label, $copy]) {
+        $component->assertSee($label)->assertSee($copy);
+    }
+});
+
+test('period actions require their matching permissions and preserve route parameters', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create(['status' => 'draft']);
+    $user = User::factory()->forCompany($company)->create();
+    $user->givePermissionTo(['pay_periods.view', 'files.upload']);
+
+    indexTestCase()->actingAs($user);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->assertSeeHtml('href="'.route('archivos.upload', ['pay_period_id' => $period->id]).'"')
+        ->assertSeeHtml('wire:navigate')
+        ->assertDontSeeHtml('href="'.route('nomina.revisar', $period).'"')
+        ->assertDontSee('Crear período')
+        ->assertDontSee('Eliminar');
+    indexTestCase()->get(route('nomina.revisar', $period))->assertForbidden();
+
+    $user->syncPermissions(['pay_periods.view', 'marks.manage']);
+
+    Livewire::test(Index::class)
+        ->assertDontSeeHtml('href="'.route('archivos.upload', ['pay_period_id' => $period->id]).'"')
+        ->assertSeeHtml('href="'.route('nomina.revisar', $period).'"')
+        ->assertSeeHtml('wire:navigate');
+    indexTestCase()->get(route('archivos.upload', ['pay_period_id' => $period->id]))->assertForbidden();
+});
+
+test('period overview exposes the exact upload matrix', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $statuses = ['draft', 'uploaded', 'validation_failed', 'validating', 'ready', 'processing', 'processed', 'approved', 'exported', 'cancelled'];
+
+    foreach ($statuses as $status) {
+        PayPeriod::factory()->forCompany($company)->create(['name' => "Estado {$status}", 'status' => $status]);
+    }
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+    $html = Livewire::test(Index::class)->html();
+
+    foreach (PayPeriod::query()->get() as $period) {
+        $uploadUrl = route('archivos.upload', ['pay_period_id' => $period->id]);
+        $expectedCount = in_array($period->status, ['draft', 'uploaded', 'validation_failed'], true) ? 2 : 0;
+
+        expect(substr_count($html, $uploadUrl))->toBe($expectedCount);
+    }
+});
+
+test('period list has distinct desktop and narrow presentations with useful empty states', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->assertSee('Todavía no hay períodos de nómina.')
+        ->assertSee('Crear el primer período')
+        ->assertSeeHtml('data-period-desktop-list')
+        ->assertSeeHtml('data-period-mobile-list');
+
+    $viewer = User::factory()->forCompany($company)->create();
+    $viewer->givePermissionTo('pay_periods.view');
+    indexTestCase()->actingAs($viewer);
+
+    Livewire::test(Index::class)
+        ->assertSee('Todavía no hay períodos de nómina.')
+        ->assertDontSee('Crear el primer período');
+});
+
+test('deletion confirmation has an accessible idle-safe lifecycle', function () {
+    $company = Company::factory()->create();
+    $period = PayPeriod::factory()->forCompany($company)->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $component = Livewire::test(Index::class)
+        ->call('openDeleteConfirmation', $period->id)
+        ->assertSeeHtml('role="dialog"')
+        ->assertSeeHtml('aria-labelledby="delete-period-heading"')
+        ->assertSeeHtml('aria-describedby="delete-period-description"')
+        ->assertSeeHtml('for="period-deletion-reason"')
+        ->assertSeeHtml('x-ref="deleteReason"')
+        ->assertSeeHtml('x-on:keydown.escape.window')
+        ->assertSeeHtml('x-on:payroll-delete-closed.window')
+        ->assertSeeHtml('wire:loading.attr="disabled"')
+        ->assertSeeHtml('wire:target="deletePeriod"')
+        ->call('closeDeleteConfirmation')
+        ->assertSet('deletingPeriodId', null);
+
+    expect($period->fresh()->trashed())->toBeFalse();
+});
+
+test('cross-tenant period identifiers cannot open deletion confirmation', function () {
+    $company = Company::factory()->create();
+    $otherPeriod = PayPeriod::factory()->forCompany(Company::factory()->create())->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    expect(fn () => Livewire::test(Index::class)->call('openDeleteConfirmation', $otherPeriod->id))
+        ->toThrow(ModelNotFoundException::class);
+});
+
 test('user without pay periods view permission cannot access nomina index', function () {
     $user = User::factory()->create();
 
-    $this->actingAs($user)
+    indexTestCase()->actingAs($user)
         ->get('/nomina')
         ->assertForbidden();
 });
@@ -436,21 +593,29 @@ test('company admin deletes a payroll period and its files with a reason', funct
         LaravelUploadedFile::fake()->createWithContent('GLG_001.TXT', $contents),
     );
 
-    $this->actingAs($admin);
+    indexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
         ->call('openDeleteConfirmation', $payPeriod->id)
         ->call('deletePeriod')
         ->assertHasErrors(['deletionReason' => 'required'])
+        ->set('deletionReason', str_repeat('a', 501))
+        ->call('deletePeriod')
+        ->assertHasErrors(['deletionReason' => 'max'])
         ->set('deletionReason', 'Periodo creado por error')
         ->call('deletePeriod')
         ->assertHasNoErrors();
 
     expect($payPeriod->fresh()->trashed())->toBeTrue()
         ->and($payPeriod->fresh()->deletion_reason)->toBe('Periodo creado por error')
+        ->and($payPeriod->fresh()->deleted_by)->toBe($admin->id)
         ->and($file->fresh()->trashed())->toBeTrue()
-        ->and($file->fresh()->deletion_reason)->toBe('Periodo creado por error');
+        ->and($file->fresh()->deletion_reason)->toBe('Periodo creado por error')
+        ->and($file->fresh()->deleted_by)->toBe($admin->id)
+        ->and(AuditLogEntry::query()->where('type', 'deletion')->count())->toBe(2)
+        ->and(AuditLogEntry::query()->where('actor_id', $admin->id)->count())->toBe(2)
+        ->and(AuditLogEntry::query()->whereJsonContains('metadata->reason', 'Periodo creado por error')->count())->toBe(2);
 
     $replacementPeriod = PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-01-01',
