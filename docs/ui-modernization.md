@@ -44,6 +44,28 @@ Los componentes reutilizables disponibles son:
 - Formularios: `x-ui.form-field`, `x-ui.input`, `x-ui.password-field`, `x-ui.select`, `x-ui.textarea`.
 - Nómina: `x-nomina.payroll-workflow` para presentar fases de período sin navegación ni cambios de estado.
 
+### Fase 6 — Workflow visual de nómina
+
+Issue de formalización: [#320](https://github.com/M3rsy/nomina/issues/320).
+
+Estado: la modernización de workflow de nómina ya está integrada en `main` y queda formalizada como fase crítica cerrable mediante revisión dedicada. El alcance implementado cubre:
+
+- `PayPeriodStatusPresentation` como seam de presentación para estados, fases, tonos y copy sin autorizar acciones;
+- `x-nomina.payroll-workflow` como orientación visual de cinco fases sin navegación ni mutaciones;
+- overview de períodos en `livewire/nomina/index.blade.php` con estados, acciones permitidas, empty states y layouts desktop/mobile;
+- resultados/finalización en `livewire/nomina/procesar.blade.php` con confirmación accesible de aprobación;
+- progreso de procesamiento de nómina y lotes de overtime con feedback live, polling acotado y estados terminales;
+- panel de overtime review modernizado sin modificar los archivos congelados `app/Livewire/Nomina/Revisar.php` ni `resources/views/livewire/nomina/revisar.blade.php`.
+
+Contratos protegidos:
+
+- `tests/Unit/Support/Nomina/PayPeriodStatusPresentationTest.php` cubre mapeos de estado y fallback desconocido.
+- `tests/Feature/Nomina/IndexTest.php`, `VistaPreviaTest.php`, `AprobarNominaTest.php`, `StartPayrollProcessingTest.php` y `AttendanceReviewTest.php` cubren overview, aprobación, progreso, bloqueo, tenant scope y matrices de acciones.
+- `tests/Feature/Payroll/PayrollRunProgressTest.php` y `tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` cubren polling, progreso, terminales y lotes.
+- `tests/Feature/Ui/DesignSystemComponentsTest.php` cubre workflow y componentes compartidos.
+
+Regla de continuación: todo cambio posterior en nómina debe conservar que la presentación no decida permisos ni transiciones. Cualquier cambio en cálculo, locking, jobs, policies o PostgreSQL queda fuera de esta fase y requiere issue/especificación separada.
+
 ## Componentes y patrones UI
 
 - Usar tokens semánticos de `resources/css/app.css` (`brand`, `surface`, `border`, `text`, `success`, `warning`, `danger`) antes de agregar colores Tailwind hardcoded.
