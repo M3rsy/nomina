@@ -35,14 +35,62 @@ Si una mejora visual necesita tocar comportamiento, debe separarse en otro Issue
 
 La aplicación usa Laravel 12, Livewire 3, Blade, Alpine.js y Tailwind CSS 4. Las rutas de `routes/web.php` montan pantallas públicas de autenticación y pantallas autenticadas para dashboards, empresas, usuarios, empleados, jornadas, feriados, vacaciones, archivos, nómina, auditoría, respaldos y perfil.
 
-Los componentes reutilizables actuales son mínimos:
+Los componentes reutilizables disponibles son:
 
-- `resources/views/components/auth/shell.blade.php`;
-- `resources/views/components/layouts/app.blade.php`;
-- `resources/views/components/ui/loading-button.blade.php`;
-- `resources/views/components/ui/loading-overlay.blade.php`.
+- Shells y layout: `components/auth/shell.blade.php`, `components/layouts/app.blade.php`.
+- Navegación autenticada: `app/View/Components/AppLayout.php` concentra estado activo de rutas, visibilidad por permisos, usuario actual, rol, empresa actual y empresas disponibles para `super_admin`; `app/Providers/AppServiceProvider.php` complementa esa información para vistas Livewire que usan `components.layouts.app` directamente.
+- Componentes base: `x-ui.button`, `x-ui.loading-button`, `x-ui.badge`, `x-ui.card`, `x-ui.page-header`, `x-ui.stat-card`.
+- Feedback y estados: `x-ui.alert`, `x-ui.feedback`, `x-ui.empty-state`, `x-ui.loading-overlay`.
+- Formularios: `x-ui.form-field`, `x-ui.input`, `x-ui.password-field`, `x-ui.select`, `x-ui.textarea`.
+- Nómina: `x-nomina.payroll-workflow` para presentar fases de período sin navegación ni cambios de estado.
 
-`app/View/Components/AppLayout.php` concentra navegación, estado activo de rutas, visibilidad por permisos, usuario actual, rol, empresa actual y empresas disponibles para `super_admin`. `app/Providers/AppServiceProvider.php` complementa esa información para vistas Livewire que usan `components.layouts.app` directamente.
+## Componentes y patrones UI
+
+- Usar tokens semánticos de `resources/css/app.css` (`brand`, `surface`, `border`, `text`, `success`, `warning`, `danger`) antes de agregar colores Tailwind hardcoded.
+- Preferir `x-ui.button` para acciones y enlaces con apariencia de botón. Los enlaces deshabilitados deben retirar `href`, exponer `aria-disabled="true"` y salir del tab order.
+- Usar `x-ui.loading-button` para acciones Livewire mutantes; el `target` debe apuntar a la acción específica para evitar que un loading global bloquee controles no relacionados.
+- Usar `x-ui.loading-overlay` sólo para operaciones de página o panel claramente bloqueantes, con mensaje visible y región anunciable.
+- Usar `x-ui.alert`/`x-ui.feedback` para mensajes de éxito, advertencia y error. Errores que requieren atención usan `role="alert"`; mensajes informativos usan `role="status"`/`aria-live="polite"`.
+- Usar `x-ui.empty-state` para colecciones vacías o filtros sin resultados; el texto debe explicar el próximo paso permitido.
+- En tablas anchas, envolver con una región desplazable nombrada para teclado (`aria-label` o `aria-labelledby`) y conservar encabezados semánticos `<th>`.
+- En modales, exponer `role="dialog"`, `aria-modal="true"`, `aria-labelledby`, foco inicial programático y cierre por Escape. Si el modal muta datos, usar botones de loading action-scoped.
+
+## Cómo agregar nuevas pantallas
+
+1. Confirmar que el cambio es visual. Si toca cálculo de nómina, permisos, multi-tenancy, asistencia, jobs o migraciones, crear Issue/alcance separado.
+2. Montar la pantalla dentro de `x-layouts.app` para heredar navegación, skip link, contexto de empresa y landmarks.
+3. Empezar con `x-ui.page-header`; después organizar contenido en `x-ui.card`, estados vacíos y tablas/regiones nombradas.
+4. Validar roles desde el inicio: `super_admin` sin empresa, `super_admin` con empresa activa, cambio de empresa, `company_admin` con empresa asignada y accesos prohibidos.
+5. Validar responsive por estructura, no por duplicar lógica: desktop, tablet y mobile deben renderizar las mismas acciones autorizadas y el mismo contexto activo.
+6. Agregar loading, error, empty, disabled, processing/processed/locked y danger states donde el flujo ya los tenga. No inventar estados nuevos en PRs visuales.
+
+## Cómo escribir tests UI
+
+- Para componentes Blade puros, usar `Blade::render()` y proteger contratos observables: clases semánticas, roles, `aria-*`, atributos Livewire pass-through y contenido visible.
+- Para pantallas Livewire, usar `Livewire::test()` para abrir estados, disparar acciones y verificar copy, permisos, loading targets, errores y estados vacíos.
+- Para navegación y multi-tenancy, usar tests Feature HTTP con usuarios `super_admin` y `company_admin`; verificar rutas visibles/ocultas, `aria-current`, selector de empresa y restricciones.
+- Todo bug corregible automáticamente debe seguir RED → GREEN: primero una prueba que falle por el contrato roto, después el cambio mínimo, luego refactor si aporta claridad.
+- Los tests de accesibilidad deben cubrir asociación label/control, `aria-describedby`, `aria-invalid`, live regions, disclosure `aria-expanded`/`aria-controls`, dialog semantics, Escape y foco inicial cuando aplique.
+- Los tests responsive automatizables deben proteger markup y estados compartidos; las comprobaciones visuales por breakpoint se documentan en el PR con el dispositivo usado.
+
+## Cómo crear nuevos componentes
+
+1. Crear el componente en `resources/views/components/ui/` sólo si elimina duplicación real o protege un patrón repetido.
+2. Exponer una interfaz pequeña: props de intención (`variant`, `tone`, `size`, `target`, `label`, `hint`, `error`) antes que props de clases sueltas.
+3. Permitir `$attributes` para IDs, `wire:*`, `aria-*`, `data-*` y clases adicionales. No descartar atributos Livewire.
+4. Definir defaults accesibles: `type="button"` para botones no submit, `aria-invalid`, `aria-describedby`, live region correcto, foco visible y estados disabled.
+5. Agregar o actualizar un test en `tests/Feature/Ui/DesignSystemComponentsTest.php` o un archivo UI específico antes de migrar pantallas.
+6. Documentar el patrón aquí si el componente introduce una regla nueva.
+
+## Qué NO debe duplicarse
+
+- Tokens de color semánticos, clases de foco visible y variantes de botón/badge/alert.
+- Lógica de navegación, permisos, contexto activo de empresa o filtros por tenant.
+- Spinners, overlays, loading labels y regiones live por acción.
+- Formularios con label/error/hint hechos a mano cuando `x-ui.input`, `x-ui.select`, `x-ui.textarea`, `x-ui.password-field` o `x-ui.form-field` cubren el caso.
+- Empty states, danger states y copy de bloqueo/locked repetidos sin componente o helper claro.
+- Consultas o cálculos para mostrar una métrica si ya existe un servicio/proyección usado por otra pantalla.
+- IDs de controles, `aria-controls` o `aria-labelledby` generados con el mismo valor en más de una instancia de la página.
 
 ## Fases propuestas
 

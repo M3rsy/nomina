@@ -61,8 +61,8 @@
     </div>
 
     @if ($showCreateModal)
-        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"><div class="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
-            <h2 class="text-lg font-bold text-slate-900">Aprobar vacaciones pagadas</h2><p class="mt-1 text-sm text-slate-600">Solo se consumirán jornadas programadas; descansos y feriados activos se excluirán.</p>
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="vacation-create-title" tabindex="-1" x-data x-ref="dialog" x-init="$nextTick(() => $refs.dialog.focus())" @keydown.escape.window="$wire.closeCreateModal()"><div class="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <h2 id="vacation-create-title" class="text-lg font-bold text-slate-900">Aprobar vacaciones pagadas</h2><p class="mt-1 text-sm text-slate-600">Solo se consumirán jornadas programadas; descansos y feriados activos se excluirán.</p>
             @error('vacation')<p class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ $message }}</p>@enderror
             <div class="mt-4 space-y-4">
                 <label class="block"><span class="text-sm font-medium text-slate-700">Buscar empleado</span><input wire:model.live.debounce.300ms="vacationEmployeeSearch" type="search" placeholder="Nombre, apellido, código o clave…" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"></label>
@@ -75,8 +75,8 @@
     @endif
 
     @if ($showAdjustmentModal)
-        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"><div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <h2 class="text-lg font-bold text-slate-900">Ajustar saldo</h2><p class="mt-1 text-sm text-slate-600">Positivo acredita, negativo descuenta. El saldo puede quedar negativo.</p>
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="vacation-adjustment-title" tabindex="-1" x-data x-ref="dialog" x-init="$nextTick(() => $refs.dialog.focus())" @keydown.escape.window="$wire.closeAdjustmentModal()"><div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <h2 id="vacation-adjustment-title" class="text-lg font-bold text-slate-900">Ajustar saldo</h2><p class="mt-1 text-sm text-slate-600">Positivo acredita, negativo descuenta. El saldo puede quedar negativo.</p>
             <div class="mt-4 space-y-4">
                 <label class="block"><span class="text-sm font-medium text-slate-700">Buscar empleado</span><input wire:model.live.debounce.300ms="adjustmentEmployeeSearch" type="search" placeholder="Nombre, apellido, código o clave…" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"></label>
                 <label class="block"><span class="text-sm font-medium text-slate-700">Empleado</span><select wire:model="employeeId" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"><option value="">Seleccionar…</option>@foreach($adjustmentEmployees as $employee)<option value="{{ $employee->id }}">{{ $employee->full_name }} — saldo {{ (int) ($balances[$employee->id] ?? 0) }}</option>@endforeach</select>@error('employeeId')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror</label>
@@ -88,8 +88,8 @@
     @endif
 
     @if ($showCancelModal)
-        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"><div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <h2 class="text-lg font-bold text-slate-900">Cancelar vacaciones</h2><p class="mt-1 text-sm text-slate-600">Las jornadas dejarán de estar activas y el consumo se revertirá sin borrar el historial.</p>
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="vacation-cancel-title" tabindex="-1" x-data x-ref="dialog" x-init="$nextTick(() => $refs.dialog.focus())" @keydown.escape.window="$wire.set('showCancelModal', false)"><div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <h2 id="vacation-cancel-title" class="text-lg font-bold text-slate-900">Cancelar vacaciones</h2><p class="mt-1 text-sm text-slate-600">Las jornadas dejarán de estar activas y el consumo se revertirá sin borrar el historial.</p>
             @error('vacation')<p class="mt-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{{ $message }}</p>@enderror
             <label class="mt-4 block"><span class="text-sm font-medium text-slate-700">Motivo obligatorio</span><textarea wire:model="cancellationReason" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>@error('cancellationReason')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror @error('cancellation_reason')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror</label>
             <div class="mt-6 flex justify-end gap-2"><button wire:click="$set('showCancelModal', false)" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cerrar</button><x-ui.loading-button wire:click="cancel" target="cancel" loading-label="Cancelando…" class="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Confirmar cancelación</x-ui.loading-button></div>
