@@ -1,10 +1,10 @@
-#!/bin/bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Production deployment script for Nómina.
 # Run from the project root on the VPS after configuring .env.production.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.prod.yml"
 
@@ -20,16 +20,16 @@ fi
 
 unset BACKUP_ARCHIVE_PASSWORD
 # shellcheck source=/dev/null
-source .env.production
+. ./.env.production
 
-missing=()
-[ -z "${DOMAIN:-}" ] && missing+=("DOMAIN")
-[ -z "${DB_PASSWORD:-}" ] && missing+=("DB_PASSWORD")
-[ -z "${APP_KEY:-}" ] && missing+=("APP_KEY")
-[ -z "${BACKUP_ARCHIVE_PASSWORD:-}" ] && missing+=("BACKUP_ARCHIVE_PASSWORD")
+missing=""
+[ -z "${DOMAIN:-}" ] && missing="${missing} DOMAIN"
+[ -z "${DB_PASSWORD:-}" ] && missing="${missing} DB_PASSWORD"
+[ -z "${APP_KEY:-}" ] && missing="${missing} APP_KEY"
+[ -z "${BACKUP_ARCHIVE_PASSWORD:-}" ] && missing="${missing} BACKUP_ARCHIVE_PASSWORD"
 
-if [ ${#missing[@]} -ne 0 ]; then
-    echo "ERROR: The following required variables are missing in .env.production: ${missing[*]}"
+if [ -n "$missing" ]; then
+    echo "ERROR: The following required variables are missing in .env.production:${missing}"
     exit 1
 fi
 
