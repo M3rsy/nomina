@@ -8,12 +8,15 @@ use App\Models\Employee;
 use App\Models\User;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
+use Livewire\Livewire;
 
 beforeEach(function () {
+    /** @var \Tests\TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
 test('super admin paginates all company employees with stable ordering', function () {
+    /** @var \Tests\TestCase $this */
     $companies = Company::factory()->count(2)->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
@@ -44,6 +47,7 @@ test('super admin paginates all company employees with stable ordering', functio
 });
 
 test('company employee filters reset page two and remain tenant scoped', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -76,6 +80,7 @@ test('company employee filters reset page two and remain tenant scoped', functio
 });
 
 test('employees can be filtered to inactive records and filters can be cleared', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     Employee::factory()->forCompany($company)->create(['external_id' => 'CURRENT-RECORD']);
@@ -98,6 +103,7 @@ test('employees can be filtered to inactive records and filters can be cleared',
 });
 
 test('employee list refreshes after nested status and delete actions', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $employee = Employee::factory()->forCompany($company)->create(['external_id' => 'REFRESH-ME']);
@@ -120,7 +126,39 @@ test('employee list refreshes after nested status and delete actions', function 
     expect($employee->fresh()->trashed())->toBeTrue();
 });
 
+test('employee directory presents the Stitch-inspired hierarchy with real result data', function () {
+    /** @var \Tests\TestCase $this */
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create([
+        'first_name' => 'Ana',
+        'last_name' => 'López',
+        'expected_salary' => 1250.50,
+    ]);
+    Employee::factory()->forCompany($company)->create();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->assertSee('Directorio oficial')
+        ->assertSee('Resultados totales')
+        ->assertSee('En esta página')
+        ->assertSee('Búsqueda inactiva')
+        ->assertSee('2 resultados')
+        ->assertSee('2 visibles')
+        ->assertSee('AL')
+        ->assertSee('1,250.50')
+        ->assertSeeHtml('data-employee-section="hero"')
+        ->assertSeeHtml('data-employee-section="metrics"')
+        ->assertSeeHtml('data-employee-section="filters"')
+        ->assertSeeHtml('data-employee-section="directory"')
+        ->assertSeeHtml('data-employee-avatar')
+        ->assertSeeHtml('border-border');
+});
+
 test('employee row actions stay together in one ordered action bar', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     Employee::factory()->forCompany($company)->create();
