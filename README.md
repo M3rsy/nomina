@@ -24,6 +24,13 @@ Sistema multi-tenant de planilla y asistencia construido con Laravel 12, Livewir
    docker compose up -d
    ```
 
+   Para probar el worker de colas local junto con la app y PostgreSQL:
+   ```bash
+   docker compose --profile worker up -d app db worker
+   ```
+
+   Los puertos publicados por el compose de desarrollo se enlazan a `127.0.0.1` para no exponer la app o PostgreSQL fuera de la máquina local.
+
 3. Instalar dependencias y generar clave:
    ```bash
    docker compose exec app composer install
