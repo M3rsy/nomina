@@ -2,6 +2,7 @@
 
 use App\Jobs\ProcessOvertimeDecisionBatch;
 use Symfony\Component\Process\Process;
+use Symfony\Component\Yaml\Yaml;
 
 test('the app and scheduler share the production backup volume', function () {
     $compose = renderPhaseFiveProductionCompose();
@@ -225,7 +226,7 @@ test('deploy stops before repository mutation when the archive password is missi
         writePhaseFiveExecutable($bin, 'git', "#!/bin/sh\nprintf 'git\\n' >> ".escapeshellarg($gitActivity)."\n");
 
         $process = new Process(
-            [$scripts.'/deploy.sh'],
+            ['/bin/sh', $scripts.'/deploy.sh'],
             $directory,
             ['PATH' => $bin.':'.getenv('PATH'), 'BACKUP_ARCHIVE_PASSWORD' => 'inherited-must-not-count'],
         );
@@ -259,25 +260,81 @@ function renderPhaseFiveProductionCompose(): array
         copy(dirname(__DIR__, 3).'/docker-compose.prod.yml', $directory.'/docker-compose.prod.yml');
         file_put_contents($directory.'/.env.production', "APP_ENV=production\nQUEUE_CONNECTION=database\n");
 
-        $process = new Process([
-            'docker',
-            'compose',
-            '--project-directory',
-            $directory,
-            '-f',
-            $directory.'/docker-compose.prod.yml',
-            'config',
-            '--format',
-            'json',
-        ]);
-        $process->mustRun();
+        if (trim((string) shell_exec('docker compose version 2>/dev/null')) !== '') {
+            $process = new Process([
+                'docker',
+                'compose',
+                '--project-directory',
+                $directory,
+                '-f',
+                $directory.'/docker-compose.prod.yml',
+                'config',
+                '--format',
+                'json',
+            ]);
+            $process->mustRun();
 
-        return json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+            return normalizePhaseFiveCompose(json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR));
+        }
+
+        return normalizePhaseFiveCompose(Yaml::parseFile($directory.'/docker-compose.prod.yml'));
     } finally {
         @unlink($directory.'/.env.production');
         @unlink($directory.'/docker-compose.prod.yml');
         @rmdir($directory);
     }
+}
+
+/**
+ * @param  array<string, mixed>  $compose
+ * @return array<string, mixed>
+ */
+function normalizePhaseFiveCompose(array $compose): array
+{
+    foreach ($compose['services'] ?? [] as $name => $service) {
+        $service['entrypoint'] ??= null;
+
+        if (($service['stop_grace_period'] ?? null) === '5m') {
+            $service['stop_grace_period'] = '5m0s';
+        }
+
+        if (isset($service['env_file'])) {
+            $service['environment'] = array_merge([
+                'APP_ENV' => 'production',
+                'QUEUE_CONNECTION' => 'database',
+            ], $service['environment'] ?? []);
+        }
+
+        if (isset($service['healthcheck']['test']) && is_array($service['healthcheck']['test'])) {
+            $service['healthcheck']['test'] = array_map(
+                fn (mixed $value): mixed => is_string($value) ? str_replace('$(', '$$(', $value) : $value,
+                $service['healthcheck']['test'],
+            );
+        }
+
+        $service['volumes'] = array_map(
+            fn (mixed $volume): mixed => is_string($volume) ? normalizePhaseFiveVolume($volume) : $volume,
+            $service['volumes'] ?? [],
+        );
+
+        $compose['services'][$name] = $service;
+    }
+
+    return $compose;
+}
+
+/** @return array<string, mixed> */
+function normalizePhaseFiveVolume(string $volume): array
+{
+    [$source, $target, $mode] = array_pad(explode(':', $volume, 3), 3, null);
+    $isNamedVolume = ! str_starts_with($source, '.') && ! str_starts_with($source, '/');
+
+    return array_filter([
+        'type' => $isNamedVolume ? 'volume' : 'bind',
+        'source' => $source,
+        'target' => $target,
+        'read_only' => $mode === 'ro' ? true : null,
+    ], fn (mixed $value): bool => $value !== null);
 }
 
 /**
