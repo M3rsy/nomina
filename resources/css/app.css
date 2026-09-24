@@ -30,4 +30,12 @@
     --color-danger: #e11d48;
     --color-danger-strong: #be123c;
     --color-danger-subtle: #ffe4e6;
+
+    --color-dashboard-accent: #7c3aed;
+    --color-dashboard-accent-strong: #5b21b6;
+    --color-dashboard-accent-subtle: #ede9fe;
+
+    --color-dashboard-info: #0891b2;
+    --color-dashboard-info-strong: #155e75;
+    --color-dashboard-info-subtle: #cffafe;
 }

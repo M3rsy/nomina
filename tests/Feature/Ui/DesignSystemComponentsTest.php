@@ -217,5 +217,9 @@ test('Tailwind theme exposes the semantic design token families', function () {
         ->toContain('--color-text:')
         ->toContain('--color-success:')
         ->toContain('--color-warning:')
-        ->toContain('--color-danger:');
+        ->toContain('--color-danger:')
+        ->toContain('--color-dashboard-accent:')
+        ->toContain('--color-dashboard-accent-subtle:')
+        ->toContain('--color-dashboard-info:')
+        ->toContain('--color-dashboard-info-subtle:');
 });
