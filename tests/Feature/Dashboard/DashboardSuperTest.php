@@ -6,6 +6,7 @@ use App\Models\Employee;
 use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\User;
+use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
@@ -15,10 +16,12 @@ uses()->beforeEach(function () {
 });
 
 test('guest is redirected from super dashboard', function () {
+    /** @var \Tests\TestCase $this */
     $this->get('/dashboard/super')->assertRedirect('/login');
 });
 
 test('company admin cannot access super dashboard', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $user = User::factory()->create([
         'company_id' => $company->id,
@@ -73,6 +76,7 @@ test('super admin without an active company sees organization snapshots but no p
 });
 
 test('monthly payroll trends aggregate exact active-company values in chronological order', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
 
@@ -138,13 +142,14 @@ test('monthly payroll trends aggregate exact active-company values in chronologi
             '3.00',
         ])
         ->assertSeeHtml('aria-hidden="true"')
-        ->assertSeeHtml('style="width: 100%"')
-        ->assertSeeHtml('style="width: 50%"')
+        ->assertSeeHtml('style="width: 100%;"')
+        ->assertSeeHtml('style="width: 50%;"')
         ->assertDontSee('999.99')
         ->assertDontSee('400.00');
 });
 
 test('monthly payroll trends sum canonical minutes before converting to hours', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
 
     PayrollResult::factory()->forCompany($company)->count(2)->create([
@@ -173,7 +178,44 @@ test('monthly payroll trends sum canonical minutes before converting to hours', 
         ->assertDontSee('0.04');
 });
 
+test('monthly payroll trends default to recent history while explicit dates can include older results', function () {
+    /** @var \Tests\TestCase $this */
+    Carbon::setTestNow('2026-06-15 12:00:00');
+
+    try {
+        $company = Company::factory()->create();
+        PayrollResult::factory()->forCompany($company)->createMany([
+            [
+                'date' => '2025-01-15',
+                'ordinary_minutes' => 999,
+            ],
+            [
+                'date' => '2026-01-15',
+                'ordinary_minutes' => 60,
+            ],
+        ]);
+
+        $super = User::factory()->create(['company_id' => null]);
+        $super->assignRole('super_admin');
+        $this->actingAs($super);
+        session(['active_company_id' => $company->id]);
+
+        Livewire::test(SuperAdmin::class)
+            ->assertSee('Enero de 2026')
+            ->assertDontSee('Enero de 2025');
+
+        Livewire::test(SuperAdmin::class)
+            ->set('from', '2025-01-01')
+            ->set('to', '2025-01-31')
+            ->assertSee('Enero de 2025')
+            ->assertSee('16.65');
+    } finally {
+        Carbon::setTestNow();
+    }
+});
+
 test('monthly payroll trend date filters include both result-date boundaries', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     PayrollResult::factory()->forCompany($company)->createMany([
         [
@@ -225,6 +267,7 @@ test('monthly payroll trend date filters include both result-date boundaries', f
 });
 
 test('monthly payroll trends render the same clear state for empty and filtered history', function () {
+    /** @var \Tests\TestCase $this */
     $emptyCompany = Company::factory()->create();
     $filteredCompany = Company::factory()->create();
     PayrollResult::factory()->forCompany($filteredCompany)->create([
@@ -249,6 +292,7 @@ test('monthly payroll trends render the same clear state for empty and filtered 
 });
 
 test('sparse one-month payroll history exposes stable semantic exact values', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     PayrollResult::factory()->forCompany($company)->create([
         'date' => '2026-05-20',
@@ -284,11 +328,12 @@ test('sparse one-month payroll history exposes stable semantic exact values', fu
             '10.00',
         ])
         ->assertSeeHtml('aria-hidden="true"')
-        ->assertSeeHtml('style="width: 100%"')
+        ->assertSeeHtml('style="width: 100%;"')
         ->assertDontSee('No hay resultados de nómina para la empresa activa en el rango de fechas actual.');
 });
 
 test('active company payroll overview counts every recognized and unknown status without cross-tenant data', function () {
+    /** @var \Tests\TestCase $this */
     $companyA = Company::factory()->create(['name' => 'Empresa Operativa']);
     $companyB = Company::factory()->create(['name' => 'Empresa Externa']);
 
@@ -352,6 +397,7 @@ test('active company payroll overview counts every recognized and unknown status
 });
 
 test('payroll overview date range includes only fully contained active-company periods', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
 
@@ -403,6 +449,7 @@ test('payroll overview date range includes only fully contained active-company p
 });
 
 test('active company with no payroll periods sees an actionable empty state', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create(['name' => 'Empresa sin períodos']);
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
@@ -419,6 +466,7 @@ test('active company with no payroll periods sees an actionable empty state', fu
 });
 
 test('active company with no range matches distinguishes filtered results from no periods', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     PayPeriod::factory()->forCompany($company)->create([
         'start_date' => '2026-02-01',
@@ -441,6 +489,7 @@ test('active company with no range matches distinguishes filtered results from n
 });
 
 test('dashboard redirects super admin to super dashboard', function () {
+    /** @var \Tests\TestCase $this */
     $super = User::factory()->create([
         'company_id' => null,
         'password' => Hash::make('password'),

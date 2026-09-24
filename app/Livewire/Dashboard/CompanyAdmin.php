@@ -169,6 +169,8 @@ class CompanyAdmin extends Component
         $payPeriods = PayPeriod::query()
             ->where('company_id', $companyId)
             ->whereNotNull('metadata')
+            ->latest('updated_at')
+            ->latest('id')
             ->limit(50)
             ->get();
 
@@ -200,6 +202,8 @@ class CompanyAdmin extends Component
         $rawMarks = RawMark::query()
             ->where('company_id', $companyId)
             ->whereNotNull('metadata')
+            ->latest('updated_at')
+            ->latest('id')
             ->limit(50)
             ->get();
 

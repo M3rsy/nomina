@@ -8,6 +8,7 @@ use App\Models\PayrollResult;
 use App\Models\UploadedFile;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 
@@ -16,10 +17,12 @@ uses()->beforeEach(function () {
 });
 
 test('guest is redirected from company dashboard', function () {
+    /** @var \Tests\TestCase $this */
     $this->get('/dashboard/company')->assertRedirect('/login');
 });
 
 test('super admin cannot access company dashboard without company', function () {
+    /** @var \Tests\TestCase $this */
     $super = User::factory()->create([
         'company_id' => null,
         'password' => Hash::make('password'),
@@ -115,6 +118,47 @@ test('company dashboard derives payroll totals from canonical minutes', function
         });
 });
 
+test('recent activity samples the newest payroll metadata rows deterministically', function () {
+    $company = Company::factory()->create();
+
+    PayPeriod::factory()->count(50)->forCompany($company)->create([
+        'metadata' => ['processed_at' => '2024-01-01 12:00:00'],
+        'created_at' => '2024-01-01 12:00:00',
+        'updated_at' => '2024-01-01 12:00:00',
+    ]);
+    PayPeriod::factory()->forCompany($company)->create([
+        'name' => 'Newest metadata period',
+        'metadata' => ['processed_at' => '2026-06-15 12:00:00'],
+        'created_at' => '2026-06-15 12:00:00',
+        'updated_at' => '2026-06-15 12:00:00',
+    ]);
+
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    Livewire::actingAs($admin)
+        ->test(CompanyAdmin::class)
+        ->assertViewHas('recentActivity', function (array $activity): bool {
+            return collect($activity)->contains(
+                fn (array $item): bool => $item['description'] === 'Período Newest metadata period pasó a estado processed',
+            );
+        });
+
+    $sampleQuery = collect(DB::getQueryLog())->first(
+        fn (array $query): bool => str_contains($query['query'], 'pay_periods')
+            && str_contains($query['query'], 'metadata')
+            && str_contains($query['query'], 'limit 50'),
+    );
+
+    expect($sampleQuery)->not->toBeNull()
+        ->and($sampleQuery['query'])->toMatch('/order by .*updated_at.*desc, .*id.*desc/i');
+
+    DB::disableQueryLog();
+});
+
 test('company admin date filter excludes out of range payrolls', function () {
     $company = Company::factory()->create();
 
@@ -143,6 +187,7 @@ test('company admin date filter excludes out of range payrolls', function () {
 });
 
 test('dashboard redirects company admin to company dashboard', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->create([
         'company_id' => $company->id,
@@ -155,7 +200,55 @@ test('dashboard redirects company admin to company dashboard', function () {
     $this->get('/dashboard')->assertRedirect('/dashboard/company');
 });
 
+test('company dashboard presents design-system hierarchy filters and permission-aware quick actions', function () {
+    $company = Company::factory()->create(['name' => 'Empresa Diseño']);
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    Livewire::actingAs($admin)
+        ->test(CompanyAdmin::class)
+        ->assertSee('Panel de Empresa Diseño')
+        ->assertSee('Rango de análisis')
+        ->assertSee('Los períodos y la actividad se actualizan con este rango.')
+        ->assertSee('Acciones rápidas')
+        ->assertSee('Ver nómina')
+        ->assertSee('Subir archivo')
+        ->assertSeeHtml('href="'.route('nomina.index').'"')
+        ->assertSeeHtml('href="'.route('archivos.upload').'"')
+        ->assertSeeHtml('border-border');
+});
+
+test('company dashboard hides quick actions when the user lacks their permissions', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->forCompany($company)->create();
+    $user->givePermissionTo('payroll.view');
+
+    Livewire::actingAs($user)
+        ->test(CompanyAdmin::class)
+        ->assertDontSee('Acciones rápidas')
+        ->assertDontSee('Ver nómina')
+        ->assertDontSee('Subir archivo')
+        ->assertDontSee('Ver empleados')
+        ->assertDontSeeHtml('href="'.route('nomina.index').'"')
+        ->assertDontSeeHtml('href="'.route('archivos.upload').'"')
+        ->assertDontSeeHtml('href="'.route('empleados.index').'"');
+});
+
+test('company dashboard empty collections use semantic actionable states', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    Livewire::actingAs($admin)
+        ->test(CompanyAdmin::class)
+        ->assertSee('Todavía no hay períodos de nómina en el rango seleccionado.')
+        ->assertSee('No hay archivos recientes para mostrar.')
+        ->assertSee('No hay actividad en el rango seleccionado.')
+        ->assertSeeHtml('role="status"');
+});
+
 test('payroll periods table is contained in a named keyboard scroll region', function () {
+    /** @var \Tests\TestCase $this */
     $company = Company::factory()->create();
     PayPeriod::factory()->forCompany($company)->create();
     $admin = User::factory()->forCompany($company)->create();

@@ -142,6 +142,34 @@ test('select associates its option slot and validation metadata', function () {
         ->toContain('<option value="active">Active</option>');
 });
 
+test('dashboard components expose reusable hierarchy and empty-state semantics', function () {
+    $header = Blade::render(<<<'BLADE'
+        <x-ui.page-header title="Payroll overview" description="Current payroll health.">
+            <x-slot:actions>Header action</x-slot:actions>
+        </x-ui.page-header>
+    BLADE);
+    $stat = Blade::render('<x-ui.stat-card label="Active employees" value="24" tone="success">Ready for payroll.</x-ui.stat-card>');
+    $empty = Blade::render('<x-ui.empty-state title="No payroll periods">Adjust the selected dates.</x-ui.empty-state>');
+
+    expect($header)
+        ->toContain('Payroll overview')
+        ->toContain('Current payroll health.')
+        ->toContain('Header action')
+        ->toContain('border-border');
+
+    expect($stat)
+        ->toContain('Active employees')
+        ->toContain('24')
+        ->toContain('Ready for payroll.')
+        ->toContain('text-success-strong');
+
+    expect($empty)
+        ->toContain('role="status"')
+        ->toContain('No payroll periods')
+        ->toContain('Adjust the selected dates.')
+        ->toContain('border-dashed');
+});
+
 test('Tailwind theme exposes the semantic design token families', function () {
     $css = file_get_contents(resource_path('css/app.css'));
 

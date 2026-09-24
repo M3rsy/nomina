@@ -15,6 +15,8 @@ use Livewire\Component;
 #[Layout('components.layouts.app')]
 class SuperAdmin extends Component
 {
+    private const DEFAULT_TREND_LOOKBACK_MONTHS = 12;
+
     #[Url]
     public ?string $from = null;
 
@@ -129,6 +131,14 @@ class SuperAdmin extends Component
 
         $dailyTotals = PayrollResult::withoutCompanyScope()
             ->where('company_id', $companyId)
+            ->when(
+                ! $this->from && ! $this->to,
+                fn ($q) => $q->whereDate(
+                    'date',
+                    '>=',
+                    now()->startOfMonth()->subMonths(self::DEFAULT_TREND_LOOKBACK_MONTHS - 1),
+                ),
+            )
             ->when($this->from, fn ($q) => $q->whereDate('date', '>=', $this->from))
             ->when($this->to, fn ($q) => $q->whereDate('date', '<=', $this->to))
             ->selectRaw(implode(', ', $selects))
