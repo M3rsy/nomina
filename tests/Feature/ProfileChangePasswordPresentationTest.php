@@ -5,6 +5,9 @@ use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Livewire\Livewire;
 
+use function Pest\Laravel\actingAs;
+use function Pest\Laravel\get;
+
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
@@ -33,9 +36,10 @@ test('change password success feedback is announced as status', function () {
     $user = User::factory()->create();
     $user->assignRole('super_admin');
 
-    $response = $this->withSession(['status' => 'Contraseña actualizada correctamente.'])
-        ->actingAs($user)
-        ->get(route('profile.change-password'));
+    actingAs($user);
+    session()->flash('status', 'Contraseña actualizada correctamente.');
+
+    $response = get(route('profile.change-password'));
 
     $response->assertOk();
 
@@ -53,7 +57,7 @@ test('change password fields and submission expose autocomplete and loading feed
     $user = User::factory()->create();
     $user->assignRole('super_admin');
 
-    $response = $this->actingAs($user)->get(route('profile.change-password'));
+    $response = actingAs($user)->get(route('profile.change-password'));
 
     $response->assertOk();
 
@@ -70,4 +74,22 @@ test('change password fields and submission expose autocomplete and loading feed
             $button.'/following-sibling::*[1][@role="status" and @aria-live="polite"]'
             .'/*[@*[name()="wire:loading"] and @*[name()="wire:target"]="save" and normalize-space()="Guardando contraseña..."]',
         )->length)->toBe(1);
+});
+
+test('change password page uses administration design system surfaces', function () {
+    $user = User::factory()->create();
+    $user->assignRole('super_admin');
+
+    $response = actingAs($user)->get(route('profile.change-password'));
+
+    $response->assertOk();
+
+    $document = new DOMDocument;
+    @$document->loadHTML($response->getContent());
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//header[contains(concat(" ", normalize-space(@class), " "), " rounded-3xl ")]//h1[normalize-space()="Cambiar contraseña"]')->length)->toBe(1)
+        ->and($xpath->query('//section[contains(concat(" ", normalize-space(@class), " "), " rounded-3xl ")]//form[@*[name()="wire:submit"]="save"]')->length)->toBe(1)
+        ->and($xpath->query('//section//label[@for="current-password" and contains(concat(" ", normalize-space(@class), " "), " text-text ")]')->length)->toBe(1)
+        ->and($xpath->query('//section//p[@id="new-password-hint" and contains(normalize-space(), "Use al menos 8 caracteres.")]')->length)->toBe(1);
 });

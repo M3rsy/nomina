@@ -6,6 +6,8 @@ use App\Livewire\Auth\ResetPassword;
 use Illuminate\Support\Facades\Password;
 use Livewire\Livewire;
 
+use function Pest\Laravel\get;
+
 function authPresentationXPath(string $html): DOMXPath
 {
     $document = new DOMDocument;
@@ -15,7 +17,7 @@ function authPresentationXPath(string $html): DOMXPath
 }
 
 test('login presents the payroll operations identity without authenticated navigation', function () {
-    $this->get(route('login'))
+    get(route('login'))
         ->assertOk()
         ->assertSee('Centro operativo de nómina')
         ->assertSee('Asistencia y trazabilidad en cada jornada.')
@@ -29,7 +31,7 @@ test('login presents the payroll operations identity without authenticated navig
 });
 
 test('login exposes accessible fields password toggle and loading feedback', function () {
-    $this->get(route('login'))
+    get(route('login'))
         ->assertOk()
         ->assertSee('wire:submit="login"', escape: false)
         ->assertSee('id="login-email"', escape: false)
@@ -58,7 +60,7 @@ test('auth loading feedback uses one live region after each submit button', func
     ];
 
     foreach ($cases as [$route, $target, $message]) {
-        $xpath = authPresentationXPath($this->get($route)->assertOk()->getContent());
+        $xpath = authPresentationXPath(get($route)->assertOk()->getContent());
         $button = '//button[@type="submit" and @*[name()="wire:target"]="'.$target.'"]';
 
         expect($xpath->query($button.'//*[@role="status" or @aria-live]')->length)->toBe(0)
@@ -80,7 +82,7 @@ test('login validation errors are announced and related to their fields', functi
 });
 
 test('forgot password reuses the identity with accessible email and loading feedback', function () {
-    $this->get(route('password.request'))
+    get(route('password.request'))
         ->assertOk()
         ->assertSee('data-auth-shell', escape: false)
         ->assertSee('Centro operativo de nómina')
@@ -104,9 +106,11 @@ test('forgot password announces validation errors and successful feedback', func
         ->assertSeeHtml('aria-describedby="forgot-email-error"')
         ->assertSeeHtml('id="forgot-email-error" role="alert"');
 
-    Livewire::test(ForgotPassword::class)
-        ->set('status', 'Enlace enviado.')
-        ->assertSeeHtml('id="forgot-status" role="status" aria-live="polite"');
+    $component = Livewire::test(ForgotPassword::class)
+        ->set('status', 'Enlace enviado.');
+    $xpath = authPresentationXPath($component->html());
+
+    expect($xpath->query('//div[@id="forgot-status" and @role="status" and @aria-live="polite"]')->length)->toBe(1);
 });
 
 test('forgot password presents localized success feedback and clears the email', function () {
@@ -117,17 +121,19 @@ test('forgot password presents localized success feedback and clears the email',
         ->with(['email' => $email])
         ->andReturn(Password::RESET_LINK_SENT);
 
-    Livewire::test(ForgotPassword::class)
+    $component = Livewire::test(ForgotPassword::class)
         ->set('email', $email)
         ->call('sendResetLink')
         ->assertSet('status', 'Le enviamos un enlace para restablecer su contraseña.')
         ->assertSet('email', '')
-        ->assertSee('Le enviamos un enlace para restablecer su contraseña.')
-        ->assertSeeHtml('id="forgot-status" role="status" aria-live="polite"');
+        ->assertSee('Le enviamos un enlace para restablecer su contraseña.');
+    $xpath = authPresentationXPath($component->html());
+
+    expect($xpath->query('//div[@id="forgot-status" and @role="status" and @aria-live="polite"]')->length)->toBe(1);
 });
 
 test('reset password reuses the identity with new password controls and loading feedback', function () {
-    $response = $this->get(route('password.reset', ['token' => 'presentation-token']));
+    $response = get(route('password.reset', ['token' => 'presentation-token']));
 
     $response
         ->assertOk()
