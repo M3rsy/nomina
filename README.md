@@ -61,6 +61,23 @@ docker compose run --rm --no-deps \
     app composer test
 ```
 
+PostgreSQL isolation suite:
+
+```bash
+docker compose up -d db
+TEST_DB_HOST=127.0.0.1 \
+TEST_DB_PORT=55432 \
+TEST_DB_DATABASE=nomina_test \
+TEST_DB_USERNAME=nomina_test \
+TEST_DB_PASSWORD=nomina_test \
+NOMINA_ALLOW_DESTRUCTIVE_TEST_DATABASE=nomina_test@postgresql-v1 \
+./vendor/bin/pest -c phpunit.postgresql.xml
+```
+
+The PostgreSQL suite is intentionally destructive and only runs when the live
+connection resolves to the dedicated `nomina_test` database and user. Do not
+point `pgsql_testing` at development or production data.
+
 ## Estructura del proyecto
 
 - `app/Services/Payroll/` — motor de cálculo de planilla y reglas de horas.
