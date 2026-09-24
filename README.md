@@ -78,6 +78,22 @@ The PostgreSQL suite is intentionally destructive and only runs when the live
 connection resolves to the dedicated `nomina_test` database and user. Do not
 point `pgsql_testing` at development or production data.
 
+## Reverse proxy trust
+
+By default, local/direct requests do not trust `X-Forwarded-*` headers. In
+production behind nginx or another explicit reverse proxy, set
+`TRUSTED_PROXIES` to the proxy IPs or CIDR ranges that are allowed to provide
+forwarded client metadata:
+
+```env
+TRUSTED_PROXIES=172.20.0.0/16,10.0.0.10
+```
+
+Do not use wildcard proxy trust unless the application is unreachable except
+through the documented proxy boundary. The app accepts only `X-Forwarded-For`,
+`X-Forwarded-Host`, `X-Forwarded-Port`, and `X-Forwarded-Proto` from trusted
+proxies.
+
 ## Estructura del proyecto
 
 - `app/Services/Payroll/` — motor de cálculo de planilla y reglas de horas.
