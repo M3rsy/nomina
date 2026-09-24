@@ -539,6 +539,32 @@ test('payment code is optional, shared within a company, and normalized to null'
     expect($employee->fresh()->payment_code)->toBeNull();
 });
 
+test('employee create presents the registration workflow in semantic sections', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->assertSee('Gestión de Personal')
+        ->assertSee('Alta de colaborador')
+        ->assertSee('Registrar Nuevo Empleado')
+        ->assertSee('Información personal e identidad')
+        ->assertSee('Información laboral y compensación')
+        ->assertSee('Asignación de jornada')
+        ->assertSee('Notas y configuración')
+        ->assertSeeHtml('data-employee-create-personal')
+        ->assertSeeHtml('data-employee-create-employment')
+        ->assertSeeHtml('data-employee-create-schedule')
+        ->assertSeeHtml('data-employee-create-notes')
+        ->assertSeeHtml('data-employee-create-actions')
+        ->assertSeeHtml('wire:submit="save"')
+        ->assertSeeHtml('href="/empleados"')
+        ->assertDontSee('Guardar borrador')
+        ->assertDontSee('Sincronizar');
+});
+
 test('employee forms share accessible domain sections while preserving edit histories', function () {
     /** @var TestCase $this */
     $company = Company::factory()->create();
