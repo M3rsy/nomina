@@ -26,9 +26,9 @@ The forecast exceeds the 400-line review budget. The maintainer selected the thr
 
 ## Work Unit 1 — Shared status presentation and period overview
 
-**Start:** Existing inline status presentation and Index behavior are unchanged.  
-**Finish:** A presentation-only status/workflow seam drives a responsive, permission-correct Index while lifecycle, tenancy, creation, deletion, and navigation behavior remain exact.  
-**Dependency:** None after the delivery decision.  
+**Start:** Existing inline status presentation and Index behavior are unchanged.
+**Finish:** A presentation-only status/workflow seam drives a responsive, permission-correct Index while lifecycle, tenancy, creation, deletion, and navigation behavior remain exact.
+**Dependency:** None after the delivery decision.
 **Rollback boundary:** Revert `app/Support/Nomina/PayPeriodStatusPresentation.php`, `resources/views/components/nomina/payroll-workflow.blade.php`, any shared dialog added by this slice, Index-only wiring/view changes, and their tests; no data rollback is needed.
 
 ### RED
@@ -58,9 +58,9 @@ The forecast exceeds the 400-line review budget. The maintainer selected the thr
 
 ## Work Unit 2 — Processed results and approval confirmation
 
-**Start:** Work Unit 1 is available, and `Procesar` still performs immediate approval.  
-**Finish:** Results/finalization uses shared status context and explicit accessible confirmation while the existing server-authorized, row-locked `processed` → `approved` path remains authoritative.  
-**Dependency:** Shared status/workflow seam from Work Unit 1.  
+**Start:** Work Unit 1 is available, and `Procesar` still performs immediate approval.
+**Finish:** Results/finalization uses shared status context and explicit accessible confirmation while the existing server-authorized, row-locked `processed` → `approved` path remains authoritative.
+**Dependency:** Shared status/workflow seam from Work Unit 1.
 **Rollback boundary:** Revert only `app/Livewire/Nomina/Procesar.php`, `resources/views/livewire/nomina/procesar.blade.php`, Procesar-specific shared-dialog adoption, and `VistaPreviaTest`/`AprobarNominaTest` changes; preserve the original row-locked approval transaction and persisted approval metadata.
 
 ### RED
@@ -87,9 +87,9 @@ The forecast exceeds the 400-line review budget. The maintainer selected the thr
 
 ## Work Unit 3 — Payroll/overtime progress and overtime review panel
 
-**Start:** Existing child interfaces, polling, counters, and parent event contracts are unchanged.  
-**Finish:** Payroll progress remains qualitative, overtime batch progress is truthfully determinate, and the overtime panel is accessible/responsive without changing decisions or the frozen parent.  
-**Dependency:** Reusable dialog may come from Work Unit 1; no dependency on Work Unit 2 behavior.  
+**Start:** Existing child interfaces, polling, counters, and parent event contracts are unchanged.
+**Finish:** Payroll progress remains qualitative, overtime batch progress is truthfully determinate, and the overtime panel is accessible/responsive without changing decisions or the frozen parent.
+**Dependency:** Reusable dialog may come from Work Unit 1; no dependency on Work Unit 2 behavior.
 **Rollback boundary:** Revert only allowed progress/panel component/view changes and their focused tests; parent `Revisar` files, jobs, requesters/recorders, stored batches, and event contracts remain untouched.
 
 ### RED

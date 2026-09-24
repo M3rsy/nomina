@@ -1,6 +1,8 @@
 <?php
 
+use App\Livewire\Empleados\Delete;
 use App\Livewire\Empleados\Index;
+use App\Livewire\Empleados\ToggleActivate;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
@@ -71,6 +73,51 @@ test('company employee filters reset page two and remain tenant scoped', functio
         ->set('filter', 'all')
         ->assertSee('INACTIVE-EMPLOYEE')
         ->assertDontSee('OTHER-COMPANY');
+});
+
+test('employees can be filtered to inactive records and filters can be cleared', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create(['external_id' => 'CURRENT-RECORD']);
+    Employee::factory()->inactive()->forCompany($company)->create(['external_id' => 'DORMANT-RECORD']);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->set('filter', 'inactive')
+        ->set('search', 'DORMANT')
+        ->assertSee('DORMANT-RECORD')
+        ->assertDontSee('CURRENT-RECORD')
+        ->assertSee('1 resultado')
+        ->call('clearFilters')
+        ->assertSet('filter', 'active')
+        ->assertSet('search', '')
+        ->assertSee('CURRENT-RECORD')
+        ->assertDontSee('DORMANT-RECORD');
+});
+
+test('employee list refreshes after nested status and delete actions', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $employee = Employee::factory()->forCompany($company)->create(['external_id' => 'REFRESH-ME']);
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(ToggleActivate::class, ['employee' => $employee])
+        ->call('toggle')
+        ->assertDispatched('employee-status-changed');
+
+    expect($employee->fresh()->is_active)->toBeFalse();
+
+    $employee->update(['is_active' => true]);
+
+    Livewire::test(Delete::class, ['employee' => $employee->fresh()])
+        ->call('destroy')
+        ->assertDispatched('employee-deleted');
+
+    expect($employee->fresh()->trashed())->toBeTrue();
 });
 
 test('employee row actions stay together in one ordered action bar', function () {

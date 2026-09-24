@@ -22,6 +22,9 @@ class ToggleActivate extends Component
         $this->employee->update([
             'is_active' => ! $this->employee->is_active,
         ]);
+        $this->employee->refresh();
+
+        $this->dispatch('employee-status-changed');
     }
 
     public function render()

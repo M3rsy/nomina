@@ -3,7 +3,10 @@
 namespace App\Livewire\Empleados;
 
 use App\Models\Employee;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -26,13 +29,35 @@ class Index extends Component
         $this->resetPage();
     }
 
+    public function clearFilters(): void
+    {
+        $this->reset('search');
+        $this->filter = 'active';
+        $this->resetPage();
+    }
+
+    #[On('employee-deleted')]
+    #[On('employee-status-changed')]
+    public function refreshEmployees(): void
+    {
+        $this->resetPage();
+    }
+
     public function render()
     {
         $this->authorize('viewAny', Employee::class);
 
+        /** @var User $user */
+        $user = Auth::user();
+        $isSuperAdmin = $user->hasRole('super_admin');
+
         $employees = Employee::query()
+            ->with('company')
             ->when($this->filter === 'active', function ($query) {
                 $query->where('is_active', true);
+            })
+            ->when($this->filter === 'inactive', function ($query) {
+                $query->where('is_active', false);
             })
             ->when($this->search, function ($query) {
                 $search = '%'.$this->search.'%';
@@ -51,6 +76,7 @@ class Index extends Component
 
         return view('livewire.empleados.index', [
             'employees' => $employees,
+            'isSuperAdmin' => $isSuperAdmin,
         ]);
     }
 }
