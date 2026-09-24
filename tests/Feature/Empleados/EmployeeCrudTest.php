@@ -539,6 +539,29 @@ test('payment code is optional, shared within a company, and normalized to null'
     expect($employee->fresh()->payment_code)->toBeNull();
 });
 
+test('employee forms share accessible domain sections while preserving edit histories', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $employee = Employee::factory()->forCompany($company)->create();
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->assertSeeHtml('data-employee-common-fields')
+        ->assertSeeHtml('data-employee-schedule-fields')
+        ->call('save')
+        ->assertHasErrors(['external_id', 'first_name', 'last_name'])
+        ->assertSeeHtml('aria-invalid="true"')
+        ->assertSeeHtml('role="alert"');
+
+    Livewire::test(Edit::class, ['employee' => $employee])
+        ->assertSeeHtml('data-employee-common-fields')
+        ->assertSeeHtml('data-employee-position-history')
+        ->assertSeeHtml('data-employee-schedule-history')
+        ->assertSeeHtml('data-employee-schedule-fields');
+});
+
 test('employee code remains required and employee screens distinguish it from clave', function () {
     /** @var TestCase $this */
     $company = Company::factory()->create();
