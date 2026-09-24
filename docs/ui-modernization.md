@@ -92,6 +92,30 @@ Los componentes reutilizables disponibles son:
 - Consultas o cálculos para mostrar una métrica si ya existe un servicio/proyección usado por otra pantalla.
 - IDs de controles, `aria-controls` o `aria-labelledby` generados con el mismo valor en más de una instancia de la página.
 
+## Estado por fases
+
+### Fase 2 — Application shell / navegación
+
+Issue de formalización: [#319](https://github.com/M3rsy/nomina/issues/319).
+
+Estado: la implementación histórica en `components/layouts/app.blade.php` satisface la fase de shell/navegación sin requerir un rediseño adicional en esta integración. La app usa un shell autenticado con navegación superior sticky y panel móvil, no un sidebar persistente; se considera equivalente funcional para el alcance actual porque cubre:
+
+- skip link a `#main-content` y landmark `<main>` enfocable;
+- navegación primaria y grupo de gestión con `aria-current="page"`;
+- visibilidad por permisos/rol desde `AppLayout` sin duplicar autorización en Blade;
+- contexto de empresa para `super_admin`, incluyendo selector explícito y estado `aria-current="true"`;
+- contexto fijo para `company_admin` sin selector cross-tenant;
+- navegación móvil con secciones nombradas, cierre por Escape y limpieza de estado al cambiar breakpoint;
+- disclosures nativos con `aria-expanded`, `aria-controls`, foco de retorno, `focusout` y sin roles de menú ARIA incorrectos.
+
+Cobertura vigente:
+
+- `tests/Feature/Navigation/AuthenticatedNavigationTest.php` protege rutas activas, navegación permitida/oculta por rol, selector de empresa, semántica de disclosures, Escape, responsive cleanup, contexto activo y ausencia de navegación autenticada en login.
+- `tests/Feature/MultiTenant/CurrentCompanyContextTest.php` protege el cambio explícito de empresa y rechazos de company admin/inputs inválidos.
+- `tests/Feature/Dashboard/*` y pantallas de administración/nómina protegen que el shell no cambie acceso, permisos ni tenant scope.
+
+Regla de continuación: cualquier futuro cambio visual de shell/sidebar debe conservar esos contratos antes de agregar estilos o reordenar navegación. No se debe introducir un sidebar persistente sólo por estética si duplica navegación, rompe el selector de empresa o aumenta el coste de revisión.
+
 ## Fases propuestas
 
 1. **Baseline y reglas de trabajo**
