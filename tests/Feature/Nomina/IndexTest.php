@@ -427,6 +427,48 @@ test('manual period creation validates its input contract', function (array $val
     ],
 ]);
 
+test('payroll index presents the management hierarchy and summaries from visible periods', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    PayPeriod::factory()->forCompany($company)->create(['status' => 'draft']);
+    PayPeriod::factory()->forCompany($company)->create(['status' => 'approved']);
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->assertSeeHtml('data-payroll-index')
+        ->assertSeeText('Gestión de Nómina')
+        ->assertSeeText('Ciclos y Calendario')
+        ->assertSeeText('Períodos de Nómina')
+        ->assertSeeHtml('data-payroll-summary')
+        ->assertSeeHtml('data-summary-visible-periods="2"')
+        ->assertSeeHtml('data-summary-draft-periods="1"')
+        ->assertSeeHtml('data-summary-completed-periods="1"')
+        ->assertSeeHtml('data-summary-available-actions')
+        ->assertSeeText('Períodos visibles')
+        ->assertSeeText('Borradores')
+        ->assertSeeText('Finalizados')
+        ->assertSeeText('Acciones disponibles');
+});
+
+test('period creation panel uses a guided three-step presentation without changing its form contract', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    indexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->call('openCreateForm')
+        ->assertSeeHtml('data-create-period-steps')
+        ->assertSeeText('Identificá el período')
+        ->assertSeeText('Definí las fechas')
+        ->assertSeeText('Continuá con la carga')
+        ->assertSeeHtml('wire:submit="store"')
+        ->assertSeeHtml('wire:click="closeCreateForm"');
+});
+
 test('period overview renders canonical status copy and five workflow phases', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
