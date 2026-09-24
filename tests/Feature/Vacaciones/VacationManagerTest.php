@@ -218,6 +218,33 @@ test('vacations page requires permissions and renders company data', function ()
     Livewire::actingAs($unauthorized)->test(Index::class)->assertForbidden();
 });
 
+test('vacation modals expose dialog semantics and escape dismiss controls', function () {
+    $context = vacationContext();
+    $vacation = app(VacationManager::class)->approve(
+        $context['company'],
+        $context['employee'],
+        '2026-09-10',
+        '2026-09-10',
+        null,
+        $context['actor'],
+    );
+
+    Livewire::actingAs($context['actor'])->test(Index::class)
+        ->call('openCreateModal')
+        ->assertSee('role="dialog"', false)
+        ->assertSee('aria-modal="true"', false)
+        ->assertSee('aria-labelledby="vacation-create-title"', false)
+        ->assertSee('@keydown.escape.window="$wire.closeCreateModal()"', false)
+        ->call('closeCreateModal')
+        ->call('openAdjustmentModal')
+        ->assertSee('aria-labelledby="vacation-adjustment-title"', false)
+        ->assertSee('@keydown.escape.window="$wire.closeAdjustmentModal()"', false)
+        ->call('closeAdjustmentModal')
+        ->call('confirmCancellation', $vacation->id)
+        ->assertSee('aria-labelledby="vacation-cancel-title"', false)
+        ->assertSee('@keydown.escape.window="$wire.set(\'showCancelModal\', false)"', false);
+});
+
 /** @return array{company: Company, actor: User, employee: Employee} */
 function vacationContext(): array
 {
