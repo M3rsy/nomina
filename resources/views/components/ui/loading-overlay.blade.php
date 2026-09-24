@@ -10,7 +10,7 @@
     aria-live="polite"
     aria-atomic="true"
     style="display: none;"
-    class="absolute inset-0 z-40 items-center justify-center rounded-[inherit] bg-white/85 p-6 backdrop-blur-sm"
+    {{ $attributes->class('absolute inset-0 z-40 items-center justify-center rounded-[inherit] bg-white/85 p-6 backdrop-blur-sm') }}
 >
     <div class="flex max-w-sm items-center gap-3 rounded-2xl border border-indigo-100 bg-white px-5 py-4 text-sm font-semibold text-slate-800 shadow-lg">
         <svg class="size-5 shrink-0 animate-spin text-indigo-600 motion-reduce:animate-none" viewBox="0 0 24 24" fill="none" aria-hidden="true">
