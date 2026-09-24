@@ -1,0 +1,52 @@
+---
+# OpenSpec project context for Nómina
+schema: spec-driven
+strict_tdd: true
+
+context: |
+  Nómina is a multi-tenant payroll and attendance system built with PHP 8.5,
+  Laravel 12, Livewire 3, Tailwind CSS 4, Vite, and PostgreSQL 15.
+  Domain logic lives primarily under app/Services/Payroll and
+  app/Services/Attendance; UI components live under app/Livewire.
+  Tenant-owned domain data is scoped by company_id. Pest 3 covers Unit and
+  Feature tests with in-memory SQLite; PostgreSQL-specific
+  constraints and concurrency behavior use phpunit.postgresql.xml.
+
+rules:
+  proposal:
+    require_problem_statement: true
+  spec:
+    require_acceptance_criteria: true
+    scenario_format: given_when_then
+  design:
+    require_tradeoffs: true
+    preserve_tenant_isolation: true
+  tasks:
+    protect_review_workload: true
+    review_budget_lines: 400
+  apply:
+    test_command: "composer test"
+    require_strict_tdd: true
+  verify:
+    test_command: "composer test"
+    compare_against_spec_scenarios: true
+  archive:
+    preserve_audit_trail: true
+
+testing:
+  runner:
+    command: "composer test"
+    framework: "Pest 3 with PHPUnit"
+    database: "SQLite in-memory"
+  layers:
+    unit: "./vendor/bin/pest tests/Unit"
+    integration: "./vendor/bin/pest tests/Feature"
+    postgresql: "./vendor/bin/pest -c phpunit.postgresql.xml"
+  ci:
+    build: "npm run build"
+    default_suite: "composer test"
+    postgresql_suite: "./vendor/bin/pest -c phpunit.postgresql.xml"
+
+quality:
+  format: "./vendor/bin/pint"
+  frontend_build: "npm run build"
