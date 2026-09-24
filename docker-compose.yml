@@ -4,8 +4,9 @@ services:
             context: .
             dockerfile: Dockerfile
         container_name: nomina-app
+        restart: unless-stopped
         ports:
-            - "8000:8000"
+            - "127.0.0.1:8000:8000"
         environment:
             APP_ENV: local
             APP_KEY: ${APP_KEY}
@@ -18,6 +19,8 @@ services:
             DB_DATABASE: nomina
             DB_USERNAME: nomina
             DB_PASSWORD: secret
+            QUEUE_CONNECTION: database
+            DB_QUEUE_RETRY_AFTER: 360
         depends_on:
             - db
         volumes:
@@ -25,15 +28,54 @@ services:
         networks:
             - nomina
 
+    worker:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: nomina-worker
+        profiles:
+            - worker
+        restart: unless-stopped
+        stop_grace_period: 5m
+        environment:
+            APP_ENV: local
+            APP_KEY: ${APP_KEY}
+            APP_DEBUG: "true"
+            APP_LOCALE: es
+            APP_TIMEZONE: America/Tegucigalpa
+            DB_CONNECTION: pgsql
+            DB_HOST: nomina-db
+            DB_PORT: 5432
+            DB_DATABASE: nomina
+            DB_USERNAME: nomina
+            DB_PASSWORD: secret
+            QUEUE_CONNECTION: database
+            DB_QUEUE_RETRY_AFTER: 360
+        depends_on:
+            - db
+        volumes:
+            - .:/var/www/html
+        command:
+            - php
+            - artisan
+            - queue:work
+            - --sleep=3
+            - --tries=30
+            - --timeout=240
+            - --max-time=3600
+        networks:
+            - nomina
+
     db:
         image: postgres:15-alpine
         container_name: nomina-db
+        restart: unless-stopped
         environment:
             POSTGRES_DB: nomina
             POSTGRES_USER: nomina
             POSTGRES_PASSWORD: secret
         ports:
-            - "5432:5432"
+            - "127.0.0.1:5432:5432"
         volumes:
             - nomina-db-data:/var/lib/postgresql/data
         networks:

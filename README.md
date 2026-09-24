@@ -24,6 +24,13 @@ Sistema multi-tenant de planilla y asistencia construido con Laravel 12, Livewir
    docker compose up -d
    ```
 
+   Para probar el worker de colas local junto con la app y PostgreSQL:
+   ```bash
+   docker compose --profile worker up -d app db worker
+   ```
+
+   Los puertos publicados por el compose de desarrollo se enlazan a `127.0.0.1` para no exponer la app o PostgreSQL fuera de la máquina local.
+
 3. Instalar dependencias y generar clave:
    ```bash
    docker compose exec app composer install
@@ -88,6 +95,22 @@ Para limpiar datos operativos de una demo sin borrar empleados ni su configuraci
 ```
 
 El modo `--dry-run` muestra el inventario explícito de tablas y rutas que serían limpiadas. La ejecución real mantiene la confirmación tipada y el guard de producción; `--force` solo debe usarse en bases desechables o entornos de presentación controlados.
+
+## Reverse proxy trust
+
+By default, local/direct requests do not trust `X-Forwarded-*` headers. In
+production behind nginx or another explicit reverse proxy, set
+`TRUSTED_PROXIES` to the proxy IPs or CIDR ranges that are allowed to provide
+forwarded client metadata:
+
+```env
+TRUSTED_PROXIES=172.20.0.0/16,10.0.0.10
+```
+
+Do not use wildcard proxy trust unless the application is unreachable except
+through the documented proxy boundary. The app accepts only `X-Forwarded-For`,
+`X-Forwarded-Host`, `X-Forwarded-Port`, and `X-Forwarded-Proto` from trusted
+proxies.
 
 ## Estructura del proyecto
 
