@@ -14,36 +14,72 @@ Sistema multi-tenant de planilla y asistencia construido con Laravel 12, Livewir
 
 ## Desarrollo local
 
-1. Copiar variables de entorno:
-   ```bash
-   cp .env.example .env
-   ```
+### Entorno recomendado
 
-2. Levantar servicios:
-   ```bash
-   docker compose up -d
-   ```
+- **Windows:** usar WSL2 con Ubuntu y Docker Desktop con la integración de WSL habilitada. Clonar el repositorio dentro del sistema de archivos de Ubuntu y ejecutar ahí los comandos; evitá trabajar desde `/mnt/c` para obtener mejor rendimiento y permisos más predecibles.
+- **Linux y macOS:** usar Docker con `docker compose` directamente desde la terminal.
 
-   Para probar el worker de colas local junto con la app y PostgreSQL:
-   ```bash
-   docker compose --profile worker up -d app db worker
-   ```
+Hay dos plantillas de entorno, según cómo se ejecuten los servicios:
 
-   Los puertos publicados por el compose de desarrollo se enlazan a `127.0.0.1` para no exponer la app o PostgreSQL fuera de la máquina local.
+| Entorno | Comando | Host de PostgreSQL |
+| --- | --- | --- |
+| Docker Compose | `cp .env.docker.example .env` | `DB_HOST=nomina-db` |
+| Lerd o servicios nativos | `cp .env.lerd.example .env` | `DB_HOST=lerd-postgres` |
 
-3. Instalar dependencias y generar clave:
-   ```bash
-   docker compose exec app composer install
-   docker compose exec app php artisan key:generate
-   docker compose exec app php artisan migrate --seed
-   docker compose exec app npm install
-   docker compose exec app npm run dev
-   ```
+No mezclar las plantillas: los nombres de host dependen de la red de cada entorno.
 
-4. Abrir http://localhost:8000 e iniciar sesión con:
-   - Super admin: `admin@nomina.test` / `password`
-   - Admin Empresa A: `admin_a@empresa-a.test` / `password`
-   - Admin Empresa B: `admin_b@empresa-b.test` / `password`
+### Instalación recomendada con Docker
+
+Este flujo es el mismo en Ubuntu sobre WSL2, Linux y macOS:
+
+```bash
+git clone <URL_DEL_REPOSITORIO>
+cd nomina
+cp .env.docker.example .env
+docker compose up -d --build
+docker compose exec app php artisan key:generate
+docker compose up -d --force-recreate
+docker compose exec app php artisan migrate --seed
+```
+
+La recreación carga en los contenedores la clave generada en `.env`. Luego abrí http://localhost:8000 e iniciá sesión con alguno de los usuarios de demostración:
+
+- Super admin: `admin@nomina.test` / `password`
+- Admin Empresa A: `admin_a@empresa-a.test` / `password`
+- Admin Empresa B: `admin_b@empresa-b.test` / `password`
+
+Los puertos de desarrollo se enlazan a `127.0.0.1`, por lo que la aplicación y PostgreSQL no quedan expuestos fuera de la máquina local.
+
+#### Instalación limpia, sin datos de demostración
+
+En lugar de `php artisan migrate --seed`, ejecutá las migraciones, sembrá solamente permisos y roles, y creá un super admin. Cambiá el correo y la contraseña antes de ejecutar el último comando:
+
+```bash
+docker compose exec app php artisan migrate
+docker compose exec app php artisan db:seed --class=PermissionRoleSeeder
+docker compose exec app php artisan tinker --execute='$user = App\Models\User::updateOrCreate(["email" => "admin@example.com"], ["name" => "Super Admin", "password" => Illuminate\Support\Facades\Hash::make("cambiar-esta-clave"), "company_id" => null, "is_active" => true]); $user->syncRoles("super_admin");'
+```
+
+Esta variante no crea empresas ni empleados de demostración.
+
+### Comandos operativos
+
+```bash
+# Iniciar la aplicación y PostgreSQL
+docker compose up -d
+
+# Detener los contenedores
+docker compose down
+
+# Seguir los logs de la aplicación
+docker compose logs -f app
+
+# Abrir una shell en la aplicación
+docker compose exec app sh
+
+# Iniciar el worker de colas
+docker compose --profile worker up -d worker
+```
 
 ## Tests
 
