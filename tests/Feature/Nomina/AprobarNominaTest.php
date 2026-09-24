@@ -10,9 +10,22 @@ use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
+
+function aprobarNominaTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    aprobarNominaTestCase()->seed(PermissionRoleSeeder::class);
 });
 
 function setupPayPeriodForApproval(): array
@@ -39,10 +52,12 @@ function setupPayPeriodForApproval(): array
 test('approve changes pay period status from processed to approved', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
+        ->call('requestApprovalConfirmation')
+        ->assertSet('showApprovalConfirmation', true)
         ->call('approve')
         ->assertHasNoErrors();
 
@@ -56,7 +71,7 @@ test('approve changes pay period status from processed to approved', function ()
 test('approve cannot overwrite a period reopened before the transition lock', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     $component = Livewire::test(Procesar::class, ['payPeriod' => $payPeriod]);
@@ -75,7 +90,10 @@ test('approve cannot overwrite a period reopened before the transition lock', fu
             ->update(['status' => 'validating']);
     });
 
-    $component->call('approve')->assertHasNoErrors();
+    $component
+        ->call('requestApprovalConfirmation')
+        ->call('approve')
+        ->assertHasNoErrors();
     $armed = false;
 
     expect($raceTriggered)->toBeTrue()
@@ -83,17 +101,26 @@ test('approve cannot overwrite a period reopened before the transition lock', fu
         ->and($payPeriod->fresh()->payrollResults()->count())->toBe(1);
 });
 
-test('approve action is displayed without a confirmation modal', function () {
+test('approval requires an accessible confirmation before mutating payroll', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
         ->assertSee('Aprobar nómina')
-        ->assertDontSee('Confirmar aprobación');
+        ->call('approve')
+        ->assertSet('showApprovalConfirmation', false)
+        ->assertHasNoErrors()
+        ->call('requestApprovalConfirmation')
+        ->assertSet('showApprovalConfirmation', true)
+        ->assertSee('Confirmar aprobación')
+        ->assertSee('Esta acción registra quién aprobó la nómina y habilita la exportación.')
+        ->call('cancelApprovalConfirmation')
+        ->assertSet('showApprovalConfirmation', false);
 
-    expect($payPeriod->fresh()->status)->toBe('processed');
+    expect($payPeriod->fresh()->status)->toBe('processed')
+        ->and($payPeriod->fresh()->metadata['approved_at'] ?? null)->toBeNull();
 });
 
 test('results review reads only the current frozen generation and exposes evidence without mutations', function () {
@@ -105,7 +132,7 @@ test('results review reads only the current frozen generation and exposes eviden
         'employee_name' => 'Stale result',
     ]);
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -121,7 +148,7 @@ test('approve is blocked when pay period is already approved or exported', funct
     $payPeriod->status = $status;
     $payPeriod->save();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -138,21 +165,22 @@ test('user without payroll approve permission cannot approve', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
     $admin->roles->first()->revokePermissionTo('payroll.approve');
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
-        ->call('approve')
+        ->call('requestApprovalConfirmation')
         ->assertStatus(403);
 });
 
 test('locked is true after approving', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     $component = Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
+        ->call('requestApprovalConfirmation')
         ->call('approve');
 
     $component->assertSet('locked', true);
@@ -161,11 +189,12 @@ test('locked is true after approving', function () {
 test('excel export is exposed only after payroll approval', function () {
     [$company, $payPeriod, $employee, $admin] = setupPayPeriodForApproval();
 
-    $this->actingAs($admin);
+    aprobarNominaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
         ->assertDontSee('Generar Excel')
+        ->call('requestApprovalConfirmation')
         ->call('approve')
         ->assertSee('Generar Excel');
 });

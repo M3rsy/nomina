@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Nomina\PayPeriodStatusPresentation;
 use Illuminate\Support\Facades\Blade;
 
 test('button exposes variants disabled semantics and Livewire attribute pass-through', function () {
@@ -168,6 +169,42 @@ test('dashboard components expose reusable hierarchy and empty-state semantics',
         ->toContain('No payroll periods')
         ->toContain('Adjust the selected dates.')
         ->toContain('border-dashed');
+});
+
+test('payroll workflow presents five descriptive phases and the current stored status', function () {
+    $presentation = PayPeriodStatusPresentation::for('validating');
+    $phases = PayPeriodStatusPresentation::phases();
+
+    $html = Blade::render(
+        '<x-nomina.payroll-workflow :phases="$phases" :presentation="$presentation" />',
+        compact('phases', 'presentation'),
+    );
+
+    expect($html)
+        ->toContain('aria-label="Flujo de nómina"')
+        ->toContain('aria-current="step"')
+        ->toContain('Estado actual: Validando. Fase actual: Revisión.')
+        ->toContain('Período')
+        ->toContain('Carga')
+        ->toContain('Revisión')
+        ->toContain('Proceso')
+        ->toContain('Aprobación y exportación')
+        ->not->toContain('<a')
+        ->not->toContain('<button');
+});
+
+test('payroll workflow leaves every phase inactive for an unknown status', function () {
+    $presentation = PayPeriodStatusPresentation::for('future_state');
+    $phases = PayPeriodStatusPresentation::phases();
+
+    $html = Blade::render(
+        '<x-nomina.payroll-workflow :phases="$phases" :presentation="$presentation" />',
+        compact('phases', 'presentation'),
+    );
+
+    expect($html)
+        ->toContain('Estado actual: Estado desconocido. Fase actual: ninguna.')
+        ->not->toContain('aria-current="step"');
 });
 
 test('Tailwind theme exposes the semantic design token families', function () {

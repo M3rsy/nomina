@@ -2,15 +2,18 @@
 
 namespace App\Livewire\Nomina;
 
-use App\Models\PayPeriod;
 use App\Models\AuditLogEntry;
+use App\Models\PayPeriod;
 use App\Models\UploadedFile;
 use App\Services\Payroll\PayPeriodRangeGuard;
+use App\Support\Nomina\PayPeriodStatusPresentation;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -46,9 +49,32 @@ class Index extends Component
             ? PayPeriod::query()->orderBy('start_date', 'desc')->orderByDesc('id')->paginate(10)
             : collect();
 
+        $visiblePeriods = $payPeriods instanceof LengthAwarePaginator
+            ? $payPeriods->getCollection()
+            : $payPeriods;
+
+        $periodPresentations = $visiblePeriods->mapWithKeys(
+            fn (PayPeriod $period): array => [
+                $period->id => PayPeriodStatusPresentation::for($period->status),
+            ],
+        );
+        $periodActions = $visiblePeriods->mapWithKeys(
+            fn (PayPeriod $period): array => [
+                $period->id => [
+                    'upload' => $period->canUploadFiles() && Gate::allows('files.upload'),
+                    'review' => Gate::allows('marks.manage') && Gate::allows('view', $period),
+                    'delete' => Gate::allows('delete', $period),
+                ],
+            ],
+        );
+
         return view('livewire.nomina.index', [
             'payPeriods' => $payPeriods,
             'hasCompany' => $company !== null,
+            'periodPresentations' => $periodPresentations,
+            'periodActions' => $periodActions,
+            'phases' => PayPeriodStatusPresentation::phases(),
+            'canCreate' => Gate::allows('create', PayPeriod::class),
         ]);
     }
 
@@ -166,6 +192,7 @@ class Index extends Component
 
         if ($reason === '') {
             $this->addError('deletionReason', 'El motivo es obligatorio.');
+
             return;
         }
 

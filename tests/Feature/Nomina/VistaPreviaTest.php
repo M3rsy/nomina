@@ -10,9 +10,22 @@ use App\Services\CurrentCompany;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
+
+function vistaPreviaTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    vistaPreviaTestCase()->seed(PermissionRoleSeeder::class);
 });
 
 function setupProcessedPayPeriod(): array
@@ -33,12 +46,13 @@ function setupProcessedPayPeriod(): array
 test('company admin can render procesar page for processed pay period', function () {
     [$company, $payPeriod, $employee, $admin] = setupProcessedPayPeriod();
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $this->get("/nomina/{$payPeriod->id}/procesar")
+    vistaPreviaTestCase()->get("/nomina/{$payPeriod->id}/procesar")
         ->assertOk()
-        ->assertSee('Procesar nómina');
+        ->assertSee('Revisión y finalización de nómina')
+        ->assertSee('Procesado');
 });
 
 test('procesar page renders payroll results grouped by employee', function () {
@@ -53,7 +67,7 @@ test('procesar page renders payroll results grouped by employee', function () {
         'extra_25_hours' => 0.5,
     ]);
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -80,7 +94,7 @@ test('procesar summary card shows totals for employees and minutes', function ()
         'extra_25_minutes' => 1,
     ]);
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -109,7 +123,7 @@ test('procesar rows derive displayed hours from canonical minutes', function () 
         'extra_25_minutes' => 1,
     ]);
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -130,7 +144,7 @@ test('procesar page filters by employee', function () {
         'date' => '2026-01-06',
     ]);
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Procesar::class, ['payPeriod' => $payPeriod])
@@ -148,7 +162,7 @@ test('company admin cannot access procesar page of other company', function () {
 
     app(CurrentCompany::class)->set($companyA);
 
-    $this->actingAs($adminA)
+    vistaPreviaTestCase()->actingAs($adminA)
         ->get("/nomina/{$payPeriodB->id}/procesar")
         ->assertForbidden();
 });
@@ -161,7 +175,7 @@ test('super admin cannot access procesar page outside active company', function 
 
     app(CurrentCompany::class)->set($activeCompany);
 
-    $this->actingAs($superAdmin)
+    vistaPreviaTestCase()->actingAs($superAdmin)
         ->get("/nomina/{$otherPayPeriod->id}/procesar")
         ->assertForbidden();
 });
@@ -173,7 +187,7 @@ test('user without payroll process permission cannot access procesar page', func
 
     app(CurrentCompany::class)->set($company);
 
-    $this->actingAs($user)
+    vistaPreviaTestCase()->actingAs($user)
         ->get("/nomina/{$payPeriod->id}/procesar")
         ->assertForbidden();
 });
@@ -183,9 +197,9 @@ test('procesar redirects to revisar when pay period is not processed', function 
     $payPeriod = PayPeriod::factory()->forCompany($company)->create(['status' => 'ready']);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    vistaPreviaTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $this->get("/nomina/{$payPeriod->id}/procesar")
+    vistaPreviaTestCase()->get("/nomina/{$payPeriod->id}/procesar")
         ->assertRedirect("/nomina/{$payPeriod->id}/revisar");
 });

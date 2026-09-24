@@ -1,249 +1,266 @@
-<div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-    <header class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
-        <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div class="max-w-3xl">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Gestión de nómina</p>
-                <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">Períodos de nómina</h1>
-                <p class="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
-                    Definí las fechas del período y continuá con la carga del archivo de marcas. La carga valida los datos; no procesa la nómina automáticamente.
-                </p>
-            </div>
-
-            @can('create', App\Models\PayPeriod::class)
-                <button
+<div
+    class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"
+    x-data="{ deleteTrigger: null }"
+    x-on:payroll-delete-closed.window="$nextTick(() => deleteTrigger?.focus())"
+>
+    <x-ui.page-header
+        title="Períodos de nómina"
+        description="Identificá la fase de cada período y continuá únicamente con las acciones disponibles para tu rol."
+    >
+        @if ($canCreate)
+            <x-slot:actions>
+                <x-ui.button
                     id="create-period-trigger"
-                    type="button"
                     wire:click="openCreateForm"
                     aria-expanded="{{ $showCreateForm ? 'true' : 'false' }}"
                     aria-controls="create-period-panel"
-                    class="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 >
                     Crear período
-                </button>
-            @endcan
-        </div>
-
-        @if ($hasCompany)
-            <div class="mt-7 border-t border-slate-100 pt-5" aria-label="Etapas del flujo de nómina">
-                <p class="mb-3 text-sm font-medium text-slate-700">Estás en: <span class="font-semibold text-indigo-700">1. Períodos</span></p>
-                <ol class="grid gap-3 text-sm sm:grid-cols-3">
-                    <li class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-900">
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-indigo-600">Paso 1</span>
-                        Crear o elegir período
-                    </li>
-                    <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 2</span>
-                        Cargar y validar marcas
-                    </li>
-                    <li class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Paso 3</span>
-                        Revisar el resultado
-                    </li>
-                </ol>
-            </div>
+                </x-ui.button>
+            </x-slot:actions>
         @endif
-    </header>
+    </x-ui.page-header>
+
+    @if ($hasCompany)
+        <x-ui.card class="mt-6" aria-labelledby="workflow-heading">
+            <x-slot:header>
+                <h2 id="workflow-heading" class="font-semibold text-text">Cinco fases del flujo</h2>
+                <p class="mt-1 text-sm text-text-muted">La fase orienta; el estado y los permisos siguen controlando cada acción.</p>
+            </x-slot:header>
+            <x-nomina.payroll-workflow :phases="$phases" />
+        </x-ui.card>
+    @endif
 
     @if ($showCreateForm)
-        <section id="create-period-panel" aria-labelledby="create-period-heading" class="mt-6 rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm sm:p-7">
-            <div class="max-w-3xl">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Nuevo período</p>
-                <h2 id="create-period-heading" class="mt-1 text-xl font-bold text-slate-950">Definí el rango de fechas</h2>
-                <p class="mt-2 text-sm leading-6 text-slate-600">Las fechas de inicio y fin se incluyen dentro del período.</p>
-            </div>
+        <x-ui.card id="create-period-panel" class="mt-6" aria-labelledby="create-period-heading">
+            <x-slot:header>
+                <h2 id="create-period-heading" class="text-xl font-bold text-text">Definí el rango de fechas</h2>
+                <p class="mt-1 text-sm text-text-muted">Las fechas de inicio y fin se incluyen dentro del período.</p>
+            </x-slot:header>
 
-            <form id="create-period-form" wire:submit="store" class="mt-6 grid gap-5 lg:grid-cols-2">
+            <form id="create-period-form" wire:submit="store" class="grid gap-5 lg:grid-cols-2">
                 <div class="lg:col-span-2">
-                    <label for="period-name" class="block text-sm font-semibold text-slate-800">Nombre del período</label>
-                    <p id="period-name-hint" class="mt-1 text-sm text-slate-500">Usá un nombre que puedas reconocer en la lista.</p>
-                    <input
+                    <x-ui.input
                         id="period-name"
-                        type="text"
+                        label="Nombre del período"
+                        hint="Usá un nombre que puedas reconocer en la lista."
                         wire:model="name"
                         maxlength="120"
                         required
                         autocomplete="off"
-                        aria-describedby="period-name-hint @error('name') period-name-error @enderror"
-                        @error('name') aria-invalid="true" @else aria-invalid="false" @enderror
-                        class="mt-2 block min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                    >
-                    @error('name')
-                        <p id="period-name-error" role="alert" class="mt-2 text-sm font-medium text-red-700">{{ $message }}</p>
-                    @enderror
+                        :error="$errors->first('name')"
+                    />
                 </div>
-
-                <div>
-                    <label for="period-start-date" class="block text-sm font-semibold text-slate-800">Fecha de inicio</label>
-                    <input
-                        id="period-start-date"
-                        type="date"
-                        wire:model="start_date"
-                        required
-                        @error('start_date') aria-describedby="period-start-date-error" aria-invalid="true" @else aria-invalid="false" @enderror
-                        class="mt-2 block min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                <x-ui.input
+                    id="period-start-date"
+                    type="date"
+                    label="Fecha de inicio"
+                    wire:model="start_date"
+                    required
+                    :error="$errors->first('start_date')"
+                />
+                <x-ui.input
+                    id="period-end-date"
+                    type="date"
+                    label="Fecha de fin"
+                    wire:model="end_date"
+                    required
+                    :error="$errors->first('end_date')"
+                />
+                <div class="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-end lg:col-span-2">
+                    <x-ui.button variant="secondary" wire:click="closeCreateForm">Cancelar</x-ui.button>
+                    <x-ui.loading-button
+                        type="submit"
+                        target="store"
+                        loading-label="Creando período…"
+                        class="inline-flex min-h-11 items-center justify-center rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white"
                     >
-                    @error('start_date')
-                        <p id="period-start-date-error" role="alert" class="mt-2 text-sm font-medium text-red-700">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                <div>
-                    <label for="period-end-date" class="block text-sm font-semibold text-slate-800">Fecha de fin</label>
-                    <input
-                        id="period-end-date"
-                        type="date"
-                        wire:model="end_date"
-                        required
-                        @error('end_date') aria-describedby="period-end-date-error" aria-invalid="true" @else aria-invalid="false" @enderror
-                        class="mt-2 block min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                    >
-                    @error('end_date')
-                        <p id="period-end-date-error" role="alert" class="mt-2 text-sm font-medium text-red-700">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                <div class="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end lg:col-span-2">
-                    <button type="button" wire:click="closeCreateForm" class="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">
-                        Cancelar
-                    </button>
-                    <x-ui.loading-button type="submit" target="store" loading-label="Creando período…" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60">Crear y continuar</x-ui.loading-button>
+                        Crear y continuar
+                    </x-ui.loading-button>
                 </div>
             </form>
-        </section>
+        </x-ui.card>
     @endif
 
     @if (! $hasCompany)
-        <section
+        <x-ui.empty-state
             data-payroll-company-context
-            role="status"
-            aria-labelledby="payroll-company-context-heading"
-            class="mx-auto mt-8 max-w-2xl rounded-3xl border border-indigo-200 bg-gradient-to-br from-white via-indigo-50/70 to-amber-50 p-6 text-center shadow-sm sm:p-10"
+            title="Seleccioná una empresa para continuar"
+            class="mx-auto mt-8 max-w-2xl"
         >
-            <span class="mx-auto grid size-14 place-items-center rounded-2xl bg-indigo-600 text-white shadow-sm shadow-indigo-200" aria-hidden="true">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.75 20.25h14.5M6.75 20.25V5.5A1.75 1.75 0 0 1 8.5 3.75h7A1.75 1.75 0 0 1 17.25 5.5v14.75M9.25 7.5h1.5m2.5 0h1.5m-5.5 3.5h1.5m2.5 0h1.5m-5.5 3.5h1.5m2.5 0h1.5" />
-                </svg>
-            </span>
-
-            <h2 id="payroll-company-context-heading" class="mt-5 text-2xl font-bold tracking-tight text-slate-950">
-                Seleccioná una empresa para continuar
-            </h2>
-            <p class="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600 sm:text-base">
-                La nómina siempre corresponde a una empresa activa. Elegí una para consultar períodos, cargar marcas y procesar resultados sin mezclar información entre empresas.
-            </p>
-
-            <div class="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-                <button
-                    type="button"
-                    x-on:click.stop="$dispatch('open-company-selector')"
-                    class="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                >
-                    Seleccionar empresa
-                </button>
-                <a
-                    href="{{ route('dashboard') }}"
-                    wire:navigate
-                    class="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                >
-                    Volver al panel
-                </a>
-            </div>
-        </section>
+            La nómina siempre corresponde a una empresa activa. Elegí una para consultar períodos, cargar marcas y procesar resultados sin mezclar información entre empresas.
+            <x-slot:actions>
+                <x-ui.button x-on:click.stop="$dispatch('open-company-selector')">Seleccionar empresa</x-ui.button>
+                <x-ui.button :href="route('dashboard')" variant="secondary" wire:navigate>Volver al panel</x-ui.button>
+            </x-slot:actions>
+        </x-ui.empty-state>
     @else
         <section aria-labelledby="period-list-heading" class="mt-8">
             <div class="mb-4">
-                <h2 id="period-list-heading" class="text-xl font-bold text-slate-950">Períodos existentes</h2>
-                <p class="mt-1 text-sm text-slate-600">El estado muestra hasta dónde avanzó cada período.</p>
+                <h2 id="period-list-heading" class="text-xl font-bold text-text">Períodos existentes</h2>
+                <p class="mt-1 text-sm text-text-muted">Cada período muestra su estado exacto, su explicación y solo las acciones autorizadas.</p>
             </div>
 
-            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div class="max-w-full overflow-x-auto">
-                    <table class="min-w-[760px] w-full text-sm">
-                        <thead class="bg-slate-50 text-slate-600">
+            @if ($payPeriods->isEmpty())
+                <x-ui.empty-state title="Todavía no hay períodos de nómina.">
+                    Creá un período para definir sus fechas y continuar con la carga de asistencia.
+                    @if ($canCreate)
+                        <x-slot:actions>
+                            <x-ui.button wire:click="openCreateForm">Crear el primer período</x-ui.button>
+                        </x-slot:actions>
+                    @endif
+                </x-ui.empty-state>
+            @endif
+
+            <div data-period-desktop-list class="hidden overflow-hidden rounded-3xl border border-border bg-surface shadow-sm lg:block">
+                <table class="w-full text-sm">
+                    <thead class="bg-surface-muted text-text-muted">
+                        <tr>
+                            <th scope="col" class="px-5 py-3 text-left font-semibold">Período</th>
+                            <th scope="col" class="px-5 py-3 text-left font-semibold">Fechas</th>
+                            <th scope="col" class="px-5 py-3 text-left font-semibold">Estado y orientación</th>
+                            <th scope="col" class="px-5 py-3 text-left font-semibold">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border">
+                        @foreach ($payPeriods as $payPeriod)
+                            @php
+                                $presentation = $periodPresentations[$payPeriod->id];
+                                $actions = $periodActions[$payPeriod->id];
+                            @endphp
                             <tr>
-                                <th scope="col" class="px-5 py-3 text-left font-semibold">Nombre</th>
-                                <th scope="col" class="px-5 py-3 text-left font-semibold">Inicio</th>
-                                <th scope="col" class="px-5 py-3 text-left font-semibold">Fin</th>
-                                <th scope="col" class="px-5 py-3 text-left font-semibold">Estado</th>
-                                <th scope="col" class="px-5 py-3 text-left font-semibold">Acciones</th>
+                                <th scope="row" class="px-5 py-5 text-left font-semibold text-text">{{ $payPeriod->name ?? $payPeriod->slug }}</th>
+                                <td class="px-5 py-5 text-text-muted">
+                                    {{ $payPeriod->start_date->format('d/m/Y') }} – {{ $payPeriod->end_date->format('d/m/Y') }}
+                                </td>
+                                <td class="max-w-md px-5 py-5">
+                                    <x-ui.badge :variant="$presentation->badgeVariant">{{ $presentation->label }}</x-ui.badge>
+                                    <p class="mt-2 text-sm leading-5 text-text-muted">{{ $presentation->copy }}</p>
+                                </td>
+                                <td class="px-5 py-5">
+                                    <div class="flex flex-wrap gap-2">
+                                        @if ($actions['upload'])
+                                            <x-ui.button :href="route('archivos.upload', ['pay_period_id' => $payPeriod->id])" wire:navigate>Cargar marcas</x-ui.button>
+                                        @endif
+                                        @if ($actions['review'])
+                                            <x-ui.button :href="route('nomina.revisar', $payPeriod)" variant="secondary" wire:navigate>Revisar</x-ui.button>
+                                        @endif
+                                        @if ($actions['delete'])
+                                            <x-ui.button
+                                                variant="danger"
+                                                wire:click="openDeleteConfirmation({{ $payPeriod->id }})"
+                                                x-on:click="deleteTrigger = $el"
+                                            >
+                                                Eliminar
+                                            </x-ui.button>
+                                        @endif
+                                    </div>
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                            @forelse ($payPeriods as $payPeriod)
-                                @php
-                                    $statusClass = match ($payPeriod->status) {
-                                        'ready', 'processed' => 'bg-emerald-100 text-emerald-800',
-                                        'validating', 'processing' => 'bg-blue-100 text-blue-800',
-                                        'approved' => 'bg-violet-100 text-violet-800',
-                                        'exported' => 'bg-slate-100 text-slate-700',
-                                        'validation_failed', 'cancelled' => 'bg-red-100 text-red-800',
-                                        default => 'bg-amber-100 text-amber-800',
-                                    };
-                                    $statusLabel = match ($payPeriod->status) {
-                                        'draft' => 'Borrador',
-                                        'uploaded' => 'Archivo cargado',
-                                        'validating' => 'Validando',
-                                        'validation_failed' => 'Validación con errores',
-                                        'ready' => 'Listo',
-                                        'processing' => 'Procesando',
-                                        'processed' => 'Procesado',
-                                        'approved' => 'Aprobado',
-                                        'exported' => 'Exportado',
-                                        'cancelled' => 'Cancelado',
-                                        default => 'Estado pendiente',
-                                    };
-                                @endphp
-                                <tr>
-                                    <td class="px-5 py-4 font-medium text-slate-900">{{ $payPeriod->name ?? $payPeriod->slug }}</td>
-                                    <td class="px-5 py-4 text-slate-600">{{ $payPeriod->start_date->format('d/m/Y') }}</td>
-                                    <td class="px-5 py-4 text-slate-600">{{ $payPeriod->end_date->format('d/m/Y') }}</td>
-                                    <td class="px-5 py-4">
-                                        <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $statusClass }}">{{ $statusLabel }}</span>
-                                    </td>
-                                    <td class="px-5 py-4">
-                                        <div class="flex items-center gap-4">
-                                            @if ($payPeriod->canUploadFiles())
-                                                <a href="{{ route('archivos.upload', ['pay_period_id' => $payPeriod->id]) }}" class="font-semibold text-indigo-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">Cargar marcas</a>
-                                            @endif
-                                            <a href="{{ route('nomina.revisar', $payPeriod) }}" class="font-semibold text-slate-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2">Revisar</a>
-                                            @can('delete', $payPeriod)
-                                                <button type="button" wire:click="openDeleteConfirmation({{ $payPeriod->id }})" class="font-semibold text-rose-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">Eliminar</button>
-                                            @endcan
-                                        </div>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="5" class="px-5 py-10 text-center text-slate-500">Todavía no hay períodos de nómina.</td>
-                                </tr>
-                            @endforelse
-                        </tbody>
-                    </table>
-                </div>
+                        @endforeach
+                    </tbody>
+                </table>
             </div>
 
-            <div class="mt-4">
-                {{ $payPeriods->links() }}
+            <div data-period-mobile-list class="grid gap-4 lg:hidden" aria-label="Períodos de nómina en vista compacta">
+                @foreach ($payPeriods as $payPeriod)
+                    @php
+                        $presentation = $periodPresentations[$payPeriod->id];
+                        $actions = $periodActions[$payPeriod->id];
+                    @endphp
+                    <x-ui.card aria-labelledby="period-{{ $payPeriod->id }}-heading">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <h3 id="period-{{ $payPeriod->id }}-heading" class="font-semibold text-text">{{ $payPeriod->name ?? $payPeriod->slug }}</h3>
+                                <p class="mt-1 text-sm text-text-muted">{{ $payPeriod->start_date->format('d/m/Y') }} – {{ $payPeriod->end_date->format('d/m/Y') }}</p>
+                            </div>
+                            <x-ui.badge :variant="$presentation->badgeVariant">{{ $presentation->label }}</x-ui.badge>
+                        </div>
+                        <p class="mt-3 text-sm leading-6 text-text-muted">{{ $presentation->copy }}</p>
+                        <div class="mt-4 flex flex-wrap gap-2">
+                            @if ($actions['upload'])
+                                <x-ui.button :href="route('archivos.upload', ['pay_period_id' => $payPeriod->id])" wire:navigate>Cargar marcas</x-ui.button>
+                            @endif
+                            @if ($actions['review'])
+                                <x-ui.button :href="route('nomina.revisar', $payPeriod)" variant="secondary" wire:navigate>Revisar</x-ui.button>
+                            @endif
+                            @if ($actions['delete'])
+                                <x-ui.button
+                                    variant="danger"
+                                    wire:click="openDeleteConfirmation({{ $payPeriod->id }})"
+                                    x-on:click="deleteTrigger = $el"
+                                >
+                                    Eliminar
+                                </x-ui.button>
+                            @endif
+                        </div>
+                    </x-ui.card>
+                @endforeach
             </div>
+
+            @if ($payPeriods->hasPages())
+                <div class="mt-4">{{ $payPeriods->links() }}</div>
+            @endif
         </section>
     @endif
 
     @if ($deletingPeriodId)
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation">
-            <div class="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="delete-period-heading">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-rose-600">Accion irreversible</p>
-                <h2 id="delete-period-heading" class="mt-1 text-xl font-bold text-slate-950">Eliminar nomina</h2>
-                <p class="mt-2 text-sm leading-6 text-slate-600">Se eliminara el periodo y sus archivos asociados. Esta accion quedara registrada en auditoria.</p>
+        <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-text/50 p-4"
+            role="presentation"
+            x-init="$nextTick(() => $refs.deleteReason.focus())"
+            x-on:keydown.escape.window="if (getComputedStyle($refs.deleteBusy).display === 'none') { $wire.closeDeleteConfirmation(); $dispatch('payroll-delete-closed') }"
+        >
+            <div
+                class="w-full max-w-lg rounded-3xl border border-border bg-surface p-6 shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="delete-period-heading"
+                aria-describedby="delete-period-description"
+                wire:loading.attr="aria-busy"
+                wire:target="deletePeriod"
+                x-on:keydown.tab="
+                    const controls = [...$el.querySelectorAll('textarea, button:not([disabled])')];
+                    if ($event.shiftKey && document.activeElement === controls[0]) { $event.preventDefault(); controls.at(-1).focus(); }
+                    if (! $event.shiftKey && document.activeElement === controls.at(-1)) { $event.preventDefault(); controls[0].focus(); }
+                "
+            >
+                <p class="text-xs font-semibold uppercase tracking-wide text-danger-strong">Acción irreversible</p>
+                <h2 id="delete-period-heading" class="mt-1 text-xl font-bold text-text">Eliminar nómina</h2>
+                <p id="delete-period-description" class="mt-2 text-sm leading-6 text-text-muted">
+                    Se eliminarán el período y sus archivos asociados. El motivo y la persona responsable quedarán registrados en auditoría.
+                </p>
                 <form wire:submit="deletePeriod" class="mt-5 space-y-4">
-                    <div>
-                        <label for="period-deletion-reason" class="block text-sm font-semibold text-slate-800">Motivo de eliminacion</label>
-                        <textarea id="period-deletion-reason" wire:model="deletionReason" rows="4" maxlength="500" required class="mt-2 block w-full rounded-xl border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-rose-500 focus:outline-none focus:ring-rose-500/30" placeholder="Explica por que se elimina esta nomina"></textarea>
-                        @error('deletionReason') <p class="mt-1 text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <x-ui.textarea
+                        id="period-deletion-reason"
+                        label="Motivo de eliminación"
+                        wire:model="deletionReason"
+                        rows="4"
+                        maxlength="500"
+                        required
+                        x-ref="deleteReason"
+                        :error="$errors->first('deletionReason')"
+                    >{{ $deletionReason }}</x-ui.textarea>
+                    <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        <x-ui.button
+                            variant="secondary"
+                            wire:click="closeDeleteConfirmation"
+                            wire:loading.attr="disabled"
+                            wire:target="deletePeriod"
+                            x-on:click="$dispatch('payroll-delete-closed')"
+                        >
+                            Cancelar
+                        </x-ui.button>
+                        <x-ui.loading-button
+                            type="submit"
+                            target="deletePeriod"
+                            loading-label="Eliminando…"
+                            class="inline-flex min-h-11 items-center justify-center rounded-xl bg-danger px-4 py-2.5 text-sm font-semibold text-white"
+                        >
+                            Eliminar nómina
+                        </x-ui.loading-button>
                     </div>
-                    <div class="flex justify-end gap-2">
-                        <button type="button" wire:click="closeDeleteConfirmation" class="inline-flex min-h-10 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                        <x-ui.loading-button type="submit" target="deletePeriod" loading-label="Eliminando..." class="inline-flex min-h-10 items-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white">Eliminar nomina</x-ui.loading-button>
-                    </div>
+                    <span x-ref="deleteBusy" wire:loading wire:target="deletePeriod" class="sr-only">Eliminación en curso.</span>
                 </form>
             </div>
         </div>

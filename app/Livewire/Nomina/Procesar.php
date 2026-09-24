@@ -4,10 +4,12 @@ namespace App\Livewire\Nomina;
 
 use App\Models\PayPeriod;
 use App\Services\Payroll\PayrollResultsReviewProjection;
+use App\Support\Nomina\PayPeriodStatusPresentation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -28,6 +30,9 @@ class Procesar extends Component
     public ?int $evidenceResultId = null;
 
     public bool $locked = false;
+
+    #[Locked]
+    public bool $showApprovalConfirmation = false;
 
     public function mount(PayPeriod $payPeriod): void
     {
@@ -57,6 +62,9 @@ class Procesar extends Component
             'isCancelled' => $this->isCancelled(),
             'canApprove' => $this->canApprove(),
             'canExport' => $this->canExport(),
+            'statusPresentation' => PayPeriodStatusPresentation::for($this->payPeriod->status),
+            'phases' => PayPeriodStatusPresentation::phases(),
+            'hasActiveFilters' => $this->employee_id !== null || filled($this->absence),
         ]);
     }
 
@@ -75,8 +83,33 @@ class Procesar extends Component
         $this->evidenceResultId = $resultId;
     }
 
+    public function requestApprovalConfirmation(): void
+    {
+        Gate::authorize('payroll.approve');
+
+        $this->payPeriod->refresh();
+
+        if ($this->payPeriod->status !== 'processed') {
+            $this->locked = in_array($this->payPeriod->status, ['approved', 'exported', 'cancelled'], true);
+            $this->showApprovalConfirmation = false;
+
+            return;
+        }
+
+        $this->showApprovalConfirmation = true;
+    }
+
+    public function cancelApprovalConfirmation(): void
+    {
+        $this->showApprovalConfirmation = false;
+    }
+
     public function approve(): void
     {
+        if (! $this->showApprovalConfirmation) {
+            return;
+        }
+
         Gate::authorize('payroll.approve');
 
         [$approved, $freshPeriod] = DB::transaction(function (): array {
@@ -102,7 +135,11 @@ class Procesar extends Component
 
         $this->payPeriod = $freshPeriod;
         $this->locked = in_array($freshPeriod->status, ['approved', 'exported', 'cancelled'], true);
+        $this->showApprovalConfirmation = false;
+
         if (! $approved) {
+            session()->flash('warning', 'La nómina ya no está en estado procesado; no se aplicó la aprobación.');
+
             return;
         }
 

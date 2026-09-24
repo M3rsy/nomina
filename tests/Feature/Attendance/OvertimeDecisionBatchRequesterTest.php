@@ -36,9 +36,22 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
+
+function overtimeDecisionBatchRequesterTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    overtimeDecisionBatchRequesterTestCase()->seed(PermissionRoleSeeder::class);
     Queue::fake();
 });
 test('dispatches new and queued retries after commit but not completed batches', function () {
@@ -334,7 +347,7 @@ test('rejects a locked period without writing a batch', function (string $status
 test('queues only authoritative selected overtime candidates with stable idempotency', function (string $decision) {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->set('selectedOvertimeCandidates', [[], null, 123, 'malformed'])
@@ -365,7 +378,7 @@ test('selects every filtered overtime match across pages with compact public sta
         addBatchCandidate($context);
     }
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectCurrentOvertimePage')
@@ -405,7 +418,7 @@ test('selects only pending candidates visible on the current mixed-status page',
     $pendingTokens = $pending->map(fn (array $target): string => implode('|', [
         $target['employee']->id, '2026-07-20', $target['candidate']->key]))->all();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->set('overtimeStatus', 'all')
@@ -422,7 +435,7 @@ test('all-match batches are bounded by active filters and ignore forged selected
     $otherFile = UploadedFile::factory()->forCompany($context['company'])->forPayPeriod($context['period'])->create();
     $otherFileCandidate = addBatchCandidate($context, $otherFile);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $forgedTokens = [
         implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]),
@@ -448,7 +461,7 @@ test('all-match batches are bounded by active filters and ignore forged selected
 test('changing overtime filters clears all-match mode and clear returns to subset selection', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectAllFilteredOvertime')
@@ -469,7 +482,7 @@ test('panel owns filtered overtime pagination and selection state', function () 
         addBatchCandidate($context);
     }
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     Livewire::test(OvertimeReviewPanel::class, [
         'payPeriod' => $context['period'],
@@ -490,7 +503,7 @@ test('panel refuses a foreign company before exposing overtime state', function 
     $foreignCompany = Company::factory()->create();
     $foreignActor = User::factory()->forCompany($foreignCompany)->create()->assignRole('company_admin');
     app(CurrentCompany::class)->set($foreignCompany);
-    $this->actingAs($foreignActor);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($foreignActor);
 
     Livewire::test(OvertimeReviewPanel::class, [
         'payPeriod' => $context['period'],
@@ -500,7 +513,7 @@ test('panel refuses a foreign company before exposing overtime state', function 
 test('panel owns the individual decision modal and emits its minimal command', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('openOvertimeDecision', $context['employee']->id, '2026-07-20', $context['candidate']->key, 'approved', '14:00 → 14:30 · 30 min', '2026-07-20T14:00', '2026-07-20T14:30')
@@ -512,7 +525,7 @@ test('panel owns the individual decision modal and emits its minimal command', f
 test('panel owns batch intent and emits a canonical request without creating a batch', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectCurrentOvertimePage')
@@ -526,7 +539,7 @@ test('panel owns batch intent and emits a canonical request without creating a b
 test('parent records only a verified canonical panel batch intent', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $filters = ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''];
     $targets = app(OvertimeReviewReader::class)
         ->pendingTargetsForPeriod($context['period'], null, $filters);
@@ -574,7 +587,7 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
     $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));
     app()->instance(AttendanceReviewQuery::class, $query);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectAllFilteredOvertime')
@@ -588,7 +601,7 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
 test('all-match confirmation rejects candidate drift and filter changes before queueing', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectAllFilteredOvertime')
@@ -613,7 +626,7 @@ test('all-match confirmation rejects candidate drift and filter changes before q
 test('resets overtime pagination and stale selection when its source or an individual decision changes', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
     $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period'], 'uploadedFileId' => $context['file']->id])
         ->set('paginators.overtimePage', 2)->set('selectedOvertimeCandidates', [$token])
@@ -630,14 +643,19 @@ test('renders actor scoped batch progress in an isolated livewire module', funct
     $items[1]->update(['status' => 'failed', 'last_error' => 'Las marcas cambiaron.']);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     $component = Livewire::test(OvertimeBatchProgress::class, [
         'payPeriod' => $context['period'], 'batchId' => $batch->id,
     ])
         ->assertSet('progress.status', 'processing')
-        ->assertSee('1 de 2 procesados')
+        ->assertSet('progress.completed', 2)
+        ->assertSet('progress.percentage', 100)
+        ->assertSee('2 de 2 completados')
+        ->assertSee('1 exitosos, 1 fallidos')
         ->assertSee('Las marcas cambiaron.')
+        ->assertSeeHtml('value="2"')
+        ->assertSeeHtml('max="2"')
         ->assertSeeHtml('wire:poll.3s="poll"');
     expect(strlen($component->html()))->toBeLessThan(12_000);
 
@@ -646,7 +664,7 @@ test('renders actor scoped batch progress in an isolated livewire module', funct
         ->assertSet('batchId', null)
         ->assertDontSee('Las marcas cambiaron.');
 
-    $this->actingAs(User::factory()->forCompany($context['company'])->create()->assignRole('company_admin'));
+    overtimeDecisionBatchRequesterTestCase()->actingAs(User::factory()->forCompany($context['company'])->create()->assignRole('company_admin'));
     Livewire::test(OvertimeBatchProgress::class, ['payPeriod' => $context['period'], 'batchId' => $batch->id])
         ->assertSet('batchId', null)
         ->assertDontSee('Las marcas cambiaron.');
@@ -654,7 +672,7 @@ test('renders actor scoped batch progress in an isolated livewire module', funct
     $foreign = batchRequestFixture();
     $superAdmin = User::factory()->create()->assignRole('super_admin');
     $foreignBatch = requestBatch($foreign, ['actor' => $superAdmin]);
-    $this->actingAs($superAdmin);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($superAdmin);
     Livewire::test(OvertimeBatchProgress::class, ['payPeriod' => $context['period'], 'batchId' => $foreignBatch->id])
         ->assertSet('batchId', null);
 });
@@ -662,7 +680,7 @@ test('mounts progress polling outside the parent payroll review module', functio
     $context = batchRequestFixture();
     $batch = requestBatch($context);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
     Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
         ->assertSet('activeOvertimeBatchId', $batch->id)
@@ -674,7 +692,7 @@ test('stops isolated polling and notifies the parent when the batch becomes term
     $batch = requestBatch($context);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $component = Livewire::test(OvertimeBatchProgress::class, [
         'payPeriod' => $context['period'], 'batchId' => $batch->id,
     ]);
@@ -691,7 +709,7 @@ test('refreshes the parent once only after a verified terminal child event', fun
     $batch = requestBatch($context);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
         ->dispatch('overtime-batch-terminal', batchId: $batch->id);
     $batch->update(['status' => 'completed', 'finished_at' => now()]);
@@ -703,7 +721,7 @@ test('clears only a verified unavailable active batch from the parent', function
     $context = batchRequestFixture();
     $batch = requestBatch($context);
     app(CurrentCompany::class)->set($context['company']);
-    $this->actingAs($context['actor']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
     $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
         ->dispatch('overtime-batch-unavailable', batchId: $batch->id)
         ->assertSet('activeOvertimeBatchId', $batch->id);

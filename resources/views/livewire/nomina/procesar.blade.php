@@ -1,30 +1,53 @@
-<div class="relative isolate max-w-7xl mx-auto py-8 px-4">
+<div class="relative isolate mx-auto max-w-7xl px-4 py-8">
     <x-ui.loading-overlay target="approve" message="Validando y aprobando la nómina…" />
 
-    <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">Procesar nómina</h1>
-        <div class="flex gap-2">
-            <a href="{{ route('nomina.revisar', ['payPeriod' => $payPeriod]) }}" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
-                Volver
-            </a>
-            @if ($isCancelled)
-                <span class="px-4 py-2 bg-red-100 text-red-800 rounded">
-                    Nómina cancelada
-                </span>
-            @else
-                @if ($canApprove)
-                    <x-ui.loading-button wire:click="approve" target="approve" loading-label="Aprobando…" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-                        Aprobar nómina
-                    </x-ui.loading-button>
+    <x-ui.page-header
+        title="Revisión y finalización de nómina"
+        description="Revisá los resultados congelados, confirmá riesgos y continuá solo con las acciones disponibles."
+    >
+        <x-slot:actions>
+            <div class="flex flex-wrap gap-2">
+                <x-ui.button :href="route('nomina.revisar', ['payPeriod' => $payPeriod])" variant="secondary" wire:navigate>
+                    Volver
+                </x-ui.button>
+                @if ($isCancelled)
+                    <x-ui.badge variant="danger">Nómina cancelada</x-ui.badge>
+                @else
+                    @if ($canApprove)
+                        <x-ui.button id="approve-payroll-trigger" wire:click="requestApprovalConfirmation">
+                            Aprobar nómina
+                        </x-ui.button>
+                    @endif
+                    @if ($canExport)
+                        <x-ui.button :href="route('nomina.excel', ['payPeriod' => $payPeriod])" variant="secondary">
+                            Generar Excel
+                        </x-ui.button>
+                    @endif
                 @endif
-                @if ($canExport)
-                    <a href="{{ route('nomina.excel', ['payPeriod' => $payPeriod]) }}" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                        Generar Excel
-                    </a>
-                @endif
-            @endif
-        </div>
-    </div>
+            </div>
+        </x-slot:actions>
+    </x-ui.page-header>
+
+    <x-ui.card class="mt-6" aria-labelledby="payroll-finalization-status">
+        <x-slot:header>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 id="payroll-finalization-status" class="font-semibold text-text">Estado del período</h2>
+                    <p class="mt-1 text-sm text-text-muted">{{ $payPeriod->name ?? $payPeriod->slug }} · {{ $payPeriod->start_date->format('d/m/Y') }} – {{ $payPeriod->end_date->format('d/m/Y') }}</p>
+                </div>
+                <x-ui.badge :variant="$statusPresentation->badgeVariant">{{ $statusPresentation->label }}</x-ui.badge>
+            </div>
+        </x-slot:header>
+        <p class="mb-4 text-sm text-text-muted">{{ $statusPresentation->copy }}</p>
+        <x-nomina.payroll-workflow :phases="$phases" :presentation="$statusPresentation" />
+    </x-ui.card>
+
+    @if (session('success'))
+        <x-ui.alert class="mt-6" variant="success">{{ session('success') }}</x-ui.alert>
+    @endif
+    @if (session('warning'))
+        <x-ui.alert class="mt-6" variant="warning">{{ session('warning') }}</x-ui.alert>
+    @endif
 
     @if ($isCancelled)
         <div class="mb-6 p-4 bg-red-50 border border-red-200 text-red-800 rounded">
@@ -130,7 +153,66 @@
         </section>
     @endif
 
+    @if ($results->isEmpty())
+        <x-ui.empty-state class="mt-6" title="No hay resultados para mostrar">
+            @if ($hasActiveFilters)
+                No encontramos resultados con los filtros actuales. Limpiá los filtros para revisar toda la nómina congelada.
+            @else
+                Este período todavía no tiene filas congeladas para la generación actual.
+            @endif
+        </x-ui.empty-state>
+    @endif
+
     <div class="mt-4">
         {{ $results->links() }}
     </div>
+
+    @if ($showApprovalConfirmation)
+        <div
+            class="fixed inset-0 z-50 flex items-center justify-center bg-text/50 p-4"
+            role="presentation"
+            x-data
+            x-init="$nextTick(() => $refs.cancelApproval.focus())"
+            x-on:keydown.escape.window="$wire.cancelApprovalConfirmation()"
+        >
+            <section
+                class="w-full max-w-lg rounded-3xl border border-border bg-surface p-6 shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="approval-confirmation-heading"
+                aria-describedby="approval-confirmation-description"
+                wire:loading.attr="aria-busy"
+                wire:target="approve"
+            >
+                <p class="text-xs font-semibold uppercase tracking-wide text-warning-strong">Confirmación requerida</p>
+                <h2 id="approval-confirmation-heading" class="mt-1 text-xl font-bold text-text">Confirmar aprobación</h2>
+                <p id="approval-confirmation-description" class="mt-2 text-sm leading-6 text-text-muted">
+                    Esta acción registra quién aprobó la nómina y habilita la exportación. La aprobación se revalida en el servidor antes de cambiar el estado.
+                </p>
+                <div class="mt-5 rounded-2xl border border-warning bg-warning-subtle p-4 text-sm text-warning-strong">
+                    Verificá que los resultados congelados correspondan al período antes de confirmar.
+                </div>
+                <div class="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <x-ui.button
+                        x-ref="cancelApproval"
+                        variant="secondary"
+                        wire:click="cancelApprovalConfirmation"
+                        wire:loading.attr="disabled"
+                        wire:target="approve"
+                    >
+                        Cancelar
+                    </x-ui.button>
+                    <x-ui.loading-button
+                        type="button"
+                        target="approve"
+                        wire:click="approve"
+                        loading-label="Aprobando…"
+                        class="inline-flex min-h-11 items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white"
+                    >
+                        Confirmar aprobación
+                    </x-ui.loading-button>
+                </div>
+            </section>
+        </div>
+    @endif
 </div>
