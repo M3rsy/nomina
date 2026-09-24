@@ -55,13 +55,23 @@ class OvertimeBatchProgress extends Component
 
         $counts = $batch->items()->selectRaw('status, count(*) as total')->groupBy('status')
             ->pluck('total', 'status');
+        $pending = (int) ($counts['pending'] ?? 0);
+        $processing = (int) ($counts['processing'] ?? 0);
+        $succeeded = (int) ($counts['succeeded'] ?? 0);
+        $failed = (int) ($counts['failed'] ?? 0);
+        $total = (int) $batch->total_items;
+        $completed = $succeeded + $failed;
+
         $this->progress = [
             'status' => $batch->status,
-            'total' => $batch->total_items,
-            'pending' => (int) ($counts['pending'] ?? 0),
-            'processing' => (int) ($counts['processing'] ?? 0),
-            'succeeded' => (int) ($counts['succeeded'] ?? 0),
-            'failed' => (int) ($counts['failed'] ?? 0),
+            'total' => $total,
+            'pending' => $pending,
+            'processing' => $processing,
+            'succeeded' => $succeeded,
+            'failed' => $failed,
+            'completed' => $completed,
+            'remaining' => max(0, $total - $completed),
+            'percentage' => $total > 0 ? min(100, max(0, (int) round(($completed / $total) * 100))) : null,
             'terminal' => in_array($batch->status, [
                 OvertimeDecisionBatch::COMPLETED,
                 OvertimeDecisionBatch::COMPLETED_WITH_ERRORS,
