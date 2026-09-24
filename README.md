@@ -85,6 +85,17 @@ The PostgreSQL suite is intentionally destructive and only runs when the live
 connection resolves to the dedicated `nomina_test` database and user. Do not
 point `pgsql_testing` at development or production data.
 
+## Limpieza de presentación
+
+Para limpiar datos operativos de una demo sin borrar empleados ni su configuración laboral base:
+
+```bash
+./scripts/limpiar-presentacion.sh --dry-run
+./scripts/limpiar-presentacion.sh
+```
+
+El modo `--dry-run` muestra el inventario explícito de tablas y rutas que serían limpiadas. La ejecución real mantiene la confirmación tipada y el guard de producción; `--force` solo debe usarse en bases desechables o entornos de presentación controlados.
+
 ## Reverse proxy trust
 
 By default, local/direct requests do not trust `X-Forwarded-*` headers. In
