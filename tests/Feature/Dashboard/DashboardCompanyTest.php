@@ -200,7 +200,7 @@ test('dashboard redirects company admin to company dashboard', function () {
     $this->get('/dashboard')->assertRedirect('/dashboard/company');
 });
 
-test('company dashboard presents design-system hierarchy filters and permission-aware quick actions', function () {
+test('company dashboard presents Stitch-inspired operational hierarchy and permission-aware quick actions', function () {
     $company = Company::factory()->create(['name' => 'Empresa Diseño']);
     $admin = User::factory()->forCompany($company)->create();
     $admin->assignRole('company_admin');
@@ -210,9 +210,16 @@ test('company dashboard presents design-system hierarchy filters and permission-
         ->assertSee('Panel de Empresa Diseño')
         ->assertSee('Rango de análisis')
         ->assertSee('Los períodos y la actividad se actualizan con este rango.')
+        ->assertSee('Alcance de empresa')
+        ->assertSee('Estado operativo')
         ->assertSee('Acciones rápidas')
         ->assertSee('Ver nómina')
         ->assertSee('Subir archivo')
+        ->assertSeeHtml('data-dashboard-section="hero"')
+        ->assertSeeHtml('data-dashboard-section="company-kpis"')
+        ->assertSeeHtml('data-dashboard-section="payroll-operations"')
+        ->assertSeeHtml('data-dashboard-section="recent-files"')
+        ->assertSeeHtml('data-dashboard-section="recent-activity"')
         ->assertSeeHtml('href="'.route('nomina.index').'"')
         ->assertSeeHtml('href="'.route('archivos.upload').'"')
         ->assertSeeHtml('border-border');
