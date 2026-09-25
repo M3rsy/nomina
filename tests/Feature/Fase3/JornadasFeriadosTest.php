@@ -12,10 +12,24 @@ use App\Models\WorkScheduleProfile;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Database\Seeders\WorkScheduleSeeder;
+use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
 
 beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    jornadasFeriadosTestCase()->seed(PermissionRoleSeeder::class);
 });
+
+function jornadasFeriadosTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 test('work schedule policy denies company admin A from updating company B schedule', function () {
     $companyA = Company::factory()->create();
@@ -24,7 +38,7 @@ test('work schedule policy denies company admin A from updating company B schedu
     $adminA = User::factory()->for($companyA)->create()->assignRole('company_admin');
     $scheduleB = WorkSchedule::factory()->forCompany($companyB)->create(['day_of_week' => 1]);
 
-    $this->assertFalse($adminA->can('update', $scheduleB));
+    jornadasFeriadosTestCase()->assertFalse($adminA->can('update', $scheduleB));
 });
 
 test('work schedule policy allows super admin to update any schedule', function () {
@@ -32,7 +46,7 @@ test('work schedule policy allows super admin to update any schedule', function 
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
     $schedule = WorkSchedule::factory()->forCompany($company)->create(['day_of_week' => 1]);
 
-    $this->assertTrue($superAdmin->can('update', $schedule));
+    jornadasFeriadosTestCase()->assertTrue($superAdmin->can('update', $schedule));
 });
 
 test('holiday policy denies company admin A from managing company B holiday', function () {
@@ -42,8 +56,8 @@ test('holiday policy denies company admin A from managing company B holiday', fu
     $adminA = User::factory()->for($companyA)->create()->assignRole('company_admin');
     $holidayB = Holiday::factory()->forCompany($companyB)->create(['date' => '2026-09-15']);
 
-    $this->assertFalse($adminA->can('update', $holidayB));
-    $this->assertFalse($adminA->can('delete', $holidayB));
+    jornadasFeriadosTestCase()->assertFalse($adminA->can('update', $holidayB));
+    jornadasFeriadosTestCase()->assertFalse($adminA->can('delete', $holidayB));
 });
 
 test('company admin can access jornadas page of own company', function () {
@@ -51,7 +65,7 @@ test('company admin can access jornadas page of own company', function () {
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
 
     app(CurrentCompany::class)->set($company);
-    $this->actingAs($admin)
+    jornadasFeriadosTestCase()->actingAs($admin)
         ->get('/jornadas')
         ->assertOk()
         ->assertDontSee('Nueva plantilla')
@@ -62,7 +76,7 @@ test('super admin without active company sees empty jornadas page', function () 
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
     app(CurrentCompany::class)->set(null);
-    $this->actingAs($superAdmin)
+    jornadasFeriadosTestCase()->actingAs($superAdmin)
         ->get('/jornadas')
         ->assertOk();
 });
@@ -81,11 +95,37 @@ test('company admin cannot save work schedules for own company', function () {
     expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(0);
 });
 
+test('work schedules page presents the Stitch-inspired management workspace with real schedule data', function () {
+    $company = Company::factory()->create();
+    $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
+
+    jornadasFeriadosTestCase()->seed(WorkScheduleSeeder::class);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::actingAs($admin)
+        ->test(WorkSchedulesIndex::class)
+        ->assertSeeHtml('data-work-schedules-index="workspace"')
+        ->assertSee('Configuración de Jornada')
+        ->assertSee('Motor de Cálculo de Horas')
+        ->assertSee('Plantilla semanal de horarios')
+        ->assertSee('Control de cambios y versionado')
+        ->assertSee('Bandas de recargo aplicadas')
+        ->assertSee('Checklist de validación técnica')
+        ->assertSee('Días laborables')
+        ->assertSee('Horas base semanales')
+        ->assertSee('Jornada general · v1')
+        ->assertSee('44.00')
+        ->assertSeeHtml('wire:model.live="selectedProfileId"')
+        ->assertSeeHtml('wire:model.live="schedules.1.start_time"')
+        ->assertSeeHtml('wire:click="activateGeneralProfile"')
+        ->assertSeeHtml('wire:click="save"');
+});
+
 test('super admin saving a schedule profile creates an audited immutable version', function () {
     $company = Company::factory()->create();
     $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->seed(WorkScheduleSeeder::class);
+    jornadasFeriadosTestCase()->seed(WorkScheduleSeeder::class);
     $originalProfile = WorkScheduleProfile::withoutCompanyScope()
         ->where('company_id', $company->id)
         ->sole();
@@ -126,7 +166,7 @@ test('super admin can duplicate the selected schedule into a reusable profile', 
     $company = Company::factory()->create();
     $admin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->seed(WorkScheduleSeeder::class);
+    jornadasFeriadosTestCase()->seed(WorkScheduleSeeder::class);
     app(CurrentCompany::class)->set($company);
 
     $component = Livewire::actingAs($admin)
@@ -219,7 +259,7 @@ test('company admin can access feriados page of own company', function () {
     $admin = User::factory()->for($company)->create()->assignRole('company_admin');
 
     app(CurrentCompany::class)->set($company);
-    $this->actingAs($admin)
+    jornadasFeriadosTestCase()->actingAs($admin)
         ->get('/feriados')
         ->assertOk();
 });
@@ -273,7 +313,7 @@ test('saving a holiday requires a company and shows toast message', function () 
 test('work schedule seeder creates seven rows per company', function () {
     $company = Company::factory()->create();
 
-    $this->seed(WorkScheduleSeeder::class);
+    jornadasFeriadosTestCase()->seed(WorkScheduleSeeder::class);
 
     expect(WorkSchedule::withoutCompanyScope()->where('company_id', $company->id)->count())->toBe(7);
 });
