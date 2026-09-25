@@ -11,10 +11,23 @@ use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
+use Pest\TestSuite;
+use Tests\TestCase;
 
 uses()->beforeEach(function () {
-    $this->seed(PermissionRoleSeeder::class);
+    archivosIndexTestCase()->seed(PermissionRoleSeeder::class);
 });
+
+function archivosIndexTestCase(): TestCase
+{
+    $test = TestSuite::getInstance()->test;
+
+    if (! $test instanceof TestCase) {
+        throw new LogicException('The current Pest test case is unavailable.');
+    }
+
+    return $test;
+}
 
 test('super admin cannot list uploaded files without an active company context', function () {
     $company = Company::factory()->create();
@@ -24,7 +37,7 @@ test('super admin cannot list uploaded files without an active company context',
     ]);
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
+    archivosIndexTestCase()->actingAs($superAdmin);
     app(CurrentCompany::class)->set(null);
 
     Livewire::test(Index::class)
@@ -39,8 +52,8 @@ test('super admin stale company selection is cleared and never lists global file
     ]);
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
-    $this->actingAs($superAdmin);
-    session(['active_company_id' => $staleSelection?->call($this) ?? Company::factory()->inactive()->create()->id]);
+    archivosIndexTestCase()->actingAs($superAdmin);
+    session(['active_company_id' => $staleSelection?->call(archivosIndexTestCase()) ?? Company::factory()->inactive()->create()->id]);
 
     Livewire::test(Index::class)
         ->assertForbidden()
@@ -71,7 +84,7 @@ test('super admin lists only the active company files', function () {
         'created_at' => '2026-01-01 12:00:00',
     ]);
 
-    $this->actingAs($superAdmin);
+    archivosIndexTestCase()->actingAs($superAdmin);
     app(CurrentCompany::class)->set($activeCompany);
 
     Livewire::test(Index::class)
@@ -105,7 +118,7 @@ test('company file filters reset page two and remain tenant scoped', function ()
     UploadedFile::factory()->forCompany($otherCompany)->forPayPeriod($otherPayPeriod)
         ->create(['original_name' => 'OTHER-COMPANY.TXT']);
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     foreach (['search' => 'FILE-11', 'status' => 'valid', 'pay_period_id' => $filteredPayPeriod->id] as $property => $value) {
@@ -131,7 +144,7 @@ test('file mark totals render without per-row count queries', function () {
     RawMark::factory()->count(7)->forCompany($company)->forPayPeriod($payPeriod)
         ->forUploadedFile($fileWithSeven)->create();
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
     DB::flushQueryLog();
     DB::enableQueryLog();
@@ -149,6 +162,40 @@ test('file mark totals render without per-row count queries', function () {
     expect($rawMarkQueries)->toHaveCount(1);
 });
 
+test('company admin sees the uploaded files management workspace', function () {
+    $company = Company::factory()->create();
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create(['name' => 'January 2026']);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'original_name' => 'attendance-january.csv',
+        'stored_name' => 'tenant/attendance-january.csv',
+        'status' => 'valid',
+    ]);
+    RawMark::factory()->count(3)->forCompany($company)->forPayPeriod($payPeriod)
+        ->forUploadedFile($file)->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+
+    archivosIndexTestCase()->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    $response = archivosIndexTestCase()->get('/archivos');
+
+    $response->assertOk();
+    $response->assertSee('Control de Asistencia / Relojes y Biometría');
+    $response->assertSee('Archivos de marcas');
+    $response->assertSee('Volver a períodos');
+    $response->assertSee('Cargar nuevo archivo');
+    $response->assertSee('Auditoría de cargas');
+    $response->assertSee('January 2026');
+    $response->assertSee('attendance-january.csv');
+    $response->assertSee('3');
+    $response->assertSeeHtml('data-files-index="workspace"');
+    $response->assertSeeHtml('data-files-section="summary"');
+    $response->assertSeeHtml('data-files-section="filters"');
+    $response->assertSeeHtml('data-files-section="listing"');
+    $response->assertSeeHtml('href="'.route('nomina.index').'"');
+    $response->assertSeeHtml('href="'.route('archivos.upload').'"');
+});
+
 test('company admin lists only own company files', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
@@ -164,10 +211,10 @@ test('company admin lists only own company files', function () {
     ]);
     $admin->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($companyA);
 
-    $response = $this->get('/archivos');
+    $response = archivosIndexTestCase()->get('/archivos');
     $response->assertOk();
     $response->assertSee('alpha.txt');
     $response->assertDontSee('beta.txt');
@@ -192,10 +239,10 @@ test('index filters by status', function () {
     ]);
     $admin->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $response = $this->get('/archivos?status=valid');
+    $response = archivosIndexTestCase()->get('/archivos?status=valid');
     $response->assertOk();
     $response->assertSee('valid.txt');
     $response->assertDontSee('invalid.txt');
@@ -221,10 +268,10 @@ test('index filters by pay period', function () {
     ]);
     $admin->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $response = $this->get('/archivos?pay_period_id='.$payPeriodA->id);
+    $response = archivosIndexTestCase()->get('/archivos?pay_period_id='.$payPeriodA->id);
     $response->assertOk();
     $response->assertSee('PERIOD-ALPHA-UPLOAD.CSV');
     $response->assertSee('stored-alpha-visible-row.csv');
@@ -245,10 +292,10 @@ test('index search filters by original name', function () {
     ]);
     $admin->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
-    $response = $this->get('/archivos?search=GLG');
+    $response = archivosIndexTestCase()->get('/archivos?search=GLG');
     $response->assertOk();
     $response->assertSee('GLG_001.TXT');
     $response->assertDontSee('attlog.dat');
@@ -273,7 +320,7 @@ test('company admin deletes an uploaded file and deactivates its marks with a re
     ]);
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
 
-    $this->actingAs($admin);
+    archivosIndexTestCase()->actingAs($admin);
     app(CurrentCompany::class)->set($company);
 
     Livewire::test(Index::class)
