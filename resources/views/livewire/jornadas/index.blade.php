@@ -1,361 +1,405 @@
-@php($canManageSchedules = auth()->user()->can('create', \App\Models\WorkSchedule::class))
+@php
+    $canManageSchedules = auth()->user()->can('create', \App\Models\WorkSchedule::class);
+    $selectedProfile = collect($profiles)->firstWhere('id', $selectedProfileId) ?? collect($profiles)->first();
+    $selectedProfileName = $selectedProfile['name'] ?? 'Jornada general';
+    $selectedProfileVersion = $selectedProfile['version'] ?? 1;
+    $workingDaysCount = $this->getWorkingDaysCountProperty();
+    $weeklyOrdinaryHours = $this->getWeeklyOrdinaryHoursProperty();
+@endphp
 
-<div class="relative isolate min-h-screen bg-[radial-gradient(circle_at_top,_#e8fbfb_0%,_#f5f3ff_35%,_#fff_70%)] px-4 py-6 sm:px-6 lg:px-8">
+<div class="min-h-screen bg-surface-muted" data-work-schedules-index="workspace">
     <x-ui.loading-overlay target="confirmHistoricalSave,createProfile,retireProfile,activateGeneralProfile,save" message="Validando y guardando la jornada…" />
 
-    <div class="mx-auto w-full max-w-6xl space-y-5">
-        <section class="rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-sm backdrop-blur">
-            <div class="flex flex-col gap-2">
-                <p class="inline-flex w-fit items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-                    Configuración interna
-                </p>
+    <div class="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <nav aria-label="Miga de pan" class="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-muted">
+            <span class="rounded-full bg-surface px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand">Configuración de Jornada</span>
+            <span aria-hidden="true">/</span>
+            <span>Motor de Cálculo de Horas</span>
+        </nav>
 
-                <h1 class="text-3xl font-black tracking-tight text-slate-900">Jornadas de trabajo</h1>
-                <p class="max-w-2xl text-sm leading-relaxed text-slate-600">
-                    Define tu semana base y consulta qué tan sensibles son tus cambios para la nómina ya cerrada.
-                    El sistema calcula recargos por tramo automáticamente.
+        <x-ui.page-header
+            title="Jornadas de trabajo"
+            description="Definí la semana base, versioná plantillas operativas y verificá cómo impactan los horarios en el cálculo automatizado de nómina."
+        >
+            @if ($canManageSchedules)
+                <x-slot:actions>
+                    <x-ui.loading-button
+                        type="button"
+                        variant="secondary"
+                        wire:click="openCreateProfile"
+                        target="openCreateProfile"
+                        loading-label="Abriendo…"
+                        :disabled="$requiresProfileMigration"
+                    >
+                        Nueva plantilla
+                    </x-ui.loading-button>
+                </x-slot:actions>
+            @endif
+        </x-ui.page-header>
+
+        <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumen de jornadas">
+            <x-ui.card class="relative overflow-hidden">
+                <div class="absolute -right-10 -top-10 size-28 rounded-full bg-brand/5" aria-hidden="true"></div>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Plantilla activa</p>
+                <p class="mt-3 text-2xl font-black tracking-tight text-text">{{ $selectedProfileName }} · v{{ $selectedProfileVersion }}</p>
+                <p class="mt-2 text-sm text-text-muted">Perfil seleccionado para editar o versionar.</p>
+                <div class="mt-4 h-1.5 rounded-full bg-brand"></div>
+            </x-ui.card>
+
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Horas base semanales</p>
+                <p class="mt-3 text-3xl font-black tracking-tight text-text">{{ number_format($weeklyOrdinaryHours, 2) }} <span class="text-base font-semibold text-text-muted">hrs</span></p>
+                <p class="mt-2 text-sm text-text-muted">Suma real de horas ordinarias configuradas.</p>
+            </x-ui.card>
+
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Días laborables</p>
+                <p class="mt-3 text-3xl font-black tracking-tight text-text">{{ $workingDaysCount }} <span class="text-base font-semibold text-text-muted">días</span></p>
+                <p class="mt-2 text-sm text-text-muted">Calculado desde la plantilla semanal visible.</p>
+            </x-ui.card>
+
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Estado técnico</p>
+                <p class="mt-3 text-2xl font-black tracking-tight {{ $this->getHasHistoricalImpactProperty() ? 'text-warning-strong' : 'text-success-strong' }}">
+                    {{ $this->getHasHistoricalImpactProperty() ? 'Histórico activo' : 'Sin conflictos' }}
                 </p>
-            </div>
+                <p class="mt-2 text-sm text-text-muted">
+                    {{ $this->getHasHistoricalImpactProperty() ? $this->historicalImpactSummary() : 'No hay nómina procesada persistida para esta empresa.' }}
+                </p>
+            </x-ui.card>
         </section>
 
         @if ($showSuccess)
-            <section class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800 shadow-sm">
+            <x-ui.alert variant="success" class="shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <p class="font-semibold">Listo: versión guardada</p>
-                        <p class="mt-1 text-emerald-700">
-                            La versión anterior conserva su historial y la nueva ya está disponible para asignar.
-                        </p>
+                        <p class="mt-1">La versión anterior conserva su historial y la nueva ya está disponible para asignar.</p>
                     </div>
-
-                    <button
-                        type="button"
-                        wire:click="$set('showSuccess', false)"
-                        class="rounded-full border border-emerald-200 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-100"
-                        aria-label="Cerrar mensaje de éxito"
-                    >
-                        Cerrar
-                    </button>
+                    <button type="button" wire:click="$set('showSuccess', false)" class="text-xs font-bold uppercase tracking-wide text-success-strong" aria-label="Cerrar mensaje de éxito">Cerrar</button>
                 </div>
-            </section>
+            </x-ui.alert>
         @endif
 
         @if ($showRetirementSuccess)
-            <section class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800 shadow-sm">
+            <x-ui.alert variant="success" class="shadow-sm">
                 <p class="font-semibold">Jornada retirada</p>
                 <p class="mt-1">Las asignaciones vigentes y futuras ahora usan la jornada reemplazante.</p>
-            </section>
+            </x-ui.alert>
         @endif
 
         @if ($requiresProfileMigration)
-            <section class="rounded-3xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900 shadow-sm">
+            <x-ui.alert variant="warning" class="shadow-sm">
                 <p class="font-semibold">Faltan migraciones de jornadas</p>
-                <p class="mt-2 text-sm">No existe aún la tabla <code>work_schedule_profiles</code> en la base actual.</p>
-                <p class="mt-1 text-sm">
-                    Ejecutá <code>php artisan migrate --force</code> para completar la migración y habilitar perfiles/versiones.
-                </p>
+                <p class="mt-2">No existe aún la tabla <code>work_schedule_profiles</code> en la base actual.</p>
+                <p class="mt-1">Ejecutá <code>php artisan migrate --force</code> para completar la migración y habilitar perfiles/versiones.</p>
                 @error('jornadas_profiles')
-                    <p class="mt-2 text-sm font-semibold text-amber-900">{{ $message }}</p>
+                    <p class="mt-2 font-semibold">{{ $message }}</p>
                 @enderror
-            </section>
+            </x-ui.alert>
         @endif
 
         @if ($showHistoricalImpactWarning)
-            <section class="rounded-3xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+            <x-ui.alert variant="warning" class="shadow-sm">
                 <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
-                        <p class="text-sm font-semibold uppercase tracking-wide text-amber-800">Impacto sobre históricos</p>
-                        <p class="mt-1 text-sm text-amber-900">
-                        @if ($this->getHasHistoricalImpactProperty())
-                            {{ $this->historicalImpactSummary() }}
-                        @else
-                            No hay historial de nómina cerrado para esta compañía.
-                        @endif
+                        <p class="text-sm font-bold uppercase tracking-wide">Impacto sobre históricos</p>
+                        <p class="mt-1 text-sm">
+                            @if ($this->getHasHistoricalImpactProperty())
+                                {{ $this->historicalImpactSummary() }}
+                            @else
+                                No hay historial de nómina cerrado para esta compañía.
+                            @endif
                         </p>
-                        <p class="mt-2 text-sm text-amber-800">
-                            Si continúas, se creará una versión nueva. Los resultados históricos conservarán la versión anterior.
-                        </p>
+                        <p class="mt-2 text-sm">Si continuás, se creará una versión nueva. Los resultados históricos conservarán la versión anterior.</p>
                     </div>
 
-                    <div class="mt-2 flex shrink-0 gap-2 md:mt-0">
-                        <x-ui.loading-button
-                            type="button"
-                            wire:click="confirmHistoricalSave"
-                            target="confirmHistoricalSave"
-                            loading-label="Guardando…"
-                            class="inline-flex items-center rounded-full border border-amber-300 bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
-                        >
+                    <div class="flex shrink-0 flex-wrap gap-2">
+                        <x-ui.loading-button type="button" wire:click="confirmHistoricalSave" target="confirmHistoricalSave" loading-label="Guardando…" class="inline-flex min-h-10 items-center rounded-xl bg-warning px-4 py-2 text-sm font-semibold text-white">
                             Confirmar y crear versión
                         </x-ui.loading-button>
-
-                        <button
-                            type="button"
-                            wire:click="cancelHistoricalSave"
-                            class="inline-flex items-center rounded-full border border-amber-200 bg-white px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
-                        >
-                            Revisar ajustes
-                        </button>
+                        <x-ui.button type="button" variant="secondary" wire:click="cancelHistoricalSave">Revisar ajustes</x-ui.button>
                     </div>
                 </div>
-            </section>
+            </x-ui.alert>
         @endif
 
-        <section class="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <article class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <header class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                        <h2 class="text-xl font-semibold text-slate-900">Plantilla semanal</h2>
-                        <p class="text-sm text-slate-600">Define el horario real; una hora de fin menor indica que la jornada cruza medianoche.</p>
-                    </div>
-                    <div class="flex flex-wrap items-end gap-2">
-                        <label class="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Plantilla
-                            <select wire:model.live="selectedProfileId" class="mt-1 block rounded-xl border-slate-300 text-sm" @disabled($requiresProfileMigration)>
-                                @forelse ($profiles as $profile)
-                                    <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
-                                @empty
-                                     <option value="">Jornada general · sin guardar</option>
-                                @endforelse
-                            </select>
-                        </label>
-                        @if ($canManageSchedules)
-                            <x-ui.loading-button type="button" wire:click="openCreateProfile" target="openCreateProfile" loading-label="Abriendo…" :disabled="$requiresProfileMigration" class="rounded-full border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Nueva plantilla</x-ui.loading-button>
-                            @if ($selectedProfileId)
-                                <x-ui.loading-button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked="true"
-                                    wire:click="openRetireProfile({{ $selectedProfileId }})"
-                                    target="openRetireProfile({{ $selectedProfileId }})"
-                                    loading-label="Abriendo…"
-                                    class="inline-flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-                                >
-                                    <span class="h-3 w-3 rounded-full bg-emerald-500"></span>
-                                    Disponible
-                                </x-ui.loading-button>
-                            @endif
-                            @if ($requiresProfileMigration)
-                                <p class="text-xs text-slate-500">No se puede crear o versionar plantillas hasta aplicar migraciones pendientes.</p>
-                            @endif
-                        @endif
-                    </div>
-                </header>
+        <section class="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(22rem,0.85fr)] xl:items-start">
+            <div class="space-y-6">
+                <x-ui.card aria-labelledby="weekly-schedule-heading" class="overflow-hidden">
+                    <x-slot:header>
+                        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                            <div>
+                                <p class="text-xs font-bold uppercase tracking-wider text-brand">Plantilla semanal de horarios</p>
+                                <h2 id="weekly-schedule-heading" class="mt-1 text-xl font-bold text-text">Plantilla semanal de horarios</h2>
+                                <p class="mt-1 text-sm text-text-muted">Define el horario real; una hora de fin menor indica que la jornada cruza medianoche.</p>
+                            </div>
 
-                @if ($showCreateProfile)
-                    <div class="mb-4 flex flex-col gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 sm:flex-row sm:items-end">
-                        <label class="flex-1 text-sm font-semibold text-indigo-950">Nombre de la nueva plantilla
-                            <input type="text" wire:model="newProfileName" class="mt-1 w-full rounded-xl border-indigo-200" placeholder="Ej. Guardia nocturna" />
-                            @error('newProfileName') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
-                        </label>
-                        <x-ui.loading-button type="button" wire:click="createProfile" target="createProfile" loading-label="Duplicando…" class="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</x-ui.loading-button>
-                        <button type="button" wire:click="cancelCreateProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-indigo-700">Cancelar</button>
-                    </div>
-                @endif
-
-                @if ($showRetireProfile)
-                    <div class="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
-                        <div class="grid gap-3 md:grid-cols-2">
-                            <label class="text-sm font-semibold text-amber-950">
-                                Jornada reemplazante
-                                <select wire:model="replacementProfileId" class="mt-1 w-full rounded-xl border-amber-300 bg-white">
-                                    <option value="">Seleccioná una jornada</option>
-                                    @foreach ($profiles as $profile)
-                                        @if ($profile['id'] !== $retiringProfileId)
+                            <div class="flex flex-wrap items-end gap-3">
+                                <label class="text-xs font-bold uppercase tracking-wide text-text-muted">
+                                    Plantilla
+                                    <select wire:model.live="selectedProfileId" class="mt-1 block min-h-11 rounded-xl border border-border bg-surface px-3 text-sm text-text" @disabled($requiresProfileMigration)>
+                                        @forelse ($profiles as $profile)
                                             <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
-                                        @endif
-                                    @endforeach
-                                </select>
-                                @error('replacementProfileId') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
-                            </label>
+                                        @empty
+                                            <option value="">Jornada general · sin guardar</option>
+                                        @endforelse
+                                    </select>
+                                </label>
 
-                            <label class="text-sm font-semibold text-amber-950">
-                                Motivo del retiro
-                                <input type="text" wire:model="retirementReason" maxlength="500" class="mt-1 w-full rounded-xl border-amber-300 bg-white" />
-                                @error('retirementReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
-                            </label>
+                                @if ($canManageSchedules && $selectedProfileId)
+                                    <x-ui.loading-button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked="true"
+                                        wire:click="openRetireProfile({{ $selectedProfileId }})"
+                                        target="openRetireProfile({{ $selectedProfileId }})"
+                                        loading-label="Abriendo…"
+                                        class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success-strong"
+                                    >
+                                        <span class="size-2 rounded-full bg-success" aria-hidden="true"></span>
+                                        Disponible
+                                    </x-ui.loading-button>
+                                @endif
+                            </div>
                         </div>
+                    </x-slot:header>
 
-                        <p class="mt-3 text-sm text-amber-900">
-                            Se reasignarán {{ $retirementAffectedEmployeeCount }} empleados con referencias vigentes o futuras. Esta acción no se puede revertir.
-                        </p>
-
-                        <div class="mt-3 flex justify-end gap-2">
-                            <button type="button" wire:click="cancelRetireProfile" class="rounded-full px-4 py-2 text-sm font-semibold text-amber-800">Cancelar</button>
-                            <x-ui.loading-button type="button" wire:click="retireProfile" target="retireProfile" loading-label="Retirando…" class="rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">Retirar y reasignar</x-ui.loading-button>
+                    @if ($showCreateProfile)
+                        <div class="mb-5 rounded-2xl border border-brand/20 bg-brand/5 p-4">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                <label class="flex-1 text-sm font-semibold text-text">Nombre de la nueva plantilla
+                                    <input type="text" wire:model="newProfileName" class="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2" placeholder="Ej. Guardia nocturna" />
+                                    @error('newProfileName') <span class="mt-1 block text-xs text-danger-strong">{{ $message }}</span> @enderror
+                                </label>
+                                <x-ui.loading-button type="button" wire:click="createProfile" target="createProfile" loading-label="Duplicando…" class="inline-flex min-h-10 items-center rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white">Duplicar plantilla visible</x-ui.loading-button>
+                                <x-ui.button type="button" variant="secondary" wire:click="cancelCreateProfile">Cancelar</x-ui.button>
+                            </div>
                         </div>
-                    </div>
-                @endif
-
-                <div class="overflow-hidden rounded-2xl border border-slate-200">
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-slate-200 bg-white text-sm">
-                            <thead class="bg-slate-50/90 text-slate-600">
-                                 <tr>
-                                     <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Día</th>
-                                     <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Laborable</th>
-                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Inicio</th>
-                                      <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Fin</th>
-                                     <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Horas base</th>
-                                     <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide">Notas internas</th>
-                                 </tr>
-                            </thead>
-
-                            <tbody class="divide-y divide-slate-200">
-                                @foreach ($schedules as $index => $schedule)
-                                    <tr class="transition {{ $schedule['is_working_day'] ? 'bg-white' : 'bg-slate-50/70 text-slate-500' }}">
-                                        <td class="px-4 py-3 align-top font-medium text-slate-900">{{ $schedule['day_name'] }}</td>
-
-                                        <td class="px-4 py-3 align-top">
-                                            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-                                                <input
-                                                    type="checkbox"
-                                                    wire:model.live="schedules.{{ $index }}.is_working_day"
-                                                    @disabled(! $canManageSchedules)
-                                                    class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-2 focus:ring-emerald-500"
-                                                    aria-label="Marcar {{ $schedule['day_name'] }} como día laborable"
-                                                />
-                                                {{ $schedule['is_working_day'] ? 'Sí' : 'No' }}
-                                            </label>
-                                        </td>
-
-                                        @foreach (['start_time' => 'Inicio', 'end_time' => 'Fin'] as $field => $label)
-                                            <td class="px-4 py-3 align-top">
-                                                <input type="time" wire:model.live="schedules.{{ $index }}.{{ $field }}" @disabled(! $canManageSchedules || ! $schedule['is_working_day']) aria-label="{{ $label }} de {{ $schedule['day_name'] }}" class="rounded-xl border-slate-300 text-sm disabled:bg-slate-100" />
-                                                @error("schedules.$index.$field") <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
-                                            </td>
-                                        @endforeach
-
-                                        <td class="px-4 py-3 align-top">
-                                            <input
-                                                type="number"
-                                                step="0.25"
-                                                min="0"
-                                                max="24"
-                                                wire:model.live="schedules.{{ $index }}.base_ordinary_hours"
-                                                @disabled(! $canManageSchedules)
-                                                class="w-28 rounded-xl border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                                placeholder="0.00"
-                                            />
-                                            @if (! $schedule['is_working_day'])
-                                                <p class="mt-1 text-[11px] text-slate-500">No laborable: no impactará en nómina.</p>
-                                            @endif
-                                            @error("schedules.$index.base_ordinary_hours")
-                                                <p class="mt-1 text-xs text-red-600">{{ $message }}</p>
-                                            @enderror
-                                        </td>
-
-                                        <td class="px-4 py-3 align-top">
-                                            <input
-                                                type="text"
-                                                wire:model.live="schedules.{{ $index }}.notes"
-                                                @disabled(! $canManageSchedules)
-                                                placeholder="Nota breve"
-                                                class="w-full rounded-xl border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-                                            />
-                                        </td>
-
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                        <p class="font-semibold text-slate-900">
-                            Días laborables: {{ $this->getWorkingDaysCountProperty() }} · Horas base semanales: {{ number_format($this->getWeeklyOrdinaryHoursProperty(), 2) }}
-                        </p>
-                        <p class="mt-1 text-xs text-slate-600">Nota: el valor base se usa para definir la franja ordinaria en procesos de nómina.</p>
-                    </div>
-                </div>
-
-                <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-end">
-                    @if ($canManageSchedules)
-                        <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de activación
-                            <input type="text" wire:model="activationReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué se activa la nueva política" />
-                            @error('activationReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
-                        </label>
-                        <x-ui.loading-button
-                            type="button"
-                            wire:click="activateGeneralProfile"
-                            target="activateGeneralProfile"
-                            loading-label="Activando…"
-                            class="inline-flex items-center rounded-full bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-emerald-800 disabled:opacity-70"
-                        >
-                            Activar jornada general
-                        </x-ui.loading-button>
-                        @if ($selectedProfileId)
-                            <label class="w-full text-sm font-semibold text-slate-700 sm:max-w-md">Motivo de la nueva versión
-                                <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border-slate-300" placeholder="Explicá por qué cambia la jornada" />
-                                @error('changeReason') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
-                            </label>
-                        @endif
-                         <x-ui.loading-button
-                             type="button"
-                             wire:click="save"
-                             target="save"
-                             loading-label="Guardando…"
-                             :disabled="$requiresProfileMigration"
-                            class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-slate-800 disabled:opacity-70"
-                        >
-                            {{ $selectedProfileId ? 'Crear nueva versión' : 'Guardar plantilla inicial' }}
-                        </x-ui.loading-button>
                     @endif
-                </div>
-            </article>
 
-            <aside class="space-y-4">
-                <article class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 class="text-lg font-semibold text-slate-900">Bandas de recargo aplicadas</h3>
-                    <p class="mt-1 text-sm text-slate-600">Las franjas siguientes ya se usan en el motor de cálculo.</p>
+                    @if ($showRetireProfile)
+                        <div class="mb-5 rounded-2xl border border-warning/30 bg-warning/10 p-4">
+                            <div class="grid gap-3 md:grid-cols-2">
+                                <label class="text-sm font-semibold text-text">
+                                    Jornada reemplazante
+                                    <select wire:model="replacementProfileId" class="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2">
+                                        <option value="">Seleccioná una jornada</option>
+                                        @foreach ($profiles as $profile)
+                                            @if ($profile['id'] !== $retiringProfileId)
+                                                <option value="{{ $profile['id'] }}">{{ $profile['name'] }} · v{{ $profile['version'] }}</option>
+                                            @endif
+                                        @endforeach
+                                    </select>
+                                    @error('replacementProfileId') <span class="mt-1 block text-xs text-danger-strong">{{ $message }}</span> @enderror
+                                </label>
 
-                    <ul class="mt-4 space-y-2">
+                                <label class="text-sm font-semibold text-text">
+                                    Motivo del retiro
+                                    <input type="text" wire:model="retirementReason" maxlength="500" class="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2" />
+                                    @error('retirementReason') <span class="mt-1 block text-xs text-danger-strong">{{ $message }}</span> @enderror
+                                </label>
+                            </div>
+
+                            <p class="mt-3 text-sm text-text-muted">Se reasignarán {{ $retirementAffectedEmployeeCount }} empleados con referencias vigentes o futuras. Esta acción no se puede revertir.</p>
+
+                            <div class="mt-3 flex justify-end gap-2">
+                                <x-ui.button type="button" variant="secondary" wire:click="cancelRetireProfile">Cancelar</x-ui.button>
+                                <x-ui.loading-button type="button" wire:click="retireProfile" target="retireProfile" loading-label="Retirando…" class="inline-flex min-h-10 items-center rounded-xl bg-warning px-4 py-2 text-sm font-semibold text-white">Retirar y reasignar</x-ui.loading-button>
+                            </div>
+                        </div>
+                    @endif
+
+                    <div class="overflow-hidden rounded-2xl border border-border">
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full bg-surface text-sm">
+                                <thead class="bg-surface-muted text-xs font-bold uppercase tracking-wide text-text-muted">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left">Día</th>
+                                        <th class="px-4 py-3 text-center">Laborable</th>
+                                        <th class="px-4 py-3 text-left">Inicio</th>
+                                        <th class="px-4 py-3 text-left">Fin</th>
+                                        <th class="px-4 py-3 text-left">Horas base</th>
+                                        <th class="px-4 py-3 text-left">Notas internas</th>
+                                        <th class="px-4 py-3 text-right">Estado</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody class="divide-y divide-border">
+                                    @foreach ($schedules as $index => $schedule)
+                                        <tr class="transition {{ $schedule['is_working_day'] ? 'bg-surface hover:bg-surface-muted/60' : 'bg-surface-muted/70 text-text-muted' }}">
+                                            <td class="px-4 py-3 align-top font-semibold text-text">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <span class="size-2 rounded-full {{ $schedule['is_working_day'] ? 'bg-success' : 'bg-border' }}" aria-hidden="true"></span>
+                                                    {{ $schedule['day_name'] }}
+                                                </span>
+                                            </td>
+
+                                            <td class="px-4 py-3 text-center align-top">
+                                                <label class="inline-flex items-center gap-2 text-sm text-text-muted">
+                                                    <input
+                                                        type="checkbox"
+                                                        wire:model.live="schedules.{{ $index }}.is_working_day"
+                                                        @disabled(! $canManageSchedules)
+                                                        class="size-4 rounded border-border text-brand focus:ring-2 focus:ring-brand/30"
+                                                        aria-label="Marcar {{ $schedule['day_name'] }} como día laborable"
+                                                    />
+                                                    <span class="sr-only">{{ $schedule['is_working_day'] ? 'Sí' : 'No' }}</span>
+                                                </label>
+                                            </td>
+
+                                            @foreach (['start_time' => 'Inicio', 'end_time' => 'Fin'] as $field => $label)
+                                                <td class="px-4 py-3 align-top">
+                                                    <input type="time" wire:model.live="schedules.{{ $index }}.{{ $field }}" @disabled(! $canManageSchedules || ! $schedule['is_working_day']) aria-label="{{ $label }} de {{ $schedule['day_name'] }}" class="min-h-10 rounded-xl border border-border bg-surface px-3 text-sm text-text disabled:bg-surface-muted" />
+                                                    @error("schedules.$index.$field") <p class="mt-1 text-xs text-danger-strong">{{ $message }}</p> @enderror
+                                                </td>
+                                            @endforeach
+
+                                            <td class="px-4 py-3 align-top">
+                                                <input
+                                                    type="number"
+                                                    step="0.25"
+                                                    min="0"
+                                                    max="24"
+                                                    wire:model.live="schedules.{{ $index }}.base_ordinary_hours"
+                                                    @disabled(! $canManageSchedules)
+                                                    class="w-28 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text disabled:bg-surface-muted"
+                                                    placeholder="0.00"
+                                                />
+                                                @if (! $schedule['is_working_day'])
+                                                    <p class="mt-1 text-[11px] text-text-muted">No impacta</p>
+                                                @endif
+                                                @error("schedules.$index.base_ordinary_hours") <p class="mt-1 text-xs text-danger-strong">{{ $message }}</p> @enderror
+                                            </td>
+
+                                            <td class="px-4 py-3 align-top">
+                                                <input
+                                                    type="text"
+                                                    wire:model.live="schedules.{{ $index }}.notes"
+                                                    @disabled(! $canManageSchedules)
+                                                    placeholder="Nota breve"
+                                                    class="w-full min-w-48 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text disabled:bg-surface-muted"
+                                                />
+                                            </td>
+
+                                            <td class="px-4 py-3 text-right align-top">
+                                                <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $schedule['is_working_day'] ? 'bg-success/10 text-success-strong' : 'bg-surface-muted text-text-muted' }}">
+                                                    {{ $schedule['is_working_day'] ? 'Activo' : 'Inactivo' }}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="flex flex-col gap-2 border-t border-border bg-surface-muted px-4 py-3 text-sm text-text-muted sm:flex-row sm:items-center sm:justify-between">
+                            <p class="font-semibold text-text">Días laborables: {{ $workingDaysCount }} · Horas base semanales: {{ number_format($weeklyOrdinaryHours, 2) }}</p>
+                            <p class="text-xs">Nota: el valor base se usa para definir la franja ordinaria en procesos de nómina.</p>
+                        </div>
+                    </div>
+                </x-ui.card>
+
+                <x-ui.card aria-labelledby="schedule-versioning-heading">
+                    <x-slot:header>
+                        <p class="text-xs font-bold uppercase tracking-wider text-brand">Control de cambios y versionado</p>
+                        <h2 id="schedule-versioning-heading" class="mt-1 text-xl font-bold text-text">Control de cambios y versionado</h2>
+                        <p class="mt-1 text-sm text-text-muted">Cada cambio operativo queda versionado para proteger períodos históricos.</p>
+                    </x-slot:header>
+
+                    @if ($canManageSchedules)
+                        <div class="grid gap-4 lg:grid-cols-2">
+                            <label class="text-sm font-semibold text-text">Motivo de activación
+                                <input type="text" wire:model="activationReason" class="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2" placeholder="Explicá por qué se activa la nueva política" />
+                                @error('activationReason') <span class="mt-1 block text-xs text-danger-strong">{{ $message }}</span> @enderror
+                            </label>
+
+                            @if ($selectedProfileId)
+                                <label class="text-sm font-semibold text-text">Motivo de la nueva versión
+                                    <input type="text" wire:model="changeReason" class="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2" placeholder="Explicá por qué cambia la jornada" />
+                                    @error('changeReason') <span class="mt-1 block text-xs text-danger-strong">{{ $message }}</span> @enderror
+                                </label>
+                            @endif
+                        </div>
+
+                        <div class="mt-4 flex flex-wrap justify-end gap-3">
+                            <x-ui.loading-button type="button" wire:click="activateGeneralProfile" target="activateGeneralProfile" loading-label="Activando…" class="inline-flex min-h-11 items-center rounded-xl bg-success px-5 py-2.5 text-sm font-semibold text-white">
+                                Activar jornada general
+                            </x-ui.loading-button>
+                            <x-ui.loading-button type="button" wire:click="save" target="save" loading-label="Guardando…" :disabled="$requiresProfileMigration" class="inline-flex min-h-11 items-center rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-70">
+                                {{ $selectedProfileId ? 'Crear nueva versión' : 'Guardar plantilla inicial' }}
+                            </x-ui.loading-button>
+                        </div>
+                    @else
+                        <p class="text-sm text-text-muted">Tu rol puede consultar la configuración, pero no crear nuevas versiones.</p>
+                    @endif
+                </x-ui.card>
+            </div>
+
+            <aside class="space-y-6">
+                <x-ui.card aria-labelledby="timebands-heading">
+                    <x-slot:header>
+                        <p class="text-xs font-bold uppercase tracking-wider text-brand">Motor de cálculo</p>
+                        <h2 id="timebands-heading" class="mt-1 text-xl font-bold text-text">Bandas de recargo aplicadas</h2>
+                        <p class="mt-1 text-sm text-text-muted">Las franjas siguientes ya se usan en el motor de cálculo automatizado.</p>
+                    </x-slot:header>
+
+                    <div class="rounded-2xl bg-surface-muted p-4">
+                        <div class="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                            <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+                        </div>
+                        <div class="mt-2 flex h-6 overflow-hidden rounded-xl shadow-sm" aria-hidden="true">
+                            <div class="grid place-items-center bg-warning/30 text-[10px] font-bold text-warning-strong" style="width:25%">+75%</div>
+                            <div class="grid place-items-center bg-success/30 text-[10px] font-bold text-success-strong" style="width:33.33%">100%</div>
+                            <div class="grid place-items-center bg-info/30 text-[10px] font-bold text-info-strong" style="width:16.66%">+25%</div>
+                            <div class="grid place-items-center bg-brand/20 text-[10px] font-bold text-brand" style="width:25.01%">+50%</div>
+                        </div>
+                    </div>
+
+                    <ul class="mt-4 space-y-3">
                         @foreach ($timeBandProfile as $band)
-                            <li class="rounded-2xl border px-3 py-2 {{ $band['color'] }} flex items-center justify-between gap-2">
-                                <span class="font-semibold">{{ $band['label'] }}</span>
-                                <span class="text-xs font-semibold uppercase tracking-[0.15em]">{{ $band['start'] }} – {{ $band['end'] }}</span>
-                                <span class="rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-bold">{{ $band['rate'] }}</span>
+                            <li class="flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 {{ $band['color'] }}">
+                                <div>
+                                    <p class="font-bold">{{ $band['label'] }}</p>
+                                    <p class="mt-0.5 text-xs font-semibold uppercase tracking-wide">{{ $band['start'] }} – {{ $band['end'] }}</p>
+                                </div>
+                                <span class="rounded-full bg-white/70 px-2 py-1 text-xs font-black">{{ $band['rate'] }}</span>
                             </li>
                         @endforeach
                     </ul>
+                </x-ui.card>
 
-                    <button
-                        type="button"
-                        wire:click="$toggle('showTimebandPreview')"
-                        class="mt-4 inline-flex items-center rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                    >
+                <x-ui.card aria-labelledby="technical-checklist-heading">
+                    <x-slot:header>
+                        <h2 id="technical-checklist-heading" class="text-xl font-bold text-text">Checklist de validación técnica</h2>
+                        <p class="mt-1 text-sm text-text-muted">Comprobaciones automáticas que protegen consistencia legal y algorítmica.</p>
+                    </x-slot:header>
+
+                    <button type="button" wire:click="$toggle('showTimebandPreview')" class="mb-4 inline-flex min-h-10 items-center rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-text transition hover:bg-surface-muted">
                         {{ $showTimebandPreview ? 'Ocultar checklist técnico' : 'Ver checklist técnico' }}
                     </button>
 
-                    @if ($showTimebandPreview)
-                        <ul class="mt-3 space-y-2">
-                            @foreach ($technicalReadinessItems as $item)
-                                <li class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
-                                    {{ $item }}
-                                </li>
-                            @endforeach
-                        </ul>
-                    @endif
-                </article>
-
-                <article class="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
-                    <h3 class="text-lg font-semibold text-emerald-900">Estado técnico</h3>
-                    @if ($this->getHasHistoricalImpactProperty())
-                        <p class="mt-1 text-sm text-emerald-800">{{ $this->historicalImpactSummary() }}</p>
-                    @else
-                        <p class="mt-1 text-sm text-emerald-800">No hay nómina procesada persistida para esta empresa.</p>
-                    @endif
-                </article>
+                    <ul class="space-y-2">
+                        @foreach ($technicalReadinessItems as $item)
+                            <li class="rounded-xl border border-border bg-surface-muted px-3 py-2 text-sm leading-6 text-text-muted {{ $showTimebandPreview ? '' : 'hidden first:block' }}">
+                                {{ $item }}
+                            </li>
+                        @endforeach
+                    </ul>
+                </x-ui.card>
             </aside>
         </section>
 
         @if ($profileHistory !== [])
-            <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 class="text-xl font-semibold text-slate-900">Historial de jornadas</h2>
-                <p class="mt-1 text-sm text-slate-600">Las jornadas retiradas y las versiones reemplazadas son de solo lectura.</p>
+            <x-ui.card aria-labelledby="schedule-history-heading">
+                <x-slot:header>
+                    <h2 id="schedule-history-heading" class="text-xl font-bold text-text">Historial de jornadas</h2>
+                    <p class="mt-1 text-sm text-text-muted">Las jornadas retiradas y las versiones reemplazadas son de solo lectura.</p>
+                </x-slot:header>
 
-                <div class="mt-4 overflow-x-auto">
-                    <table class="min-w-full divide-y divide-slate-200 text-sm">
-                        <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <div class="overflow-x-auto rounded-2xl border border-border">
+                    <table class="min-w-full divide-y divide-border text-sm">
+                        <thead class="bg-surface-muted text-left text-xs font-bold uppercase tracking-wide text-text-muted">
                             <tr>
                                 <th class="px-3 py-2">Jornada</th>
                                 <th class="px-3 py-2">Estado</th>
@@ -365,25 +409,25 @@
                                 <th class="px-3 py-2">Reemplazo</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
+                        <tbody class="divide-y divide-border bg-surface">
                             @foreach ($profileHistory as $profile)
                                 <tr>
-                                    <td class="px-3 py-3 font-semibold text-slate-900">{{ $profile['name'] }} · v{{ $profile['version'] }}</td>
+                                    <td class="px-3 py-3 font-semibold text-text">{{ $profile['name'] }} · v{{ $profile['version'] }}</td>
                                     <td class="px-3 py-3">
-                                        <span class="rounded-full px-2 py-1 text-xs font-semibold {{ $profile['status'] === 'retired' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700' }}">
+                                        <span class="rounded-full px-2 py-1 text-xs font-semibold {{ $profile['status'] === 'retired' ? 'bg-warning/10 text-warning-strong' : 'bg-surface-muted text-text-muted' }}">
                                             {{ $profile['status'] === 'retired' ? 'Retirada' : 'Versión reemplazada' }}
                                         </span>
                                     </td>
-                                    <td class="px-3 py-3 text-slate-600">{{ $profile['date'] ?? '—' }}</td>
-                                    <td class="px-3 py-3 text-slate-600">{{ $profile['actor'] ?? '—' }}</td>
-                                    <td class="px-3 py-3 text-slate-600">{{ $profile['reason'] ?? '—' }}</td>
-                                    <td class="px-3 py-3 text-slate-600">{{ $profile['replacement'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $profile['date'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $profile['actor'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $profile['reason'] ?? '—' }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $profile['replacement'] ?? '—' }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
                     </table>
                 </div>
-            </section>
+            </x-ui.card>
         @endif
     </div>
 </div>
