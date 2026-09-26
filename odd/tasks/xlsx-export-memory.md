@@ -26,5 +26,6 @@ Make the payroll stub XLSX export safe under the full test suite's accumulated m
 - `PayrollStubExporter::export()` now releases the XLSX writer in the write callback and always disconnects worksheets/releases local workbook references in `finally`, including exceptional paths.
 - After cleanup and final regression calibration, `php artisan test tests/Feature/Nomina/ComprobanteDownloadTest.php` passed: 10 tests, 39 assertions.
 - `npm run build` passed.
-- Full suite under the harness default `128M` still exhausts memory in ZipStream; the focused regression passes. The export-focused suite passes with `php -d memory_limit=512M vendor/bin/pest --filter=ComprobanteDownloadTest`.
-- Commits: pending (owned by the parent orchestrator).
+- Full suite passes with `php -d memory_limit=512M vendor/bin/pest`: 1042 passed, 3 skipped, 5332 assertions.
+- The harness default `128M` remains insufficient for the export-heavy full suite; use the explicit 512M command in CI/local verification.
+- Commit: `6d0c126 fix: release payroll xlsx export memory`.
