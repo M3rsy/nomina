@@ -121,7 +121,7 @@
                                     class="relative"
                                     x-data="{ open: false }"
                                     @resize.window="if (window.innerWidth < 1280) { open = false }"
-                                    @open-company-selector.window="open = true; $nextTick(() => $refs.companyTrigger.focus())"
+                                    @open-company-selector.window="if (window.innerWidth >= 1280) { open = true; $nextTick(() => $refs.companyTrigger.focus()) }"
                                     @click.outside="open = false"
                                     @focusout="if (open && !$el.contains($event.relatedTarget)) { open = false }"
                                     @keydown.escape="if (open) { $event.stopPropagation(); open = false; $nextTick(() => $refs.companyTrigger.focus()) }"
