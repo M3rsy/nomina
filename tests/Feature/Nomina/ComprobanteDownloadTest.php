@@ -6,11 +6,15 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\User;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\PayrollStubExporter;
+use App\Services\Payroll\TemporaryXlsxFile;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\TestCase;
 
 beforeEach(function () {
+    /** @var TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
@@ -55,6 +59,7 @@ function setupStubScenario(): array
 }
 
 test('company admin can download comprobante for own employee', function () {
+    /** @var TestCase $this */
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();
 
     $this->actingAs($admin);
@@ -72,6 +77,7 @@ test('company admin can download comprobante for own employee', function () {
 });
 
 test('comprobante download schedules temporary file deletion after sending', function () {
+    /** @var TestCase $this */
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();
 
     $this->actingAs($admin);
@@ -88,7 +94,46 @@ test('comprobante download schedules temporary file deletion after sending', fun
     }
 });
 
+test('repeated comprobante exports release workbook memory', function () {
+    [, $payPeriod, $employee] = setupStubScenario();
+    $exporter = new PayrollStubExporter;
+    $garbageCollectionWasEnabled = gc_enabled();
+    $path = null;
+
+    gc_collect_cycles();
+    gc_disable();
+    $memoryBefore = memory_get_usage();
+    $memoryGrowth = 0;
+    $memoryGrowthLimit = 3 * 1024 * 1024;
+
+    try {
+        foreach (range(1, 24) as $_) {
+            $path = $exporter->export($payPeriod, $employee);
+
+            expect($path)->toBeFile();
+
+            TemporaryXlsxFile::delete($path);
+            $path = null;
+        }
+
+        $memoryGrowth = memory_get_usage() - $memoryBefore;
+    } finally {
+        if ($path !== null) {
+            TemporaryXlsxFile::delete($path);
+        }
+
+        if ($garbageCollectionWasEnabled) {
+            gc_enable();
+        }
+
+        gc_collect_cycles();
+    }
+
+    expect($memoryGrowth)->toBeLessThan($memoryGrowthLimit);
+});
+
 test('comprobante is unavailable before the official payroll export', function (string $status) {
+    /** @var TestCase $this */
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();
     $payPeriod->update(['status' => $status]);
 
@@ -104,6 +149,7 @@ test('comprobante is unavailable before the official payroll export', function (
 ]);
 
 test('comprobante download rejects employee from another company', function () {
+    /** @var TestCase $this */
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();
     $companyB = Company::factory()->create();
     $employeeB = Employee::factory()->forCompany($companyB)->create();
@@ -116,6 +162,7 @@ test('comprobante download rejects employee from another company', function () {
 });
 
 test('user without payroll export permission cannot download comprobante', function () {
+    /** @var TestCase $this */
     [$company, $payPeriod, $employee, $admin] = setupStubScenario();
     $admin->roles->first()->revokePermissionTo('payroll.export');
 
@@ -127,6 +174,7 @@ test('user without payroll export permission cannot download comprobante', funct
 });
 
 test('comprobante download rejects access to other company pay period', function () {
+    /** @var TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
     $payPeriodB = PayPeriod::factory()->forCompany($companyB)->create([
@@ -145,6 +193,7 @@ test('comprobante download rejects access to other company pay period', function
 });
 
 test('super admin cannot download comprobante outside active company', function () {
+    /** @var TestCase $this */
     [, $otherPayPeriod, $otherEmployee] = setupStubScenario();
     $activeCompany = Company::factory()->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');

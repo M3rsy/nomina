@@ -35,19 +35,31 @@ class PayrollStubExporter
 
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Comprobante');
 
-        $this->applyColumnWidths($sheet);
-        $this->writeHeaderBlock($sheet, $payPeriod, $identity);
-        $this->writeTableHeader($sheet);
-        $totals = $this->writeDataRows($sheet, $payPeriod, $employee);
-        $this->writeTotalsRows($sheet, $totals);
-        $this->applyHeaderStyle($sheet);
+        try {
+            $sheet->setTitle('Comprobante');
 
-        return TemporaryXlsxFile::write('payroll_stub_', function (string $path) use ($spreadsheet): void {
-            $writer = new Xlsx($spreadsheet);
-            $writer->save($path);
-        });
+            $this->applyColumnWidths($sheet);
+            $this->writeHeaderBlock($sheet, $payPeriod, $identity);
+            $this->writeTableHeader($sheet);
+            $totals = $this->writeDataRows($sheet, $payPeriod, $employee);
+            $this->writeTotalsRows($sheet, $totals);
+            $this->applyHeaderStyle($sheet);
+
+            return TemporaryXlsxFile::write('payroll_stub_', function (string $path) use ($spreadsheet): void {
+                $writer = new Xlsx($spreadsheet);
+
+                try {
+                    $writer->save($path);
+                } finally {
+                    unset($writer);
+                }
+            });
+        } finally {
+            unset($sheet);
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+        }
     }
 
     public function filename(PayPeriod $payPeriod, Employee $employee): string
