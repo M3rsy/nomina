@@ -6,6 +6,8 @@ use App\Models\PayPeriod;
 use App\Models\PayrollResult;
 use App\Models\User;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\PayrollStubExporter;
+use App\Services\Payroll\TemporaryXlsxFile;
 use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Symfony\Component\HttpFoundation\Response;
@@ -86,6 +88,42 @@ test('comprobante download schedules temporary file deletion after sending', fun
     } finally {
         deleteComprobanteResponseFile($response);
     }
+});
+
+test('repeated comprobante exports release workbook memory', function () {
+    [, $payPeriod, $employee] = setupStubScenario();
+    $exporter = new PayrollStubExporter;
+    $garbageCollectionWasEnabled = gc_enabled();
+    $path = null;
+
+    gc_collect_cycles();
+    gc_disable();
+    $memoryBefore = memory_get_usage();
+
+    try {
+        foreach (range(1, 24) as $_) {
+            $path = $exporter->export($payPeriod, $employee);
+
+            expect($path)->toBeFile();
+
+            TemporaryXlsxFile::delete($path);
+            $path = null;
+        }
+
+        $memoryGrowth = memory_get_usage() - $memoryBefore;
+    } finally {
+        if ($path !== null) {
+            TemporaryXlsxFile::delete($path);
+        }
+
+        if ($garbageCollectionWasEnabled) {
+            gc_enable();
+        }
+
+        gc_collect_cycles();
+    }
+
+    expect($memoryGrowth)->toBeLessThan(3 * 1024 * 1024);
 });
 
 test('comprobante is unavailable before the official payroll export', function (string $status) {
