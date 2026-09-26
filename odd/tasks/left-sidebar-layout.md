@@ -23,5 +23,5 @@ Integrate a global authenticated left sidebar layout while keeping dashboard pag
 - `npm run build` passes.
 - `php artisan test --filter=AuthenticatedNavigationTest` passes (8 tests, 93 assertions).
 - `lens_diagnostics` on `resources/views/components/layouts/app.blade.php` reports no diagnostics.
-- Full `php artisan test` reached the navigation suite with two initial layout-contract failures; both pass after compatibility updates. The broader run then exhausted the 128 MB PHP memory limit in `ComprobanteDownloadTest` before completion.
-- Commits: pending; user has not explicitly authorized commits in this session.
+- Full suite verification under `php -d memory_limit=512M vendor/bin/pest` reached 1041 passing tests; one existing selector-event contract was restored in `c6f7ad6` and its focused regression now passes.
+- Commits: `6f86cf1 feat: add authenticated left sidebar layout`, `c6f7ad6 fix: preserve company selector event contract`.
