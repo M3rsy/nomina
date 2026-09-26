@@ -1,46 +1,56 @@
-<div class="relative min-h-screen bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
+<div class="relative min-h-screen bg-surface-muted px-4 py-8 sm:px-6 lg:px-8" data-vacations-index="workspace">
     <x-ui.loading-overlay target="approve,adjustBalance,cancel" message="Actualizando vacaciones y saldo…" />
-    <div class="mx-auto max-w-7xl space-y-5">
-        <header class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div class="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <p class="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700">Tiempo remunerado</p>
-                    <h1 class="mt-3 text-3xl font-black text-slate-950">Vacaciones pagadas</h1>
-                    <p class="mt-2 text-sm text-slate-600">Aprobá rangos sin marcas, conservá la jornada pagable y administrá el saldo con historial.</p>
+    <div class="mx-auto max-w-7xl space-y-6">
+        <header data-vacation-section="hero" class="relative overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
+            <div class="h-1.5 bg-gradient-to-r from-brand via-dashboard-info to-success" aria-hidden="true"></div>
+            <div class="flex flex-col gap-6 p-6 sm:p-8 lg:flex-row lg:items-center lg:justify-between">
+                <div class="max-w-3xl">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex rounded-full bg-brand/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-brand">Gestión de ausencias</span>
+                        <span class="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-success"><span class="h-1.5 w-1.5 rounded-full bg-success"></span>Tiempo remunerado</span>
+                    </div>
+                    <h1 class="mt-4 text-3xl font-black tracking-tight text-text sm:text-4xl">Vacaciones pagadas</h1>
+                    <p class="mt-3 max-w-2xl text-sm leading-6 text-text-muted">Aprobá rangos, conservá la jornada pagable y administrá el saldo del equipo con historial completo.</p>
                 </div>
                 @can('vacations.manage')
-                    <div class="flex gap-2">
-                        <button wire:click="openAdjustmentModal" @disabled($companyId === null) class="min-h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold disabled:opacity-50">Ajustar saldo</button>
-                        <button wire:click="openCreateModal" @disabled($companyId === null) class="min-h-11 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50">Aprobar vacaciones</button>
+                    <div class="flex flex-col gap-2 sm:flex-row">
+                        <button wire:click="openAdjustmentModal" @disabled($companyId === null) class="min-h-11 rounded-2xl border border-border bg-surface px-4 text-sm font-bold text-text shadow-sm transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50">Ajustar saldo</button>
+                        <button wire:click="openCreateModal" @disabled($companyId === null) class="min-h-11 rounded-2xl bg-brand px-4 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50">Aprobar vacaciones</button>
                     </div>
                 @endcan
             </div>
         </header>
 
         @if ($companyId === null)
-            <div class="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Seleccioná una empresa para consultar y gestionar sus vacaciones.</div>
+            <div class="rounded-3xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning-strong">Seleccioná una empresa para consultar y gestionar sus vacaciones.</div>
         @else
-            <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section data-vacation-section="summary" aria-label="Resumen de vacaciones" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Registros visibles</p><p class="mt-2 text-3xl font-black text-text">{{ $vacations->total() }}</p><p class="mt-2 text-xs text-text-muted">Solicitudes según los filtros.</p></article>
+                <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Estado consultado</p><p class="mt-2 text-xl font-black text-text">{{ match ($status) { 'approved' => 'Aprobadas', 'cancelled' => 'Canceladas', default => 'Todos' } }}</p><p class="mt-2 text-xs text-text-muted">Segmento actual del historial.</p></article>
+                <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Saldo gestionable</p><p class="mt-2 text-xl font-black text-text">{{ count($balances) }} empleados</p><p class="mt-2 text-xs text-text-muted">Personas con saldo en la empresa activa.</p></article>
+            </section>
+
+            <section data-vacation-section="filters" class="rounded-3xl border border-border bg-surface p-5 shadow-sm">
                 <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
-                    <label><span class="mb-1 block text-xs font-medium text-slate-700">Buscar empleado</span><input wire:model.live.debounce.300ms="search" type="search" placeholder="Nombre, apellido o código…" class="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"></label>
-                    <label><span class="mb-1 block text-xs font-medium text-slate-700">Estado</span><select wire:model.live="status" class="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"><option value="all">Todos</option><option value="approved">Aprobadas</option><option value="cancelled">Canceladas</option></select></label>
+                    <label><span class="mb-1.5 block text-sm font-semibold text-text">Buscar empleado</span><input wire:model.live.debounce.300ms="search" type="search" placeholder="Nombre, apellido o código…" class="h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"></label>
+                    <label><span class="mb-1.5 block text-sm font-semibold text-text">Estado</span><select wire:model.live="status" class="h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"><option value="all">Todos</option><option value="approved">Aprobadas</option><option value="cancelled">Canceladas</option></select></label>
                 </div>
             </section>
 
-            <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <section data-vacation-section="records" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
                 <div class="overflow-x-auto">
                     <table class="min-w-full">
-                        <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"><tr><th class="px-4 py-3">Empleado</th><th class="px-4 py-3">Rango inclusivo</th><th class="px-4 py-3">Jornadas</th><th class="px-4 py-3">Saldo</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3">Detalle</th><th class="px-4 py-3">Acciones</th></tr></thead>
+                        <thead class="bg-surface-muted text-left text-xs font-bold uppercase tracking-[0.12em] text-text-muted"><tr><th class="px-4 py-3">Empleado</th><th class="px-4 py-3">Rango inclusivo</th><th class="px-4 py-3">Jornadas</th><th class="px-4 py-3">Saldo</th><th class="px-4 py-3">Estado</th><th class="px-4 py-3">Detalle</th><th class="px-4 py-3">Acciones</th></tr></thead>
                         <tbody>
                             @forelse ($vacations as $vacation)
                                 @php($balance = (int) ($balances[$vacation->employee_id] ?? 0))
-                                <tr class="border-t border-slate-200 align-top" wire:key="vacation-{{ $vacation->id }}">
-                                    <td class="px-4 py-3.5"><p class="text-sm font-semibold text-slate-900">{{ $vacation->employee->full_name }}</p><p class="text-xs text-slate-500">Código {{ $vacation->employee->external_id }}</p></td>
-                                    <td class="whitespace-nowrap px-4 py-3.5 text-sm text-slate-700">{{ $vacation->start_date->format('d/m/Y') }} — {{ $vacation->end_date->format('d/m/Y') }}</td>
-                                    <td class="px-4 py-3.5 text-sm text-slate-700">{{ $vacation->days->count() }} día(s)<br><span class="text-xs text-slate-500">{{ $vacation->days->sum('planned_minutes') }} min pagables</span></td>
-                                    <td class="px-4 py-3.5"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $balance < 0 ? 'bg-rose-50 text-rose-700' : 'bg-sky-50 text-sky-700' }}">{{ $balance }} día(s)</span></td>
-                                    <td class="px-4 py-3.5"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $vacation->status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $vacation->status === 'approved' ? 'Aprobada' : 'Cancelada' }}</span></td>
-                                    <td class="px-4 py-3.5 text-xs text-slate-600">
+                                <tr class="border-t border-border align-top transition hover:bg-surface-muted/60" wire:key="vacation-{{ $vacation->id }}">
+                                    <td class="px-4 py-3.5"><p class="text-sm font-bold text-text">{{ $vacation->employee->full_name }}</p><p class="text-xs text-text-muted">Código {{ $vacation->employee->external_id }}</p></td>
+                                    <td class="whitespace-nowrap px-4 py-3.5 text-sm text-text-muted">{{ $vacation->start_date->format('d/m/Y') }} — {{ $vacation->end_date->format('d/m/Y') }}</td>
+                                    <td class="px-4 py-3.5 text-sm text-text-muted">{{ $vacation->days->count() }} día(s)<br><span class="text-xs text-slate-500">{{ $vacation->days->sum('planned_minutes') }} min pagables</span></td>
+                                    <td class="px-4 py-3.5"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $balance < 0 ? 'bg-danger/10 text-danger' : 'bg-dashboard-info/10 text-dashboard-info-strong' }}">{{ $balance }} día(s)</span></td>
+                                    <td class="px-4 py-3.5"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ $vacation->status === 'approved' ? 'bg-success/10 text-success-strong' : 'bg-surface-muted text-text-muted' }}">{{ $vacation->status === 'approved' ? 'Aprobada' : 'Cancelada' }}</span></td>
+                                    <td class="px-4 py-3.5 text-xs text-text-muted">
                                         @if ($vacation->notes)<p>{{ $vacation->notes }}</p>@endif
                                         @if (count($vacation->excluded_dates ?? []) > 0)
                                             <details class="mt-1"><summary class="cursor-pointer font-semibold text-amber-700">{{ count($vacation->excluded_dates) }} fecha(s) excluida(s)</summary><ul class="mt-1 space-y-1">@foreach ($vacation->excluded_dates as $excluded)<li>{{ $excluded['date'] }}: {{ $excluded['label'] }}</li>@endforeach</ul></details>
