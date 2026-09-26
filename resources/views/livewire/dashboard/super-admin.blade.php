@@ -1,6 +1,6 @@
 <div class="min-h-screen bg-surface-muted">
     <div class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="dashboard-heading">
+        <section data-dashboard-section="hero" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="dashboard-heading">
             <div class="h-2 bg-gradient-to-r from-brand via-brand-strong to-success" aria-hidden="true"></div>
             <div class="flex flex-col gap-6 px-6 py-7 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:py-8">
                 <div class="max-w-3xl">
@@ -8,8 +8,10 @@
                         <span class="h-2 w-2 rounded-full bg-success" aria-hidden="true"></span>
                         Vista ejecutiva
                     </div>
+                    <p class="text-xs font-bold uppercase tracking-wider text-brand">Centro de control</p>
                     <h1 id="dashboard-heading" class="text-3xl font-black tracking-tight text-text sm:text-4xl">Panel super administrador</h1>
-                    <p class="mt-3 max-w-2xl text-sm leading-6 text-text-muted sm:text-base">Una lectura consolidada de la operación, la salud de nómina y las tendencias del período seleccionado.</p>
+                    <p class="mt-3 text-xs font-bold uppercase tracking-wider text-brand">Alcance empresarial</p>
+                    <p class="max-w-2xl text-sm leading-6 text-text-muted sm:text-base">Una lectura consolidada de la operación, la salud de nómina y las tendencias del período seleccionado.</p>
                 </div>
                 <div class="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-brand-subtle text-brand" aria-hidden="true">
                     <svg class="h-10 w-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -48,7 +50,8 @@
             <p class="mt-4 border-t border-border pt-4 text-xs leading-5 text-text-muted">Las tarjetas de organización muestran el estado actual. Los períodos de nómina usan inclusión completa y límites inclusivos. La tendencia mensual usa la fecha de cada resultado con límites inclusivos.</p>
         </section>
 
-        <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de organización">
+        <section data-dashboard-section="organization-kpis" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de organización">
+            <h2 class="sr-only">Indicadores de organización</h2>
             <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm">
                 <div class="flex items-start justify-between gap-4">
                     <div>
@@ -106,10 +109,10 @@
             </article>
         </section>
 
-        <section class="rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="payroll-overview-heading">
+        <section data-dashboard-section="payroll-operations" class="rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="payroll-overview-heading">
             <div class="flex flex-col gap-4 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Operación</p>
+                    <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Estado operativo</p>
                     <h2 id="payroll-overview-heading" class="mt-1 text-xl font-black text-text">Resumen operativo de nómina</h2>
                     @if (! empty($payrollOverview))
                         <p class="mt-1 text-sm text-text-muted">Empresa activa: <span class="font-bold text-text">{{ $payrollOverview['company_name'] }}</span></p>
@@ -185,7 +188,7 @@
                 </section>
             @endcan
 
-            <section class="min-w-0 rounded-3xl border border-border bg-surface shadow-sm @can('audit.view') lg:col-span-2 @else lg:col-span-3 @endcan" aria-labelledby="payroll-trends-heading">
+            <section data-dashboard-section="payroll-trends" class="min-w-0 rounded-3xl border border-border bg-surface shadow-sm @can('audit.view') lg:col-span-2 @else lg:col-span-3 @endcan" aria-labelledby="payroll-trends-heading">
                 <div class="border-b border-border px-5 py-5 sm:px-6">
                     <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Evolución</p>
                     <h2 id="payroll-trends-heading" class="mt-1 text-xl font-black text-text">Tendencia mensual de nómina</h2>
