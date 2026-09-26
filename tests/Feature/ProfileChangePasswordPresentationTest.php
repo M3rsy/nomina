@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Profile\ChangePassword;
+use App\Models\Company;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Livewire\Livewire;
@@ -76,7 +77,45 @@ test('change password fields and submission expose autocomplete and loading feed
         )->length)->toBe(1);
 });
 
-test('change password page uses administration design system surfaces', function () {
+test('change password page presents truthful account context and security guidance', function () {
+    $user = User::factory()->create([
+        'name' => 'Andrea López',
+        'email' => 'andrea@example.test',
+    ]);
+    $user->assignRole('super_admin');
+
+    $response = actingAs($user)->get(route('profile.change-password'));
+
+    $response->assertOk()
+        ->assertSeeText('Seguridad de la cuenta')
+        ->assertSeeText('Cambiar contraseña')
+        ->assertSeeText('Andrea López')
+        ->assertSeeText('andrea@example.test')
+        ->assertSeeText('Superadministrador')
+        ->assertSeeText('Acceso global')
+        ->assertSeeText('Requisitos obligatorios')
+        ->assertSeeText('Al menos 8 caracteres')
+        ->assertSeeText('Diferente de la contraseña actual')
+        ->assertSeeText('La confirmación coincide')
+        ->assertSeeText('Opcional')
+        ->assertSeeText('Estimación de fortaleza')
+        ->assertSeeText('hash seguro')
+        ->assertSeeText('invalida las demás sesiones guardadas');
+
+    $content = mb_strtolower($response->getContent());
+
+    expect($content)->not->toContain('2fa')
+        ->not->toContain('totp')
+        ->not->toContain('94/100')
+        ->not->toContain('historial de contraseñas')
+        ->not->toContain('argon2')
+        ->not->toContain('sha-')
+        ->not->toContain('rgpd')
+        ->not->toContain('ssl-256')
+        ->not->toContain('olvidé mi contraseña');
+});
+
+test('change password visibility controls and local guidance remain accessible and non-blocking', function () {
     $user = User::factory()->create();
     $user->assignRole('super_admin');
 
@@ -88,8 +127,34 @@ test('change password page uses administration design system surfaces', function
     @$document->loadHTML($response->getContent());
     $xpath = new DOMXPath($document);
 
-    expect($xpath->query('//header[contains(concat(" ", normalize-space(@class), " "), " rounded-3xl ")]//h1[normalize-space()="Cambiar contraseña"]')->length)->toBe(1)
-        ->and($xpath->query('//section[contains(concat(" ", normalize-space(@class), " "), " rounded-3xl ")]//form[@*[name()="wire:submit"]="save"]')->length)->toBe(1)
-        ->and($xpath->query('//section//label[@for="current-password" and contains(concat(" ", normalize-space(@class), " "), " text-text ")]')->length)->toBe(1)
-        ->and($xpath->query('//section//p[@id="new-password-hint" and contains(normalize-space(), "Use al menos 8 caracteres.")]')->length)->toBe(1);
+    foreach (['current-password', 'new-password', 'new-password-confirmation'] as $fieldId) {
+        expect($xpath->query(
+            '//button[@type="button" and @aria-controls="'.$fieldId.'"'
+            .' and @*[name()="x-bind:aria-label"] and @*[name()="x-bind:aria-pressed"]]',
+        )->length)->toBe(1);
+    }
+
+    expect($xpath->query('//*[contains(@x-data, "currentPassword")]')->length)->toBe(1)
+        ->and($xpath->query('//form[@*[name()="wire:submit"]="save"]')->length)->toBe(1)
+        ->and($xpath->query('//input[@id="current-password" and @*[name()="wire:model"]="current_password" and @x-model="currentPassword"]')->length)->toBe(1)
+        ->and($xpath->query('//input[@id="new-password" and @*[name()="wire:model"]="password" and @x-model="newPassword"]')->length)->toBe(1)
+        ->and($xpath->query('//input[@id="new-password-confirmation" and @*[name()="wire:model"]="password_confirmation" and @x-model="confirmation"]')->length)->toBe(1)
+        ->and($xpath->query('//a[@href="'.route('dashboard').'" and normalize-space()="Cancelar"]')->length)->toBe(1)
+        ->and($response->getContent())->toContain('return this.currentPassword.length > 0 && this.newPassword.length > 0')
+        ->and($response->getContent())->toContain('return this.newPassword.length > 0 && this.confirmation.length > 0');
+});
+
+test('change password page shows the assigned company for company administrators', function () {
+    $company = Company::factory()->create(['name' => 'Empresa Real']);
+    $user = User::factory()->forCompany($company)->create([
+        'name' => 'Carlos Mejía',
+        'email' => 'carlos@example.test',
+    ]);
+    $user->assignRole('company_admin');
+
+    actingAs($user)->get(route('profile.change-password'))
+        ->assertOk()
+        ->assertSeeText('Administrador de empresa')
+        ->assertSeeText('Empresa Real')
+        ->assertDontSeeText('Acceso global');
 });
