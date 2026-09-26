@@ -4,12 +4,14 @@ use App\Models\Company;
 use App\Models\User;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
+use Tests\TestCase;
 
 uses()->beforeEach(function () {
     $this->seed(PermissionRoleSeeder::class);
 });
 
 test('current named route is exposed in the authenticated navigation', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create();
     $admin->assignRole('company_admin');
@@ -27,7 +29,45 @@ test('current named route is exposed in the authenticated navigation', function 
     expect($activeLinks->length)->toBe(2);
 });
 
+test('company admin sidebar shows the company legal id and localized role', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create(['legal_id' => 'RTN-0801-1999-12345']);
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    $this->actingAs($admin)
+        ->get(route('profile.change-password'))
+        ->assertOk()
+        ->assertSee('RTN: RTN-0801-1999-12345')
+        ->assertSee('Administrador de empresa');
+});
+
+test('company admin sidebar shows a truthful fallback without a legal id', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create(['legal_id' => null]);
+    $admin = User::factory()->forCompany($company)->create();
+    $admin->assignRole('company_admin');
+
+    $this->actingAs($admin)
+        ->get(route('profile.change-password'))
+        ->assertOk()
+        ->assertSee('RTN no registrado');
+});
+
+test('authenticated user without a role sees an honest role fallback', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $user = User::factory()->forCompany($company)->create();
+
+    $this->actingAs($user)
+        ->get(route('profile.change-password'))
+        ->assertOk()
+        ->assertSee('Sin rol asignado')
+        ->assertDontSee('Administrador de empresa');
+});
+
 test('company admins cannot see global backup navigation even with direct permission', function () {
+    /** @var TestCase $this */
     foreach (Company::factory()->count(2)->create() as $company) {
         $admin = User::factory()->forCompany($company)->create();
         $admin->assignRole('company_admin');
@@ -58,6 +98,7 @@ test('company admins cannot see global backup navigation even with direct permis
 });
 
 test('super admin selector lists active companies with one selector query', function () {
+    /** @var TestCase $this */
     $activeCompany = Company::factory()->create(['name' => 'Empresa Activa Navegación']);
     $inactiveCompany = Company::factory()->inactive()->create(['name' => 'Empresa Inactiva Navegación']);
     $super = User::factory()->create(['company_id' => null]);
@@ -94,6 +135,7 @@ test('super admin selector lists active companies with one selector query', func
 });
 
 test('authenticated layout exposes native disclosure semantics and controls', function () {
+    /** @var TestCase $this */
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
 
@@ -105,9 +147,19 @@ test('authenticated layout exposes native disclosure semantics and controls', fu
         ->assertSee('href="#main-content"', escape: false)
         ->assertSee('aria-label="Navegación principal"', escape: false)
         ->assertSee('id="main-content" tabindex="-1"', escape: false)
-        ->assertSee('id="management-disclosure-trigger"', escape: false)
-        ->assertSee('aria-controls="management-disclosure-panel"', escape: false)
-        ->assertSee('id="management-disclosure-panel"', escape: false)
+        ->assertSee('class="fixed inset-y-0 left-0 z-40 hidden w-64', escape: false)
+        ->assertSee('class="xl:pl-64"', escape: false)
+        ->assertSee('Nómina &amp; Tiempo', escape: false)
+        ->assertSee('Administración')
+        ->assertSee('Sesión autenticada')
+        ->assertDontSee('id="management-disclosure-trigger"', escape: false)
+        ->assertDontSee('id="management-disclosure-panel"', escape: false)
+        ->assertSee('id="sidebar-company-disclosure-trigger"', escape: false)
+        ->assertSee('aria-controls="sidebar-company-disclosure-panel"', escape: false)
+        ->assertSee('id="sidebar-company-disclosure-panel"', escape: false)
+        ->assertSee('id="sidebar-account-disclosure-trigger"', escape: false)
+        ->assertSee('aria-controls="sidebar-account-disclosure-panel"', escape: false)
+        ->assertSee('id="sidebar-account-disclosure-panel"', escape: false)
         ->assertSee('id="company-disclosure-trigger"', escape: false)
         ->assertSee('aria-controls="company-disclosure-panel"', escape: false)
         ->assertSee('id="company-disclosure-panel"', escape: false)
@@ -119,7 +171,7 @@ test('authenticated layout exposes native disclosure semantics and controls', fu
         ->assertSee('aria-controls="mobile-navigation-panel"', escape: false)
         ->assertSee('id="mobile-navigation-panel"', escape: false)
         ->assertSee("mobileOpen ? 'Cerrar menú principal' : 'Abrir menú principal'", escape: false)
-        ->assertSee('x-ref="managementTrigger"', escape: false)
+        ->assertDontSee('x-ref="managementTrigger"', escape: false)
         ->assertSee('x-ref="companyTrigger"', escape: false)
         ->assertSee('x-ref="accountTrigger"', escape: false)
         ->assertDontSee('aria-haspopup="menu"', escape: false)
@@ -131,14 +183,22 @@ test('authenticated layout exposes native disclosure semantics and controls', fu
 
     preg_match_all('/@keydown\.escape="([^"]+)"/', $response->getContent(), $localEscapeHandlers);
 
-    expect($localEscapeHandlers[1])->toHaveCount(3)
+    expect($localEscapeHandlers[1])->toHaveCount(4)
         ->and($response->getContent())->not->toContain('@keydown.escape.stop=')
-        ->and(substr_count($response->getContent(), '@focusout='))->toBe(3)
-        ->and(substr_count($response->getContent(), '$el.contains($event.relatedTarget)'))->toBe(3)
-        ->and(substr_count($response->getContent(), '@keydown.escape.window='))->toBe(1);
+        ->and(substr_count($response->getContent(), '@focusout='))->toBe(4)
+        ->and(substr_count($response->getContent(), '$el.contains($event.relatedTarget)'))->toBe(4)
+        ->and(substr_count($response->getContent(), '@keydown.escape.window='))->toBe(1)
+        ->and(substr_count($response->getContent(), 'id="sidebar-company-disclosure-trigger"'))->toBe(1)
+        ->and(substr_count($response->getContent(), 'aria-controls="sidebar-company-disclosure-panel"'))->toBe(1)
+        ->and(substr_count($response->getContent(), 'id="sidebar-company-disclosure-panel"'))->toBe(1)
+        ->and(substr_count($response->getContent(), 'id="sidebar-account-disclosure-trigger"'))->toBe(1)
+        ->and(substr_count($response->getContent(), 'aria-controls="sidebar-account-disclosure-panel"'))->toBe(1)
+        ->and(substr_count($response->getContent(), 'id="sidebar-account-disclosure-panel"'))->toBe(1)
+        ->and(substr_count($response->getContent(), '@open-company-selector.window="if (window.innerWidth >= 1280)'))->toBe(1);
 
     foreach ($localEscapeHandlers[1] as $handler) {
-        expect($handler)->toContain('$event.stopPropagation()');
+        expect($handler)->toContain('$event.stopPropagation()')
+            ->and($handler)->toMatch('/\$nextTick\(\(\) => \$refs\.(company|account)Trigger\.focus\(\)\)/');
         $this->assertMatchesRegularExpression(
             '/^if\s*\(open\)\s*\{\s*\$event\.stopPropagation\(\)/',
             $handler,
@@ -147,6 +207,7 @@ test('authenticated layout exposes native disclosure semantics and controls', fu
 });
 
 test('account disclosure does not use a cancellable transition', function () {
+    /** @var TestCase $this */
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
 
@@ -163,6 +224,7 @@ test('account disclosure does not use a cancellable transition', function () {
 });
 
 test('responsive navigation clears hidden disclosure state at the xl breakpoint', function () {
+    /** @var TestCase $this */
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
 
@@ -183,7 +245,7 @@ test('responsive navigation clears hidden disclosure state at the xl breakpoint'
 
     expect($mobileHandlers)->toHaveCount(1)
         ->and($mobileHandlers[0])->toContain('window.innerWidth >= 1280')
-        ->and($desktopHandlers)->toHaveCount(3);
+        ->and($desktopHandlers)->toHaveCount(4);
 
     foreach ($desktopHandlers as $handler) {
         expect($handler)->toContain('window.innerWidth < 1280');
@@ -191,13 +253,16 @@ test('responsive navigation clears hidden disclosure state at the xl breakpoint'
 });
 
 test('active company is identified in the selector and account context', function () {
+    /** @var TestCase $this */
     $activeCompany = Company::factory()->create(['name' => 'Empresa Contexto Actual']);
     $super = User::factory()->create(['company_id' => null]);
     $super->assignRole('super_admin');
 
-    $this->withSession(['active_company_id' => $activeCompany->id])
+    $response = $this->withSession(['active_company_id' => $activeCompany->id])
         ->actingAs($super)
-        ->get(route('profile.change-password'))
+        ->get(route('profile.change-password'));
+
+    $response
         ->assertOk()
         ->assertSeeInOrder([
             'name="company" value="'.$activeCompany->slug.'"',
@@ -209,11 +274,18 @@ test('active company is identified in the selector and account context', functio
             $super->email,
             $activeCompany->name,
             'Cambiar contraseña',
-        ], escape: false)
-        ->assertDontSee('Acceso global');
+        ], escape: false);
+
+    $document = new DOMDocument;
+    @$document->loadHTML($response->getContent());
+    $accountDisclosure = (new DOMXPath($document))->query('//*[@id="account-disclosure-panel"]')->item(0);
+
+    expect($accountDisclosure)->not->toBeNull()
+        ->and($accountDisclosure->textContent)->not->toContain('Acceso global');
 });
 
 test('guest login does not render authenticated navigation or query companies', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create(['name' => 'Empresa No Visible En Login']);
     $companyQueries = 0;
 
