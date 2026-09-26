@@ -28,6 +28,41 @@ Hay dos plantillas de entorno, según cómo se ejecuten los servicios:
 
 No mezclar las plantillas: los nombres de host dependen de la red de cada entorno.
 
+### Windows: instalación automática con PowerShell y WSL2
+
+Requisitos: Windows con WSL2 y una distribución Ubuntu instalada, Docker Desktop en ejecución con la integración WSL habilitada para esa distribución, y Git disponible dentro de Ubuntu. El script clona el repositorio **dentro del sistema de archivos Linux de WSL** (por defecto en `~/proyectos/nomina`); rechaza rutas bajo `/mnt/`.
+
+Desde una carpeta cualquiera en PowerShell, descargá el script directamente desde la rama `main`, habilitá scripts solo para el proceso actual y ejecutá el modo limpio:
+
+```powershell
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/M3rsy/nomina/main/scripts/setup-windows.ps1' -OutFile './setup-windows.ps1'
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+./setup-windows.ps1 -InstallMode Clean -AdminEmail admin@example.com
+```
+
+No necesitás clonar el proyecto previamente: **el propio script clona el repositorio dentro del sistema de archivos Linux de WSL**, por defecto en `~/proyectos/nomina`. El modo limpio conserva datos, ejecuta migraciones no destructivas, siembra únicamente permisos/roles y solicita la contraseña del super admin sin mostrarla.
+
+Ejemplos adicionales con el archivo descargado:
+
+```powershell
+# Datos de demostración
+./setup-windows.ps1 -InstallMode Demo
+
+# Instalación limpia e inicio del worker
+./setup-windows.ps1 -InstallMode Clean -Worker
+
+# Fetch y pull fast-forward-only explícitos
+./setup-windows.ps1 -InstallMode Clean -Update
+
+# Reset destructivo: además exige escribir RESETEAR de forma interactiva
+./setup-windows.ps1 -InstallMode Clean -ResetDatabase
+
+# Otra distribución o ubicación Linux
+./setup-windows.ps1 -Distro Ubuntu-24.04 -LinuxProjectPath '~/proyectos/nomina'
+```
+
+Si ya tenés un checkout de este repositorio en Windows, como alternativa podés ejecutar `./scripts/setup-windows.ps1` desde su raíz. El script conserva un `.env` existente. Si no existe, lo crea desde `.env.docker.example`; también genera `APP_KEY` solo cuando falta y recrea `app` para que Compose cargue la clave. El repositorio solo se actualiza con `-Update`, y ninguna base existente se borra salvo que combines `-ResetDatabase` con la confirmación interactiva.
+
 ### Instalación recomendada con Docker
 
 Este flujo es el mismo en Ubuntu sobre WSL2, Linux y macOS:

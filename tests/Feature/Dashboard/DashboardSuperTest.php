@@ -34,6 +34,22 @@ test('company admin cannot access super dashboard', function () {
         ->assertStatus(403);
 });
 
+test('super dashboard exposes the Stitch-inspired operational hierarchy', function () {
+    $super = User::factory()->create(['company_id' => null]);
+    $super->assignRole('super_admin');
+
+    Livewire::actingAs($super)
+        ->test(SuperAdmin::class)
+        ->assertSeeHtml('data-dashboard-section="hero"')
+        ->assertSeeHtml('data-dashboard-section="organization-kpis"')
+        ->assertSeeHtml('data-dashboard-section="payroll-operations"')
+        ->assertSeeHtml('data-dashboard-section="payroll-trends"')
+        ->assertSee('Centro de control')
+        ->assertSee('Alcance empresarial')
+        ->assertSee('Indicadores de organización')
+        ->assertSee('Estado operativo');
+});
+
 test('super admin without an active company sees organization snapshots but no payroll aggregation', function () {
     $companyA = Company::factory()->create(['is_active' => true]);
     $companyB = Company::factory()->create(['is_active' => false]);

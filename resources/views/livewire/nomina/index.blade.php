@@ -1,27 +1,75 @@
 <div
+    data-payroll-index
     class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"
     x-data="{ deleteTrigger: null }"
     x-on:payroll-delete-closed.window="$nextTick(() => deleteTrigger?.focus())"
 >
-    <x-ui.page-header
-        title="Períodos de nómina"
-        description="Identificá la fase de cada período y continuá únicamente con las acciones disponibles para tu rol."
-    >
-        @if ($canCreate)
-            <x-slot:actions>
-                <x-ui.button
-                    id="create-period-trigger"
-                    wire:click="openCreateForm"
-                    aria-expanded="{{ $showCreateForm ? 'true' : 'false' }}"
-                    aria-controls="create-period-panel"
-                >
-                    Crear período
-                </x-ui.button>
-            </x-slot:actions>
-        @endif
-    </x-ui.page-header>
+    <nav aria-label="Ruta de navegación" class="mb-4 flex flex-wrap items-center gap-2 text-sm font-medium text-text-muted">
+        <span>Gestión de Nómina</span>
+        <span aria-hidden="true">/</span>
+        <span class="text-text">Ciclos y Calendario</span>
+    </nav>
+
+    <div class="rounded-3xl border border-border bg-surface px-5 py-6 shadow-sm sm:px-8 sm:py-8">
+        <x-ui.page-header
+            title="Períodos de Nómina"
+            description="Organizá cada ciclo, reconocé su fase actual y continuá únicamente con las acciones disponibles para tu rol."
+        >
+            @if ($canCreate)
+                <x-slot:actions>
+                    <x-ui.button
+                        id="create-period-trigger"
+                        wire:click="openCreateForm"
+                        aria-expanded="{{ $showCreateForm ? 'true' : 'false' }}"
+                        aria-controls="create-period-panel"
+                    >
+                        Crear período
+                    </x-ui.button>
+                </x-slot:actions>
+            @endif
+        </x-ui.page-header>
+        <p class="mt-5 max-w-3xl border-t border-border pt-5 text-sm leading-6 text-text-muted">
+            Consultá el historial visible de períodos y avanzá desde la preparación hasta el cierre sin salir del flujo de nómina.
+        </p>
+    </div>
 
     @if ($hasCompany)
+        @php
+            $visiblePeriods = $payPeriods->getCollection();
+            $visiblePeriodCount = $visiblePeriods->count();
+            $draftPeriodCount = $visiblePeriods->where('status', 'draft')->count();
+            $completedPeriodCount = $visiblePeriods->whereIn('status', ['processed', 'approved', 'exported'])->count();
+            $availableActionCount = collect($periodActions)
+                ->sum(fn (array $actions): int => collect($actions)->filter()->count());
+        @endphp
+
+        <section
+            data-payroll-summary
+            aria-label="Resumen de períodos visibles"
+            class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        >
+            <article data-summary-visible-periods="{{ $visiblePeriodCount }}" class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                <p class="text-sm font-medium text-text-muted">Períodos visibles</p>
+                <p class="mt-2 text-3xl font-bold text-text">{{ $visiblePeriodCount }}</p>
+                <p class="mt-1 text-xs text-text-muted">En esta página</p>
+            </article>
+            <article data-summary-draft-periods="{{ $draftPeriodCount }}" class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                <p class="text-sm font-medium text-text-muted">Borradores</p>
+                <p class="mt-2 text-3xl font-bold text-text">{{ $draftPeriodCount }}</p>
+                <p class="mt-1 text-xs text-text-muted">Listos para iniciar la carga</p>
+            </article>
+            <article data-summary-completed-periods="{{ $completedPeriodCount }}" class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                <p class="text-sm font-medium text-text-muted">Finalizados</p>
+                <p class="mt-2 text-3xl font-bold text-text">{{ $completedPeriodCount }}</p>
+                <p class="mt-1 text-xs text-text-muted">Procesados, aprobados o exportados</p>
+            </article>
+            <article data-summary-available-actions="{{ $availableActionCount }}" class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+                <p class="text-sm font-medium text-text-muted">Acciones disponibles</p>
+                <p class="mt-2 text-3xl font-bold text-text">{{ $availableActionCount }}</p>
+                <p class="mt-1 text-xs text-text-muted">Según estado y permisos</p>
+            </article>
+        </section>
+
         <x-ui.card class="mt-6" aria-labelledby="workflow-heading">
             <x-slot:header>
                 <h2 id="workflow-heading" class="font-semibold text-text">Cinco fases del flujo</h2>
@@ -34,9 +82,34 @@
     @if ($showCreateForm)
         <x-ui.card id="create-period-panel" class="mt-6" aria-labelledby="create-period-heading">
             <x-slot:header>
-                <h2 id="create-period-heading" class="text-xl font-bold text-text">Definí el rango de fechas</h2>
-                <p class="mt-1 text-sm text-text-muted">Las fechas de inicio y fin se incluyen dentro del período.</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-brand">Nuevo ciclo</p>
+                <h2 id="create-period-heading" class="mt-1 text-xl font-bold text-text">Creá un período de nómina</h2>
+                <p class="mt-1 text-sm text-text-muted">Completá los datos del ciclo. Al crearlo, vas a continuar con la carga de asistencia.</p>
             </x-slot:header>
+
+            <ol data-create-period-steps aria-label="Pasos para crear un período" class="mb-6 grid gap-3 border-b border-border pb-6 sm:grid-cols-3">
+                <li class="flex gap-3 rounded-2xl bg-surface-muted p-4">
+                    <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-white">1</span>
+                    <div>
+                        <p class="text-sm font-semibold text-text">Identificá el período</p>
+                        <p class="mt-1 text-xs text-text-muted">Asignale un nombre reconocible.</p>
+                    </div>
+                </li>
+                <li class="flex gap-3 rounded-2xl bg-surface-muted p-4">
+                    <span class="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-xs font-bold text-text">2</span>
+                    <div>
+                        <p class="text-sm font-semibold text-text">Definí las fechas</p>
+                        <p class="mt-1 text-xs text-text-muted">Indicá el inicio y el fin del ciclo.</p>
+                    </div>
+                </li>
+                <li class="flex gap-3 rounded-2xl bg-surface-muted p-4">
+                    <span class="flex size-7 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-xs font-bold text-text">3</span>
+                    <div>
+                        <p class="text-sm font-semibold text-text">Continuá con la carga</p>
+                        <p class="mt-1 text-xs text-text-muted">El siguiente paso conserva el flujo actual.</p>
+                    </div>
+                </li>
+            </ol>
 
             <form id="create-period-form" wire:submit="store" class="grid gap-5 lg:grid-cols-2">
                 <div class="lg:col-span-2">
@@ -96,9 +169,15 @@
         </x-ui.empty-state>
     @else
         <section aria-labelledby="period-list-heading" class="mt-8">
-            <div class="mb-4">
-                <h2 id="period-list-heading" class="text-xl font-bold text-text">Períodos existentes</h2>
-                <p class="mt-1 text-sm text-text-muted">Cada período muestra su estado exacto, su explicación y solo las acciones autorizadas.</p>
+            <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-brand">Ciclos y calendario</p>
+                    <h2 id="period-list-heading" class="mt-1 text-xl font-bold text-text">Períodos existentes</h2>
+                    <p class="mt-1 text-sm text-text-muted">Cada período muestra su estado exacto, su explicación y solo las acciones autorizadas.</p>
+                </div>
+                <p class="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-text-muted">
+                    {{ $visiblePeriodCount }} {{ $visiblePeriodCount === 1 ? 'período visible' : 'períodos visibles' }}
+                </p>
             </div>
 
             @if ($payPeriods->isEmpty())

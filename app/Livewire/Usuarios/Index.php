@@ -3,6 +3,10 @@
 namespace App\Livewire\Usuarios;
 
 use App\Models\User;
+use App\Services\DatabaseSessionRevoker;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -14,11 +18,45 @@ class Index extends Component
 
     public string $search = '';
 
+    public function deactivate(int $id): void
+    {
+        $target = User::query()->findOrFail($id);
+
+        $this->authorizeUserAction('update', $target);
+
+        DB::transaction(function () use ($target): void {
+            $target->forceFill(['is_active' => false])->save();
+            app(DatabaseSessionRevoker::class)->revokeUser($target->id);
+        });
+    }
+
+    public function delete(int $id): void
+    {
+        $target = User::query()->findOrFail($id);
+
+        $this->authorizeUserAction('delete', $target);
+
+        DB::transaction(function () use ($target): void {
+            app(DatabaseSessionRevoker::class)->revokeUser($target->id);
+            $target->delete();
+        });
+    }
+
+    private function authorizeUserAction(string $ability, User $target): void
+    {
+        if ($target->is(Auth::user())) {
+            throw new AuthorizationException;
+        }
+
+        $this->authorize($ability, $target);
+    }
+
     public function render()
     {
         $this->authorize('viewAny', User::class);
 
-        $user = auth()->user();
+        /** @var User $user */
+        $user = Auth::user();
         $isSuperAdmin = $user->hasRole('super_admin');
         $companyId = current_company_id();
 
