@@ -1,6 +1,6 @@
 <div class="min-h-screen bg-surface-muted">
     <div class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="dashboard-heading">
+        <section data-dashboard-section="hero" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="dashboard-heading">
             <div class="h-2 bg-gradient-to-r from-brand via-warning to-success" aria-hidden="true"></div>
             <div class="flex flex-col gap-6 px-6 py-7 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:py-8">
                 <div class="max-w-3xl">
@@ -8,6 +8,7 @@
                         <span class="h-2 w-2 rounded-full bg-success" aria-hidden="true"></span>
                         Vista ejecutiva
                     </div>
+                    <p class="text-xs font-bold uppercase tracking-wider text-brand">Alcance de empresa</p>
                     <h1 id="dashboard-heading" class="text-3xl font-black tracking-tight text-text sm:text-4xl">
                         {{ $company ? 'Panel de '.$company->name : 'Panel de empresa' }}
                     </h1>
@@ -62,7 +63,7 @@
                 Seleccioná una empresa para consultar sus indicadores y actividad.
             </x-ui.alert>
         @else
-            <section aria-label="Indicadores de nómina" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <section data-dashboard-section="company-kpis" aria-label="Indicadores de nómina" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm">
                     <div class="flex items-start justify-between gap-4">
                         <div>
@@ -107,7 +108,7 @@
             </section>
 
             @canany(['pay_periods.view', 'files.upload', 'employees.view'])
-                <section class="relative overflow-hidden rounded-3xl bg-text p-6 text-white shadow-sm" aria-labelledby="quick-actions-heading">
+                <section data-dashboard-section="quick-actions" class="relative overflow-hidden rounded-3xl bg-text p-6 text-white shadow-sm" aria-labelledby="quick-actions-heading">
                     <div class="absolute -right-10 -top-16 h-40 w-40 rounded-full bg-brand opacity-40" aria-hidden="true"></div>
                     <div class="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                         <div>
@@ -130,10 +131,10 @@
                 </section>
             @endcanany
 
-            <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="payroll-periods-heading">
+            <section data-dashboard-section="payroll-operations" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="payroll-periods-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-5 sm:px-6">
                     <div>
-                        <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Operación</p>
+                        <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Estado operativo</p>
                         <h2 id="payroll-periods-heading" class="mt-1 text-xl font-black text-text">Nóminas por período</h2>
                         <p class="mt-1 text-sm text-text-muted">Estado, registros y horas consolidadas del rango seleccionado.</p>
                     </div>
@@ -190,7 +191,7 @@
             </section>
 
             <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="recent-files-heading">
+                <section data-dashboard-section="recent-files" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="recent-files-heading">
                     <div class="flex items-center justify-between gap-3 border-b border-border px-5 py-5 sm:px-6">
                         <div>
                             <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Documentación</p>
@@ -226,7 +227,7 @@
                     </div>
                 </section>
 
-                <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="recent-activity-heading">
+                <section data-dashboard-section="recent-activity" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="recent-activity-heading">
                     <div class="flex items-center justify-between gap-3 border-b border-border px-5 py-5 sm:px-6">
                         <div>
                             <p class="text-xs font-bold uppercase tracking-[0.16em] text-brand">Trazabilidad</p>
