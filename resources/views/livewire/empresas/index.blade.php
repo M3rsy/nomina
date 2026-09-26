@@ -1,67 +1,113 @@
-<div class="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc_0%,_#f8f1ff_38%,_#ffffff_80%)] px-4 py-8 sm:px-6 lg:px-8">
-    <div class="mx-auto max-w-7xl space-y-5">
-        <header class="rounded-3xl border border-slate-200/70 bg-white/90 p-5 shadow-sm backdrop-blur sm:p-6">
-            <div class="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <p class="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">
-                        Gestión empresarial
-                    </p>
-                    <h1 id="companies-heading" class="mt-3 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Empresas</h1>
-                    <p class="mt-2 max-w-2xl text-sm text-slate-600">Administrá empresas activas e inactivas con filtros rápidos y acciones de control.</p>
-                </div>
-                @can('create', App\Models\Company::class)
-                    <a
-                        href="/empresas/crear"
-                        class="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                    >
+@php
+    $visibleCompanies = $companies->getCollection();
+    $visibleCount = $visibleCompanies->count();
+    $visibleActiveCount = $visibleCompanies->where('is_active', true)->count();
+    $visibleInactiveCount = $visibleCompanies->where('is_active', false)->count();
+    $activeCompany = current_company();
+@endphp
+
+<div class="min-h-screen bg-surface-muted" data-companies-index="workspace">
+    <div class="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <nav aria-label="Miga de pan" class="flex flex-wrap items-center gap-2 text-sm font-semibold text-text-muted">
+            <span class="rounded-full bg-surface px-3 py-1 text-xs font-bold uppercase tracking-wider text-brand">Gestión Empresarial</span>
+            <span aria-hidden="true">/</span>
+            <span>Directorio Corporativo Multi-Entidad</span>
+            <span class="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-brand">Multi-Tenant</span>
+        </nav>
+
+        <x-ui.page-header
+            title="Empresas"
+            description="Administrá las entidades corporativas, su identificación fiscal y su estado operativo sin mezclar información entre tenants."
+        >
+            @can('create', App\Models\Company::class)
+                <x-slot:actions>
+                    <x-ui.button :href="route('empresas.create')">
                         Nueva empresa
-                    </a>
-                @endcan
-            </div>
-        </header>
+                    </x-ui.button>
+                </x-slot:actions>
+            @endcan
+        </x-ui.page-header>
 
-        <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h2 class="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">Búsqueda y filtros</h2>
-                    <p class="mt-1 text-xs text-slate-600">Combiná nombre, slug y RTN para filtrar rápidamente.</p>
-                </div>
-                @if ($search !== '')
-                    <button
-                        type="button"
-                        wire:click="$set('search', '')"
-                        class="inline-flex min-h-11 shrink-0 items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                    >
-                        Limpiar filtros
-                    </button>
+        <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumen de empresas">
+            <x-ui.card class="relative overflow-hidden">
+                <div class="absolute inset-x-0 top-0 h-1 bg-brand" aria-hidden="true"></div>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Empresas registradas</p>
+                <p class="mt-3 text-3xl font-black tracking-tight text-text">{{ number_format($companies->total()) }}</p>
+                <p class="mt-2 text-sm text-text-muted">Coinciden con la búsqueda actual.</p>
+            </x-ui.card>
+
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Empresas visibles</p>
+                <p class="mt-3 text-3xl font-black tracking-tight text-text">{{ $visibleCount }}</p>
+                <p class="mt-2 text-sm text-text-muted">{{ $visibleActiveCount }} activas · {{ $visibleInactiveCount }} inactivas en esta página.</p>
+            </x-ui.card>
+
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Empresa activa</p>
+                @if ($activeCompany)
+                    <p class="mt-3 truncate text-2xl font-black tracking-tight text-text">{{ $activeCompany->name }}</p>
+                    <p class="mt-2 truncate text-sm font-semibold text-text-muted">{{ $activeCompany->legal_id ?? 'Sin RTN registrado' }}</p>
+                @else
+                    <p class="mt-3 text-2xl font-black tracking-tight text-text-muted">Sin selección</p>
+                    <p class="mt-2 text-sm text-text-muted">Seleccioná una empresa para operar módulos tenant-scoped.</p>
                 @endif
-            </div>
+            </x-ui.card>
 
-            <label class="block" for="companies-search">
-                <span class="mb-1 block text-xs font-medium text-slate-700">Buscar</span>
-                <input
-                    id="companies-search"
-                    type="text"
-                    wire:model.live="search"
-                    placeholder="Buscar por nombre, slug o RTN..."
-                    class="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm"
-                >
-            </label>
+            <x-ui.card>
+                <p class="text-xs font-bold uppercase tracking-wider text-text-muted">Aislamiento tenant</p>
+                <p class="mt-3 text-2xl font-black tracking-tight text-success-strong">Segregado</p>
+                <p class="mt-2 text-sm text-text-muted">Cada empresa mantiene colaboradores, nómina y configuraciones separadas.</p>
+            </x-ui.card>
+        </section>
 
-            <div class="mt-3 flex flex-wrap gap-2 text-xs">
+        <x-ui.card aria-labelledby="companies-filters-heading">
+            <x-slot:header>
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p class="text-xs font-bold uppercase tracking-wider text-brand">Búsqueda y filtros</p>
+                        <h2 id="companies-filters-heading" class="mt-1 text-xl font-bold text-text">Directorio corporativo</h2>
+                        <p class="mt-1 text-sm text-text-muted">Buscá por nombre comercial, slug corporativo o RTN.</p>
+                    </div>
+                    @if ($search !== '')
+                        <x-ui.button type="button" variant="secondary" wire:click="$set('search', '')">
+                            Limpiar filtros
+                        </x-ui.button>
+                    @endif
+                </div>
+            </x-slot:header>
+
+            <x-ui.input
+                id="companies-search"
+                label="Buscar empresas"
+                wire:model.live="search"
+                placeholder="Nombre, slug o RTN..."
+            />
+
+            <div class="mt-4 flex flex-wrap gap-2 text-xs">
                 @if ($search !== '')
-                    <span class="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-indigo-700">
+                    <span class="inline-flex items-center rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-brand">
                         Búsqueda: <span class="ml-1 font-semibold">{{ $search }}</span>
                     </span>
                 @else
-                    <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-600">
+                    <span class="inline-flex items-center rounded-full border border-border bg-surface-muted px-3 py-1 text-text-muted">
                         Sin filtros activos
                     </span>
                 @endif
+                @if ($activeCompany)
+                    <span class="inline-flex items-center rounded-full border border-success/20 bg-success/10 px-3 py-1 text-success-strong">
+                        Empresa activa: <span class="ml-1 font-semibold">{{ $activeCompany->name }}</span>
+                    </span>
+                @endif
             </div>
-        </section>
+        </x-ui.card>
 
-        <section class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <section class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm" aria-labelledby="companies-heading">
+            <div class="border-b border-border bg-surface px-5 py-5 sm:px-7">
+                <p class="text-xs font-bold uppercase tracking-wider text-brand">Empresas registradas</p>
+                <h2 id="companies-heading" class="mt-1 text-xl font-bold text-text">Empresas</h2>
+                <p class="mt-1 text-sm text-text-muted">Acciones disponibles según permisos: editar, activar/desactivar o eliminar.</p>
+            </div>
+
             <div
                 role="region"
                 aria-labelledby="companies-heading"
@@ -69,43 +115,60 @@
                 class="overflow-x-auto"
             >
                 <table class="min-w-full">
-                    <thead class="bg-slate-50/90 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    <thead class="bg-surface-muted text-left text-xs font-bold uppercase tracking-wide text-text-muted">
                         <tr>
-                            <th class="px-4 py-3">Nombre</th>
-                            <th class="px-4 py-3">Slug</th>
-                            <th class="px-4 py-3">RTN</th>
-                            <th class="px-4 py-3">Estado</th>
-                            <th class="px-4 py-3">Acciones</th>
+                            <th class="px-5 py-3">Empresa / Razón Social</th>
+                            <th class="px-5 py-3">Slug / ID sistema</th>
+                            <th class="px-5 py-3">RTN / Identificación</th>
+                            <th class="px-5 py-3 text-center">Estado</th>
+                            <th class="px-5 py-3 text-right">Acciones</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody class="divide-y divide-border">
                         @forelse ($companies as $company)
-                            <tr class="border-t border-slate-200">
-                                <td class="px-4 py-3.5 text-sm font-semibold text-slate-900">{{ $company->name }}</td>
-                                <td class="px-4 py-3.5 text-sm text-slate-700">{{ $company->slug }}</td>
-                                <td class="px-4 py-3.5 text-sm text-slate-700">{{ $company->legal_id }}</td>
-                                <td class="px-4 py-3.5 text-sm">
-                                    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium leading-5 {{ $company->is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700' }}">
-                                        <span class="h-2 w-2 rounded-full {{ $company->is_active ? 'bg-emerald-500' : 'bg-rose-500' }}"></span>
+                            @php($initials = collect(explode(' ', $company->name))->filter()->take(2)->map(fn ($part) => mb_substr($part, 0, 1))->implode(''))
+                            <tr class="transition {{ $activeCompany?->id === $company->id ? 'bg-brand/5' : 'bg-surface hover:bg-surface-muted/60' }}">
+                                <td class="px-5 py-4">
+                                    <div class="flex min-w-72 items-center gap-3">
+                                        <span class="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand/10 text-sm font-black uppercase text-brand ring-1 ring-brand/15">
+                                            {{ $initials ?: 'E' }}
+                                        </span>
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="truncate font-bold text-text">{{ $company->name }}</p>
+                                                @if ($activeCompany?->id === $company->id)
+                                                    <span class="rounded-full bg-brand px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">En sesión</span>
+                                                @endif
+                                            </div>
+                                            <p class="mt-1 text-xs text-text-muted">Entidad corporativa {{ $company->is_active ? 'operativa' : 'pausada' }}</p>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="px-5 py-4 font-mono text-xs text-text-muted">
+                                    <span class="rounded-lg bg-surface-muted px-2 py-1">{{ $company->slug }}</span>
+                                </td>
+                                <td class="px-5 py-4 text-sm text-text-muted">
+                                    <span class="font-mono font-semibold text-text">{{ $company->legal_id ?? 'Sin RTN' }}</span>
+                                </td>
+                                <td class="px-5 py-4 text-center">
+                                    <span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold {{ $company->is_active ? 'bg-success/10 text-success-strong' : 'bg-danger/10 text-danger-strong' }}">
+                                        <span class="size-1.5 rounded-full {{ $company->is_active ? 'bg-success' : 'bg-danger' }}"></span>
                                         {{ $company->is_active ? 'Activa' : 'Inactiva' }}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3.5">
-                                    <div class="flex flex-wrap gap-2">
+                                <td class="px-5 py-4 text-right">
+                                    <div class="flex flex-wrap justify-end gap-2">
                                         @can('update', $company)
-                                            <a
-                                                href="/empresas/{{ $company->id }}/editar"
-                                                class="inline-flex min-h-9 items-center rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                                            >
+                                            <x-ui.button :href="route('empresas.edit', $company)" variant="secondary" class="min-h-9 px-3 py-1 text-xs">
                                                 Editar
-                                            </a>
+                                            </x-ui.button>
                                         @endcan
                                         @can('activate', $company)
                                             <x-ui.loading-button
                                                 wire:click="toggle({{ $company->id }})"
                                                 target="toggle({{ $company->id }})"
                                                 loading-label="Actualizando…"
-                                                class="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                                                class="inline-flex min-h-9 items-center rounded-lg border border-border bg-surface px-3 py-1 text-xs font-semibold text-text transition hover:bg-surface-muted"
                                             >
                                                 {{ $company->is_active ? 'Desactivar' : 'Activar' }}
                                             </x-ui.loading-button>
@@ -115,7 +178,7 @@
                                                 wire:click="delete({{ $company->id }})"
                                                 target="delete({{ $company->id }})"
                                                 loading-label="Eliminando…"
-                                                class="inline-flex min-h-9 items-center rounded-lg border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                                                class="inline-flex min-h-9 items-center rounded-lg border border-danger/20 bg-danger/10 px-3 py-1 text-xs font-semibold text-danger-strong transition hover:bg-danger/15"
                                                 onclick="return confirm('¿Eliminar empresa?')"
                                             >
                                                 Eliminar
@@ -126,7 +189,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="5" class="px-4 py-8 text-center text-sm text-slate-500">No se encontraron empresas.</td>
+                                <td colspan="5" class="px-5 py-10 text-center text-sm text-text-muted">No se encontraron empresas.</td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -137,5 +200,17 @@
         <div class="pt-1">
             {{ $companies->links() }}
         </div>
+
+        <x-ui.card>
+            <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <p class="text-lg font-bold text-text">Aislamiento estricto y gobernanza multi-entidad</p>
+                    <p class="mt-1 max-w-3xl text-sm leading-6 text-text-muted">
+                        Cada empresa opera con datos independientes. Esta pantalla administra solo el directorio corporativo; la parametrización fiscal avanzada y los reportes se mantienen fuera de esta slice visual.
+                    </p>
+                </div>
+                <span class="inline-flex w-fit rounded-full bg-success/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-success-strong">Tenant-safe</span>
+            </div>
+        </x-ui.card>
     </div>
 </div>
