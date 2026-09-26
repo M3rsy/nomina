@@ -99,6 +99,8 @@ test('repeated comprobante exports release workbook memory', function () {
     gc_collect_cycles();
     gc_disable();
     $memoryBefore = memory_get_usage();
+    $memoryGrowth = 0;
+    $memoryGrowthLimit = 3 * 1024 * 1024;
 
     try {
         foreach (range(1, 24) as $_) {
@@ -123,7 +125,7 @@ test('repeated comprobante exports release workbook memory', function () {
         gc_collect_cycles();
     }
 
-    expect($memoryGrowth)->toBeLessThan(3 * 1024 * 1024);
+    expect($memoryGrowth)->toBeLessThan($memoryGrowthLimit);
 });
 
 test('comprobante is unavailable before the official payroll export', function (string $status) {
