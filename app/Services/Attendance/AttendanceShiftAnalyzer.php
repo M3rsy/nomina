@@ -31,10 +31,13 @@ class AttendanceShiftAnalyzer
             return $this->unsupportedPolicy($occurrence, $isHoliday);
         }
 
+        $policyResolved = false;
+
         try {
             $policy = $this->policyCatalog->resolve(
                 $occurrence->payrollPolicyKey ?? WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
             );
+            $policyResolved = true;
         } catch (UnsupportedPayrollPolicy) {
             if (in_array($occurrence->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
                 return $this->unsupportedPolicy($occurrence, $isHoliday);
@@ -60,7 +63,7 @@ class AttendanceShiftAnalyzer
                 && $occurrence->scheduledStart !== null
                 && $occurrence->scheduledEnd !== null) {
                 if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
-                    return $this->invalidRateBands($occurrence, $isHoliday);
+                    return $this->invalidRateBands($occurrence, $isHoliday, definitionHash: $policy->definitionHash);
                 }
 
                 $scheduledMinutes = $this->minutes(
@@ -105,6 +108,7 @@ class AttendanceShiftAnalyzer
                 $isHoliday,
                 $occurrence->publicationId,
                 $occurrence->payrollPolicyKey,
+                definitionHash: $policyResolved ? $policy->definitionHash : null,
             );
         }
 
@@ -125,6 +129,7 @@ class AttendanceShiftAnalyzer
                 $isHoliday,
                 $occurrence->publicationId,
                 $occurrence->payrollPolicyKey,
+                definitionHash: $policy->definitionHash,
             );
         }
 
@@ -133,7 +138,14 @@ class AttendanceShiftAnalyzer
         $payableEnd = $entry->addMinutes($workedMinutes);
 
         if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
-            return $this->invalidRateBands($occurrence, $isHoliday, $entry, $exit, $workedMinutes);
+            return $this->invalidRateBands(
+                $occurrence,
+                $isHoliday,
+                $entry,
+                $exit,
+                $workedMinutes,
+                $policy->definitionHash,
+            );
         }
 
         $scheduledStart = $occurrence->scheduledStart;
@@ -267,6 +279,7 @@ class AttendanceShiftAnalyzer
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,
+            definitionHash: $policy->definitionHash,
         );
     }
 
@@ -276,6 +289,7 @@ class AttendanceShiftAnalyzer
         ?CarbonImmutable $entry = null,
         ?CarbonImmutable $exit = null,
         int $workedMinutes = 0,
+        ?string $definitionHash = null,
     ): AttendanceShiftAnalysis {
         return new AttendanceShiftAnalysis(
             AttendanceShiftAnalysis::INVALID_RATE_BANDS,
@@ -290,6 +304,7 @@ class AttendanceShiftAnalyzer
             $isHoliday,
             $occurrence->publicationId,
             $occurrence->payrollPolicyKey,
+            definitionHash: $definitionHash,
         );
     }
 
@@ -342,6 +357,7 @@ class AttendanceShiftAnalyzer
                 isHoliday: $isHoliday,
                 publicationId: $occurrence->publicationId,
                 payrollPolicyKey: $occurrence->payrollPolicyKey,
+                definitionHash: $policy->definitionHash,
             );
         }
 
@@ -362,6 +378,7 @@ class AttendanceShiftAnalyzer
                 isHoliday: $isHoliday,
                 publicationId: $occurrence->publicationId,
                 payrollPolicyKey: $occurrence->payrollPolicyKey,
+                definitionHash: $policy->definitionHash,
             );
         }
 
@@ -436,6 +453,7 @@ class AttendanceShiftAnalyzer
             payrollPolicyKey: $occurrence->payrollPolicyKey,
             variations: $variations,
             excludedTransferMinutes: $excludedTransferMinutes,
+            definitionHash: $policy->definitionHash,
         );
     }
 
@@ -466,6 +484,7 @@ class AttendanceShiftAnalyzer
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,
+            definitionHash: $policy->definitionHash,
         );
     }
 

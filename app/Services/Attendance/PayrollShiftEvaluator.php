@@ -26,6 +26,20 @@ class PayrollShiftEvaluator
     ): PayrollShiftEvaluation {
         $provenance = $this->provenance($occurrence);
 
+        if ($analysis->status === AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY
+            || ($analysis->payrollPolicyKey !== null && $analysis->definitionHash === null)) {
+            return new PayrollShiftEvaluation(
+                status: PayrollShiftEvaluation::BLOCKED,
+                workDate: $analysis->workDate,
+                entryAt: $analysis->entryAt,
+                exitAt: $analysis->exitAt,
+                blockers: collect([['code' => AttendanceShiftAnalysis::UNSUPPORTED_PAYROLL_POLICY]]),
+                metadata: $provenance,
+                publicationId: $occurrence->publicationId,
+                payrollPolicyKey: $occurrence->payrollPolicyKey,
+            );
+        }
+
         if ($vacationDay !== null) {
             return $this->evaluateVacation($occurrence, $analysis, $vacationDay, $vacationIsStale, $provenance);
         }

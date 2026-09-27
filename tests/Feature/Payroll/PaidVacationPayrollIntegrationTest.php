@@ -12,6 +12,7 @@ use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\PayrollPeriodSnapshotData;
 use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollProcessor;
+use App\Services\Payroll\PayrollReportingRowAdapter;
 use App\Services\Vacations\VacationManager;
 use Carbon\CarbonImmutable;
 use Database\Seeders\PermissionRoleSeeder;
@@ -56,12 +57,37 @@ test('an approved vacation is persisted as a paid non-absence payroll result', f
             + $result->extra_75_minutes + $result->extra_100_minutes)->toBe($day->planned_minutes)
         ->and($result->is_absence)->toBeFalse()
         ->and($result->unjustified)->toBeFalse()
-        ->and($result->day_snapshot['schema_version'])->toBe(3)
+        ->and($result->day_snapshot['schema_version'])->toBe(4)
+        ->and($result->day_snapshot['publication']['payroll_policy_definition_hash'])
+        ->toBe('0d24692c1022ff3cea6457170641c9ce00a3c7b57df9ced8df2d1c352c818488')
         ->and($result->day_snapshot['day_type'])->toBe('paid_vacation')
         ->and($result->day_snapshot['vacation']['id'])->toBe($vacation->id)
         ->and($result->day_snapshot['vacation']['day_id'])->toBe($day->id)
         ->and($result->day_snapshot['vacation']['planned_minutes'])->toBe(480)
         ->and($result->notes)->toContain('Vacación pagada');
+});
+
+test('reporting adapter reads schema v4 snapshots as current rows', function () {
+    $result = (new PayrollResult)->forceFill([
+        'day_snapshot' => [
+            'schema_version' => 4,
+            'work_date' => '2026-09-11',
+            'employee' => ['external_id' => 'E-11', 'name' => 'Luis Pérez'],
+            'publication' => [
+                'payroll_policy_key' => 'schedule-overlap-v1',
+                'payroll_policy_definition_hash' => str_repeat('a', 64),
+            ],
+            'attendance' => ['marks' => [], 'worked_minutes' => 480],
+            'payable_minutes' => ['ordinary' => 480],
+        ],
+    ]);
+
+    $row = (new PayrollReportingRowAdapter)->adapt($result);
+
+    expect($row['status'])->toBe('CURRENT')
+        ->and($row['employee_external_id'])->toBe('E-11')
+        ->and($row['worked_minutes'])->toBe(480)
+        ->and($row['ordinary_minutes'])->toBe(480);
 });
 
 /** @return array{company: Company, actor: User, employee: Employee} */

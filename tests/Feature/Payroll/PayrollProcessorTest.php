@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 beforeEach(function () {
+    /** @var Tests\TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
@@ -338,9 +339,11 @@ test('processor freezes complete audited duration-first facts in the daily snaps
     $result = PayrollResult::withoutCompanyScope()->where('pay_period_id', $period->id)->sole();
     $snapshot = $result->day_snapshot;
 
-    expect($snapshot['publication'])->toBe([
+    expect($snapshot['schema_version'])->toBe(4)
+        ->and($snapshot['publication'])->toBe([
         'id' => $publication->id,
         'payroll_policy_key' => 'duration-first-v2',
+        'payroll_policy_definition_hash' => $review->analysis->definitionHash,
         'assignment_id' => $assignmentId,
         'profile_id' => $profileId,
         'schedule_id' => $scheduleId,

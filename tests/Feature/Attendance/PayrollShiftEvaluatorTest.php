@@ -4,6 +4,7 @@ use App\Models\AttendanceException;
 use App\Models\EmployeeScheduleAssignment;
 use App\Models\OvertimeDecision;
 use App\Models\RawMark;
+use App\Models\VacationDay;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceSegment;
@@ -161,6 +162,65 @@ test('keeps a scheduled day with no marks as an unpaid absence', function () {
         ->and($evaluation->isJustified)->toBeFalse()
         ->and($evaluation->unjustified)->toBeTrue()
         ->and($evaluation->recognizedMinutes)->toBe(0);
+});
+
+test('blocks an unsupported payroll policy before processing a vacation day', function () {
+    [$occurrence, $analysis] = payrollShiftWithoutMarks(payrollPolicyKey: 'unsupported-policy');
+    $vacationDay = (new VacationDay)->forceFill([
+        'id' => 51,
+        'vacation_id' => 50,
+        'planned_minutes' => 480,
+        'rate_minutes' => ['ordinary' => 480],
+        'snapshot_fingerprint' => str_repeat('a', 64),
+    ]);
+
+    expect($analysis->status)->toBe('unsupported_payroll_policy');
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate(
+        $occurrence,
+        $analysis,
+        collect(),
+        collect(),
+        $vacationDay,
+    );
+
+    expect($evaluation->status)->toBe('blocked')
+        ->and($evaluation->blockers->sole())->toBe(['code' => 'unsupported_payroll_policy']);
+});
+
+test('blocks an unresolved explicit unsupported policy before processing a vacation day', function () {
+    $occurrence = new ShiftOccurrence(
+        workDate: CarbonImmutable::parse('2026-07-20'),
+        assignment: null,
+        schedule: null,
+        scheduledStart: null,
+        scheduledEnd: null,
+        marks: collect(),
+        status: ShiftOccurrence::AMBIGUOUS,
+        payrollPolicyKey: 'duration-first-v3',
+    );
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $vacationDay = (new VacationDay)->forceFill([
+        'id' => 51,
+        'vacation_id' => 50,
+        'planned_minutes' => 480,
+        'rate_minutes' => ['ordinary' => 480],
+        'snapshot_fingerprint' => str_repeat('a', 64),
+    ]);
+
+    expect($analysis->status)->toBe(ShiftOccurrence::AMBIGUOUS)
+        ->and($analysis->definitionHash)->toBeNull();
+
+    $evaluation = app(PayrollShiftEvaluator::class)->evaluate(
+        $occurrence,
+        $analysis,
+        collect(),
+        collect(),
+        $vacationDay,
+    );
+
+    expect($evaluation->status)->toBe('blocked')
+        ->and($evaluation->blockers->sole())->toBe(['code' => 'unsupported_payroll_policy']);
 });
 
 test('blocks a duration-first no-mark day with one pending daily shortfall', function () {
