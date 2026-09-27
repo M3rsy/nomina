@@ -28,7 +28,7 @@ test('schedule overlap preserves legacy holiday and Sunday behavior', function (
 });
 
 test('catalog exposes only immutable closed definitions', function () {
-    $catalog = new InCodePayrollPolicyCatalog();
+    $catalog = new InCodePayrollPolicyCatalog;
     $schedule = $catalog->resolve('schedule-overlap-v1');
     $duration = $catalog->resolve('duration-first-v2');
     assert($schedule instanceof ScheduleOverlapPolicyDefinition);
@@ -39,14 +39,14 @@ test('catalog exposes only immutable closed definitions', function () {
         ->and((new ReflectionClass($duration))->isReadOnly())->toBeTrue()
         ->and((new ReflectionClass($schedule))->getConstructor()?->getNumberOfParameters())->toBe(0)
         ->and((new ReflectionClass($duration))->getConstructor()?->getNumberOfParameters())->toBe(0)
-        ->and((new ScheduleOverlapPolicyDefinition())->definitionHash)->toBe($schedule->definitionHash)
+        ->and((new ScheduleOverlapPolicyDefinition)->definitionHash)->toBe($schedule->definitionHash)
         ->and($duration->definitionHash)->not->toBe($schedule->definitionHash)
         ->and(fn () => $catalog->resolve('duration-first-v3'))
         ->toThrow(UnsupportedPayrollPolicy::class, 'Unsupported payroll policy [duration-first-v3].');
 });
 
 test('policies quantize complete elapsed minutes once', function () {
-    $catalog = new InCodePayrollPolicyCatalog();
+    $catalog = new InCodePayrollPolicyCatalog;
 
     expect($catalog->resolve('schedule-overlap-v1')->completeElapsedMinutes(3599))->toBe(59)
         ->and($catalog->resolve('duration-first-v2')->completeElapsedMinutes(3600))->toBe(60);
