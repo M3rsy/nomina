@@ -7,6 +7,7 @@ use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\ShiftOccurrence;
+use App\Services\Payroll\Policy\DurationFirstPolicyDefinition;
 use App\Services\Payroll\Policy\InCodePayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyDefinition;
@@ -45,7 +46,7 @@ test('analysis carries the resolved immutable policy definition hash through com
     $historical = $analysis->withDecisionSegments($analysis->deficits, $analysis->overtimeCandidates);
 
     $definition = $catalog->resolve(WorkScheduleProfilePublication::DURATION_FIRST_V2);
-    assert($definition instanceof \App\Services\Payroll\Policy\DurationFirstPolicyDefinition);
+    assert($definition instanceof DurationFirstPolicyDefinition);
 
     expect($analysis->definitionHash)->toBe($definition->definitionHash)
         ->and($historical->definitionHash)->toBe($definition->definitionHash);

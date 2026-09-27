@@ -31,9 +31,10 @@ use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use Tests\TestCase;
 
 beforeEach(function () {
-    /** @var Tests\TestCase $this */
+    /** @var TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
@@ -341,13 +342,13 @@ test('processor freezes complete audited duration-first facts in the daily snaps
 
     expect($snapshot['schema_version'])->toBe(4)
         ->and($snapshot['publication'])->toBe([
-        'id' => $publication->id,
-        'payroll_policy_key' => 'duration-first-v2',
-        'payroll_policy_definition_hash' => $review->analysis->definitionHash,
-        'assignment_id' => $assignmentId,
-        'profile_id' => $profileId,
-        'schedule_id' => $scheduleId,
-    ])->and($snapshot['rules_version'])->toBe('duration-first-v2.1')
+            'id' => $publication->id,
+            'payroll_policy_key' => 'duration-first-v2',
+            'payroll_policy_definition_hash' => $review->analysis->definitionHash,
+            'assignment_id' => $assignmentId,
+            'profile_id' => $profileId,
+            'schedule_id' => $scheduleId,
+        ])->and($snapshot['rules_version'])->toBe('duration-first-v2.1')
         ->and($snapshot['attendance'])->toMatchArray([
             'worked_minutes' => 600,
             'scheduled_minutes' => 480,
