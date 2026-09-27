@@ -151,7 +151,7 @@ test('authenticated layout exposes native disclosure semantics and controls', fu
         ->assertSee('class="xl:pl-64"', escape: false)
         ->assertSee('Nómina &amp; Tiempo', escape: false)
         ->assertSee('Administración')
-        ->assertSee('Sesión autenticada')
+        ->assertSee('Sesión segura')
         ->assertDontSee('id="management-disclosure-trigger"', escape: false)
         ->assertDontSee('id="management-disclosure-panel"', escape: false)
         ->assertSee('id="sidebar-company-disclosure-trigger"', escape: false)
