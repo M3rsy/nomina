@@ -19,7 +19,7 @@ test('approval modal presents its real controls, calculation notice, action, and
 
     app(CurrentCompany::class)->set($company);
 
-    Livewire::actingAs($manager)->test(Index::class)
+    $component = Livewire::actingAs($manager)->test(Index::class)
         ->call('openCreateModal')
         ->assertSee('data-vacation-modal="approval"', false)
         ->assertSee('data-vacation-modal-section="employee-picker"', false)
@@ -40,4 +40,12 @@ test('approval modal presents its real controls, calculation notice, action, and
         ->assertSee('x-init="$nextTick(() => $refs.dialog.focus())"', false)
         ->assertSee('@keydown.escape.window="$wire.closeCreateModal()"', false)
         ->assertSee('aria-label="Cerrar ventana"', false);
+
+    $document = new DOMDocument;
+    @$document->loadHTML($component->html());
+    $xpath = new DOMXPath($document);
+    $approvalModal = '//*[@data-vacation-modal="approval"]';
+
+    expect($xpath->query($approvalModal.'//button[@*[name()="wire:click"]="closeCreateModal" and normalize-space()="Cerrar"]')->length)->toBe(1)
+        ->and($xpath->query($approvalModal.'//button[@*[name()="wire:click"]="approve"]')->length)->toBe(1);
 });
