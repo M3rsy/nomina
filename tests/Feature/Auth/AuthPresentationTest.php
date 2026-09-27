@@ -19,13 +19,13 @@ function authPresentationXPath(string $html): DOMXPath
 test('login presents the payroll operations identity without authenticated navigation', function () {
     get(route('login'))
         ->assertOk()
-        ->assertSee('Centro operativo de nómina')
+        ->assertSee('Centro Operativo de Nómina')
         ->assertSee('Asistencia y trazabilidad en cada jornada.')
         ->assertSee('06-14')
         ->assertSee('14-18')
         ->assertSee('18-00')
         ->assertSee('00-06')
-        ->assertSee('Desarrollado por CFV Technology')
+        ->assertSeeInOrder(['Desarrollado por', 'CFV Technology'])
         ->assertDontSee('Credenciales demo')
         ->assertDontSee('aria-label="Navegación principal"', escape: false);
 });
@@ -85,8 +85,8 @@ test('forgot password reuses the identity with accessible email and loading feed
     get(route('password.request'))
         ->assertOk()
         ->assertSee('data-auth-shell', escape: false)
-        ->assertSee('Centro operativo de nómina')
-        ->assertSee('Desarrollado por CFV Technology')
+        ->assertSee('Centro Operativo de Nómina')
+        ->assertSeeInOrder(['Desarrollado por', 'CFV Technology'])
         ->assertSee('wire:submit="sendResetLink"', escape: false)
         ->assertSee('id="forgot-email"', escape: false)
         ->assertSee('autocomplete="email"', escape: false)
@@ -138,8 +138,8 @@ test('reset password reuses the identity with new password controls and loading 
     $response
         ->assertOk()
         ->assertSee('data-auth-shell', escape: false)
-        ->assertSee('Centro operativo de nómina')
-        ->assertSee('Desarrollado por CFV Technology')
+        ->assertSee('Centro Operativo de Nómina')
+        ->assertSeeInOrder(['Desarrollado por', 'CFV Technology'])
         ->assertSee('wire:submit="resetPassword"', escape: false)
         ->assertSee('id="reset-email"', escape: false)
         ->assertSee('autocomplete="email"', escape: false)

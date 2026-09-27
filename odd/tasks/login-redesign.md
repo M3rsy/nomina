@@ -26,7 +26,7 @@ Source reference: Stitch project `5126769435574810571`, screen `d4c9df8f936c4dcb
 - Implemented the responsive two-panel shell, operational assurance content, secure-login framing, icon-bearing fields, reset-password link, primary CTA, and disabled visual-only SSO control.
 - `php artisan view:clear` completed successfully: compiled views cleared.
 - `git diff --check` passed.
-- `php artisan test tests/Feature/Auth/LoginTest.php` passed: 8 tests, 52 assertions.
+- `php artisan test tests/Feature/Auth/AuthPresentationTest.php tests/Feature/WelcomeRouteTest.php tests/Feature/Auth/LoginTest.php` passed: 25 tests, 184 assertions.
 - `php artisan view:cache` passed: Blade templates compiled successfully.
 - `npm run build` was not run because Vite's Laravel plugin writes generated assets to `public/build`, which was outside the authorized edit surfaces during implementation.
 - Visual QA was approved by the user before delivery.
