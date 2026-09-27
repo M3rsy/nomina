@@ -5,37 +5,45 @@ namespace App\Services\Attendance;
 use App\Models\RawMark;
 use App\Models\WorkScheduleProfilePublication;
 use App\Services\Payroll\BandSplit;
-use App\Services\Payroll\BandSplitter;
-use App\Services\PayrollRules;
+use App\Services\Payroll\Policy\DurationFirstPolicyDefinition;
+use App\Services\Payroll\Policy\PayrollPolicyCatalog;
+use App\Services\Payroll\Policy\PayrollPolicyDefinition;
+use App\Services\Payroll\Policy\ScheduleOverlapPolicyDefinition;
+use App\Services\Payroll\Policy\UnsupportedPayrollPolicy;
 use Carbon\CarbonImmutable;
 
 class AttendanceShiftAnalyzer
 {
-    private const DURATION_FIRST_ORDINARY_QUOTA_MINUTES = 480;
-
-    private const DURATION_FIRST_OVERTIME_BANDS = [
-        ['start' => 0, 'end' => 360, 'bucket' => 'extra75'],
-        ['start' => 360, 'end' => 1080, 'bucket' => 'extra25'],
-        ['start' => 1080, 'end' => 1440, 'bucket' => 'extra50'],
-    ];
-
-    public function __construct(
-        private BandSplitter $bandSplitter,
-        private PayrollRules $rules,
-    ) {}
+    public function __construct(private PayrollPolicyCatalog $policyCatalog) {}
 
     public function analyze(
         ShiftOccurrence $occurrence,
         bool $isHoliday = false,
         int $calendarGeneration = 0,
     ): AttendanceShiftAnalysis {
-        if ($occurrence->payrollPolicyKey === WorkScheduleProfilePublication::DURATION_FIRST_V2) {
-            return $this->analyzeDurationFirst($occurrence, $isHoliday, $calendarGeneration);
+        if ($occurrence->payrollPolicyKey === null
+            && $occurrence->publicationId !== null
+            && in_array($occurrence->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
+            return $this->unsupportedPolicy($occurrence, $isHoliday);
         }
 
-        if (($occurrence->payrollPolicyKey !== null || $occurrence->publicationId !== null)
-            && $occurrence->payrollPolicyKey !== WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1
-            && in_array($occurrence->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
+        try {
+            $policy = $this->policyCatalog->resolve(
+                $occurrence->payrollPolicyKey ?? WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+            );
+        } catch (UnsupportedPayrollPolicy) {
+            if (in_array($occurrence->status, [ShiftOccurrence::RESOLVED, ShiftOccurrence::NO_MARKS], true)) {
+                return $this->unsupportedPolicy($occurrence, $isHoliday);
+            }
+
+            $policy = $this->policyCatalog->resolve(WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1);
+        }
+
+        if ($policy instanceof DurationFirstPolicyDefinition) {
+            return $this->analyzeDurationFirst($occurrence, $policy, $isHoliday, $calendarGeneration);
+        }
+
+        if (! $policy instanceof ScheduleOverlapPolicyDefinition) {
             return $this->unsupportedPolicy($occurrence, $isHoliday);
         }
 
@@ -47,25 +55,13 @@ class AttendanceShiftAnalyzer
             if ($occurrence->status === ShiftOccurrence::NO_MARKS
                 && $occurrence->scheduledStart !== null
                 && $occurrence->scheduledEnd !== null) {
-                if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
-                    return new AttendanceShiftAnalysis(
-                        AttendanceShiftAnalysis::INVALID_RATE_BANDS,
-                        $occurrence->workDate,
-                        null,
-                        null,
-                        0,
-                        0,
-                        new BandSplit,
-                        collect(),
-                        collect(),
-                        $isHoliday,
-                        $occurrence->publicationId,
-                        $occurrence->payrollPolicyKey,
-                    );
-                }
-
-                $scheduledMinutes = $this->minutes($occurrence->scheduledStart, $occurrence->scheduledEnd);
+                $scheduledMinutes = $this->minutes(
+                    $policy,
+                    $occurrence->scheduledStart,
+                    $occurrence->scheduledEnd,
+                );
                 $scheduledRates = $this->ratesFor(
+                    $policy,
                     $occurrence,
                     $occurrence->scheduledStart,
                     $occurrence->scheduledEnd,
@@ -73,9 +69,11 @@ class AttendanceShiftAnalyzer
                     $isHoliday,
                 );
 
-                if (! $isHoliday
-                    && $occurrence->schedule?->is_working_day
-                    && $scheduledMinutes > 0) {
+                if ($policy->shouldCreateFullDayAbsence(
+                    $isHoliday,
+                    (bool) $occurrence->schedule?->is_working_day,
+                    $scheduledMinutes,
+                )) {
                     $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                         'full_day_absence',
                         $occurrence->scheduledStart,
@@ -123,25 +121,8 @@ class AttendanceShiftAnalyzer
         }
 
         // Quantize the observed interval once into complete elapsed minutes anchored at the entry.
-        $workedMinutes = $this->minutes($entry, $exit);
+        $workedMinutes = $this->minutes($policy, $entry, $exit);
         $payableEnd = $entry->addMinutes($workedMinutes);
-
-        if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
-            return new AttendanceShiftAnalysis(
-                AttendanceShiftAnalysis::INVALID_RATE_BANDS,
-                $occurrence->workDate,
-                $entry,
-                $exit,
-                $workedMinutes,
-                0,
-                new BandSplit,
-                collect(),
-                collect(),
-                $isHoliday,
-                $occurrence->publicationId,
-                $occurrence->payrollPolicyKey,
-            );
-        }
 
         $scheduledStart = $occurrence->scheduledStart;
         $scheduledEnd = $occurrence->scheduledEnd;
@@ -169,6 +150,7 @@ class AttendanceShiftAnalyzer
             $scheduledObservedStart = $entry->addMinutes($preShiftMinutes);
             $scheduledObservedEnd = $scheduledObservedStart->addMinutes($scheduledMinutes);
             $scheduledRates = $this->ratesFor(
+                $policy,
                 $occurrence,
                 $scheduledObservedStart,
                 $scheduledObservedEnd,
@@ -177,66 +159,86 @@ class AttendanceShiftAnalyzer
             );
             $fingerprint = $this->fingerprint($occurrence, $isHoliday, $calendarGeneration);
             $legacyFingerprint = $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration);
-            $scheduledDuration = $this->minutes($scheduledStart, $scheduledEnd);
+            $scheduledDuration = $this->minutes($policy, $scheduledStart, $scheduledEnd);
             $missingScheduledMinutes = max(0, $scheduledDuration - $scheduledMinutes);
             $lateMinutes = min(
                 $missingScheduledMinutes,
                 $scheduledObservedStart->gt($scheduledStart)
-                    ? $this->minutes($scheduledStart, $scheduledObservedStart)
+                    ? $this->minutes($policy, $scheduledStart, $scheduledObservedStart)
                     : 0,
             );
             $earlyMinutes = $missingScheduledMinutes - $lateMinutes;
 
-            if ($lateMinutes > 0) {
+            if ($policy->shouldCreateScheduledDeficit(
+                $lateMinutes,
+                $isHoliday,
+                $occurrence->workDate->dayOfWeek,
+            )) {
                 $deficitEnd = $scheduledStart->addMinutes($lateMinutes);
                 $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                     'late_arrival',
                     $scheduledStart,
                     $deficitEnd,
                     $fingerprint,
-                    $this->ratesFor($occurrence, $scheduledStart, $deficitEnd, false, $isHoliday),
+                    $this->ratesFor($policy, $occurrence, $scheduledStart, $deficitEnd, false, $isHoliday),
                 ), $legacyFingerprint));
             }
 
-            if ($earlyMinutes > 0) {
+            if ($policy->shouldCreateScheduledDeficit(
+                $earlyMinutes,
+                $isHoliday,
+                $occurrence->workDate->dayOfWeek,
+            )) {
                 $deficitStart = $scheduledEnd->subMinutes($earlyMinutes);
                 $deficits->push($this->withLegacyIdentity(new AttendanceSegment(
                     'early_departure',
                     $deficitStart,
                     $scheduledEnd,
                     $fingerprint,
-                    $this->ratesFor($occurrence, $deficitStart, $scheduledEnd, false, $isHoliday),
+                    $this->ratesFor($policy, $occurrence, $deficitStart, $scheduledEnd, false, $isHoliday),
                 ), $legacyFingerprint));
             }
 
-            if ($preShiftMinutes > 0) {
+            if ($policy->shouldCreateOvertimeCandidate(
+                $preShiftMinutes,
+                $isHoliday,
+                $occurrence->workDate->dayOfWeek,
+            )) {
                 $candidateEnd = $entry->addMinutes($preShiftMinutes);
                 $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                     'pre_shift',
                     $entry,
                     $candidateEnd,
                     $fingerprint,
-                    $this->ratesFor($occurrence, $entry, $candidateEnd, true, $isHoliday),
+                    $this->ratesFor($policy, $occurrence, $entry, $candidateEnd, true, $isHoliday),
                 ), $legacyFingerprint));
             }
 
-            if ($postShiftMinutes > 0) {
+            if ($policy->shouldCreateOvertimeCandidate(
+                $postShiftMinutes,
+                $isHoliday,
+                $occurrence->workDate->dayOfWeek,
+            )) {
                 $candidateStart = $payableEnd->subMinutes($postShiftMinutes);
                 $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                     'post_shift',
                     $candidateStart,
                     $payableEnd,
                     $fingerprint,
-                    $this->ratesFor($occurrence, $candidateStart, $payableEnd, true, $isHoliday),
+                    $this->ratesFor($policy, $occurrence, $candidateStart, $payableEnd, true, $isHoliday),
                 ), $legacyFingerprint));
             }
-        } elseif ($workedMinutes > 0) {
+        } elseif ($policy->shouldCreateOvertimeCandidate(
+            $workedMinutes,
+            $isHoliday,
+            $occurrence->workDate->dayOfWeek,
+        )) {
             $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
                 'non_working',
                 $entry,
                 $payableEnd,
                 $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
-                $this->ratesFor($occurrence, $entry, $payableEnd, true, $isHoliday),
+                $this->ratesFor($policy, $occurrence, $entry, $payableEnd, true, $isHoliday),
             ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration)));
         }
 
@@ -278,13 +280,14 @@ class AttendanceShiftAnalyzer
 
     private function analyzeDurationFirst(
         ShiftOccurrence $occurrence,
+        DurationFirstPolicyDefinition $policy,
         bool $isHoliday,
         int $calendarGeneration,
     ): AttendanceShiftAnalysis {
         if ($occurrence->status !== ShiftOccurrence::RESOLVED) {
             $deficits = collect();
             $shortfall = $occurrence->status === ShiftOccurrence::NO_MARKS
-                ? $this->durationFirstShortfall($occurrence, 0, $isHoliday, $calendarGeneration)
+                ? $this->durationFirstShortfall($occurrence, $policy, 0, $isHoliday, $calendarGeneration)
                 : null;
 
             if ($shortfall !== null) {
@@ -327,31 +330,43 @@ class AttendanceShiftAnalyzer
             );
         }
 
-        $workedMinutes = $this->minutes($entry, $exit);
+        $workedMinutes = $policy->completeElapsedMinutes((int) $entry->diffInSeconds($exit));
+        $dayOfWeek = $occurrence->workDate->dayOfWeek;
 
-        if ($isHoliday || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY) {
-            return $this->durationFirstOverride($occurrence, $entry, $exit, $workedMinutes, $isHoliday);
+        if ($policy->overrideRateBucket($isHoliday, $dayOfWeek) !== null) {
+            return $this->durationFirstOverride($occurrence, $policy, $entry, $exit, $workedMinutes, $isHoliday);
         }
 
-        $ordinaryMinutes = min($workedMinutes, self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
+        $ordinaryMinutes = $policy->ordinaryMinutes($workedMinutes, $isHoliday, $dayOfWeek);
         $payableEnd = $entry->addMinutes($workedMinutes);
-        $postQuotaMinutes = max(0, $workedMinutes - self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
-        $residualMinutes = $postQuotaMinutes % 60;
-        $excludedTransferMinutes = $postQuotaMinutes >= 60
-            && $residualMinutes >= 1
-            && $residualMinutes <= 30 ? $residualMinutes : 0;
+        $excludedTransferMinutes = $policy->excludedTransferMinutes($workedMinutes, $isHoliday, $dayOfWeek);
         $recognizedEnd = $payableEnd->subMinutes($excludedTransferMinutes);
         $deficits = collect();
         $overtimeCandidates = collect();
         $variations = collect();
 
-        if ($shortfall = $this->durationFirstShortfall($occurrence, $workedMinutes, $isHoliday, $calendarGeneration)) {
+        if ($shortfall = $this->durationFirstShortfall(
+            $occurrence,
+            $policy,
+            $workedMinutes,
+            $isHoliday,
+            $calendarGeneration,
+        )) {
             $deficits->push($shortfall);
         }
 
-        if ($workedMinutes >= self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES
-            && $occurrence->scheduledStart !== null
-            && $entry->gt($occurrence->scheduledStart->addMinutes(20))) {
+        $minutesAfterScheduledStart = $occurrence->scheduledStart === null
+            ? null
+            : ($entry->gt($occurrence->scheduledStart)
+                ? (int) ceil($occurrence->scheduledStart->diffInSeconds($entry) / 60)
+                : 0);
+
+        if ($policy->shouldRecordEntryVariation(
+            $workedMinutes,
+            $minutesAfterScheduledStart,
+            $isHoliday,
+            $dayOfWeek,
+        )) {
             $variations->push(new AttendanceVariation(
                 'schedule_entry',
                 $entry,
@@ -359,10 +374,11 @@ class AttendanceShiftAnalyzer
             ));
         }
 
-        if ($workedMinutes > self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES) {
-            $candidateStart = $entry->addMinutes(self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES);
+        if ($policy->shouldCreateOvertimeCandidate($workedMinutes, $isHoliday, $dayOfWeek)) {
+            $candidateStart = $entry->addMinutes($ordinaryMinutes);
             $overtimeCandidates->push($this->durationFirstOvertimeCandidate(
                 $occurrence,
+                $policy,
                 $candidateStart,
                 $recognizedEnd,
                 $isHoliday,
@@ -390,19 +406,26 @@ class AttendanceShiftAnalyzer
 
     private function durationFirstOverride(
         ShiftOccurrence $occurrence,
+        DurationFirstPolicyDefinition $policy,
         CarbonImmutable $entry,
         CarbonImmutable $exit,
         int $workedMinutes,
         bool $isHoliday,
     ): AttendanceShiftAnalysis {
+        $overrideMinutes = $policy->extra100Minutes(
+            $workedMinutes,
+            $isHoliday,
+            $occurrence->workDate->dayOfWeek,
+        );
+
         return new AttendanceShiftAnalysis(
             status: $occurrence->status,
             workDate: $occurrence->workDate,
             entryAt: $entry,
             exitAt: $exit,
             workedMinutes: $workedMinutes,
-            scheduledMinutes: $workedMinutes,
-            scheduledRates: new BandSplit(extra100Minutes: $workedMinutes),
+            scheduledMinutes: $overrideMinutes,
+            scheduledRates: new BandSplit(extra100Minutes: $overrideMinutes),
             deficits: collect(),
             overtimeCandidates: collect(),
             isHoliday: $isHoliday,
@@ -413,6 +436,7 @@ class AttendanceShiftAnalyzer
 
     private function durationFirstOvertimeCandidate(
         ShiftOccurrence $occurrence,
+        DurationFirstPolicyDefinition $policy,
         CarbonImmutable $start,
         CarbonImmutable $end,
         bool $isHoliday,
@@ -423,21 +447,25 @@ class AttendanceShiftAnalyzer
             $start,
             $end,
             $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
-            $this->bandSplitter->split($start, $end, self::DURATION_FIRST_OVERTIME_BANDS),
+            $this->splitByPolicy($policy, $start, $end, $policy->overtimeBucketAt(...)),
         ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration));
     }
 
     private function durationFirstShortfall(
         ShiftOccurrence $occurrence,
+        DurationFirstPolicyDefinition $policy,
         int $workedMinutes,
         bool $isHoliday,
         int $calendarGeneration,
     ): ?AttendanceSegment {
-        $minutes = self::DURATION_FIRST_ORDINARY_QUOTA_MINUTES - $workedMinutes;
+        $minutes = $policy->shortfallMinutes(
+            $workedMinutes,
+            $isHoliday,
+            $occurrence->workDate->dayOfWeek,
+            (bool) $occurrence->schedule?->is_working_day,
+        );
 
-        if ($minutes < 1 || $isHoliday
-            || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY
-            || ! $occurrence->schedule?->is_working_day) {
+        if ($minutes < 1) {
             return null;
         }
 
@@ -451,9 +479,43 @@ class AttendanceShiftAnalyzer
         ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration));
     }
 
-    private function minutes(CarbonImmutable $start, CarbonImmutable $end): int
-    {
-        return $end->gt($start) ? (int) floor($start->diffInSeconds($end) / 60) : 0;
+    private function splitByPolicy(
+        PayrollPolicyDefinition $policy,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+        callable $bucketAt,
+    ): BandSplit {
+        $totals = [
+            'ordinary' => 0,
+            'extra25' => 0,
+            'extra50' => 0,
+            'extra75' => 0,
+            'extra100' => 0,
+        ];
+        $wholeMinutes = $policy->completeElapsedMinutes((int) $start->diffInSeconds($end));
+
+        for ($offset = 0; $offset < $wholeMinutes; $offset++) {
+            $instant = $start->addMinutes($offset);
+            $totals[$bucketAt($instant->hour * 60 + $instant->minute)]++;
+        }
+
+        return new BandSplit(
+            ordinaryMinutes: $totals['ordinary'],
+            extra25Minutes: $totals['extra25'],
+            extra50Minutes: $totals['extra50'],
+            extra75Minutes: $totals['extra75'],
+            extra100Minutes: $totals['extra100'],
+        );
+    }
+
+    private function minutes(
+        PayrollPolicyDefinition $policy,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+    ): int {
+        return $end->gt($start)
+            ? $policy->completeElapsedMinutes((int) $start->diffInSeconds($end))
+            : 0;
     }
 
     private function fingerprint(ShiftOccurrence $occurrence, bool $isHoliday, int $calendarGeneration): string
@@ -523,39 +585,24 @@ class AttendanceShiftAnalyzer
         return hash('sha256', json_encode($revisions, JSON_THROW_ON_ERROR));
     }
 
-    private function hasCompleteRateBandCoverage(ShiftOccurrence $occurrence, bool $isHoliday): bool
-    {
-        return $isHoliday
-            || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY
-            || $this->rules->hasCompleteRateBandCoverage($occurrence->schedule?->banding_json);
-    }
-
     private function ratesFor(
+        ScheduleOverlapPolicyDefinition $policy,
         ShiftOccurrence $occurrence,
         CarbonImmutable $start,
         CarbonImmutable $end,
         bool $isCandidate,
         bool $isHoliday,
     ): BandSplit {
-        if ($isHoliday || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY) {
-            return new BandSplit(extra100Minutes: $this->minutes($start, $end));
-        }
-
-        $rates = $this->bandSplitter->split(
+        return $this->splitByPolicy(
+            $policy,
             $start,
             $end,
-            $this->rules->normalizedOvertimeBands($occurrence->schedule?->banding_json),
-        );
-
-        if (! $isCandidate || $occurrence->workDate->dayOfWeek !== PayrollRules::DAY_SATURDAY) {
-            return $rates;
-        }
-
-        return new BandSplit(
-            extra25Minutes: $rates->extra25Minutes + $rates->ordinaryMinutes,
-            extra50Minutes: $rates->extra50Minutes,
-            extra75Minutes: $rates->extra75Minutes,
-            extra100Minutes: $rates->extra100Minutes,
+            fn (int $minuteOfDay): string => $policy->rateBucketAt(
+                $minuteOfDay,
+                $isHoliday,
+                $occurrence->workDate->dayOfWeek,
+                $isCandidate,
+            ),
         );
     }
 }

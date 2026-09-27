@@ -7,7 +7,69 @@ use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\ShiftOccurrence;
+use App\Services\Payroll\Policy\InCodePayrollPolicyCatalog;
+use App\Services\Payroll\Policy\PayrollPolicyCatalog;
+use App\Services\Payroll\Policy\PayrollPolicyDefinition;
 use Carbon\CarbonImmutable;
+
+test('resolves schedule overlap through the policy catalog without changing analysis identity', function () {
+    $catalog = new RecordingPayrollPolicyCatalog;
+    app()->instance(PayrollPolicyCatalog::class, $catalog);
+    $occurrence = attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 14:30:00',
+    );
+
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $repeated = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($catalog->resolvedKeys)->toBe([
+        WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+        WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+    ])->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($candidate->kind)->toBe('post_shift')
+        ->and($candidate->rateMinutes->extra25Minutes)->toBe(30)
+        ->and($candidate->fingerprint)->toBe($repeated->overtimeCandidates->sole()->fingerprint);
+});
+
+test('legacy occurrences without a policy key keep schedule overlap behavior and identity', function () {
+    $legacy = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:30:00',
+        payrollPolicyKey: null,
+    ))->overtimeCandidates->sole();
+    $explicit = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:30:00',
+    ))->overtimeCandidates->sole();
+
+    expect($legacy->kind)->toBe('post_shift')
+        ->and($legacy->rateMinutes->extra25Minutes)->toBe(30)
+        ->and($explicit->identities())->toHaveCount(2)
+        ->and($legacy->fingerprint)->toBe($explicit->identities()[1]->fingerprint);
+});
+
+test('schedule overlap keeps a full-day absence for a working day without marks', function () {
+    $resolved = attendanceOccurrence('2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:00:00');
+    $occurrence = new ShiftOccurrence(
+        $resolved->workDate,
+        $resolved->assignment,
+        $resolved->schedule,
+        $resolved->scheduledStart,
+        $resolved->scheduledEnd,
+        collect(),
+        ShiftOccurrence::NO_MARKS,
+        payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+    );
+
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+    $absence = $analysis->deficits->sole();
+
+    expect($analysis->scheduledMinutes)->toBe(480)
+        ->and($absence->kind)->toBe('full_day_absence')
+        ->and($absence->minutes)->toBe(480)
+        ->and($absence->rateMinutes->ordinaryMinutes)->toBe(480);
+});
 
 test('recognizes an exact scheduled shift in integer minutes', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
@@ -606,7 +668,7 @@ function attendanceOccurrence(
     ?string $scheduledEnd = '14:00',
     ?array $bands = null,
     int $factGeneration = 0,
-    string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+    ?string $payrollPolicyKey = WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
 ): ShiftOccurrence {
     $date = CarbonImmutable::parse($workDate)->startOfDay();
     $schedule = (new WorkSchedule)->forceFill([
@@ -651,4 +713,24 @@ function attendanceOccurrence(
         factGeneration: $factGeneration,
         payrollPolicyKey: $payrollPolicyKey,
     );
+}
+
+final class RecordingPayrollPolicyCatalog implements PayrollPolicyCatalog
+{
+    /** @var list<string> */
+    public array $resolvedKeys = [];
+
+    private InCodePayrollPolicyCatalog $catalog;
+
+    public function __construct()
+    {
+        $this->catalog = new InCodePayrollPolicyCatalog;
+    }
+
+    public function resolve(string $key): PayrollPolicyDefinition
+    {
+        $this->resolvedKeys[] = $key;
+
+        return $this->catalog->resolve($key);
+    }
 }
