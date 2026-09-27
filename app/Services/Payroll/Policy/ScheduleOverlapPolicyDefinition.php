@@ -50,6 +50,10 @@ final readonly class ScheduleOverlapPolicyDefinition extends PayrollPolicyDefini
         int $dayOfWeek,
         bool $isOvertimeCandidate,
     ): string {
+        if ($minuteOfDay < 0 || $minuteOfDay >= 1440) {
+            throw new \InvalidArgumentException('Minute of day must be between 0 and 1439.');
+        }
+
         if ($isHoliday || $dayOfWeek === self::SUNDAY) {
             return self::HOLIDAY_OR_SUNDAY_BUCKET;
         }

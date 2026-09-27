@@ -27,6 +27,24 @@ test('schedule overlap preserves legacy holiday and Sunday behavior', function (
         ->toBe('0d24692c1022ff3cea6457170641c9ce00a3c7b57df9ced8df2d1c352c818488');
 });
 
+test('schedule overlap rejects minutes outside the day before applying overrides', function (
+    int $minuteOfDay,
+    bool $isHoliday,
+    int $dayOfWeek,
+) {
+    $policy = new ScheduleOverlapPolicyDefinition;
+
+    expect(fn () => $policy->rateBucketAt($minuteOfDay, $isHoliday, $dayOfWeek, false))
+        ->toThrow(InvalidArgumentException::class, 'Minute of day must be between 0 and 1439.');
+})->with([
+    'negative minute on regular weekday' => [-1, false, 1],
+    'minute after day on regular weekday' => [1440, false, 1],
+    'negative minute on holiday weekday' => [-1, true, 1],
+    'minute after day on holiday weekday' => [1440, true, 1],
+    'negative minute on non-holiday Sunday' => [-1, false, 0],
+    'minute after day on non-holiday Sunday' => [1440, false, 0],
+]);
+
 test('catalog exposes only immutable closed definitions', function () {
     $catalog = new InCodePayrollPolicyCatalog;
     $schedule = $catalog->resolve('schedule-overlap-v1');
