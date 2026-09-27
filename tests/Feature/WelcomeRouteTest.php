@@ -70,7 +70,7 @@ test('login is a complete asset-backed page with a size-safe brand mark', functi
         ->assertSee('<link rel="stylesheet"', escape: false)
         ->assertSee('<script type="module"', escape: false)
         ->assertSee('data-auth-shell', escape: false)
-        ->assertSee('<svg class="size-6" width="24" height="24"', escape: false);
+        ->assertSee('<svg class="size-6" viewBox="0 0 24 24"', escape: false);
 });
 
 test('guest accessing dashboard is redirected to login', function () {
