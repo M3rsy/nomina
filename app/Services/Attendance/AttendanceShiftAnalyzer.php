@@ -10,11 +10,15 @@ use App\Services\Payroll\Policy\PayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyDefinition;
 use App\Services\Payroll\Policy\ScheduleOverlapPolicyDefinition;
 use App\Services\Payroll\Policy\UnsupportedPayrollPolicy;
+use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 
 class AttendanceShiftAnalyzer
 {
-    public function __construct(private PayrollPolicyCatalog $policyCatalog) {}
+    public function __construct(
+        private PayrollPolicyCatalog $policyCatalog,
+        private PayrollRules $rules,
+    ) {}
 
     public function analyze(
         ShiftOccurrence $occurrence,
@@ -55,6 +59,10 @@ class AttendanceShiftAnalyzer
             if ($occurrence->status === ShiftOccurrence::NO_MARKS
                 && $occurrence->scheduledStart !== null
                 && $occurrence->scheduledEnd !== null) {
+                if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
+                    return $this->invalidRateBands($occurrence, $isHoliday);
+                }
+
                 $scheduledMinutes = $this->minutes(
                     $policy,
                     $occurrence->scheduledStart,
@@ -123,6 +131,10 @@ class AttendanceShiftAnalyzer
         // Quantize the observed interval once into complete elapsed minutes anchored at the entry.
         $workedMinutes = $this->minutes($policy, $entry, $exit);
         $payableEnd = $entry->addMinutes($workedMinutes);
+
+        if (! $this->hasCompleteRateBandCoverage($occurrence, $isHoliday)) {
+            return $this->invalidRateBands($occurrence, $isHoliday, $entry, $exit, $workedMinutes);
+        }
 
         $scheduledStart = $occurrence->scheduledStart;
         $scheduledEnd = $occurrence->scheduledEnd;
@@ -255,6 +267,29 @@ class AttendanceShiftAnalyzer
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,
+        );
+    }
+
+    private function invalidRateBands(
+        ShiftOccurrence $occurrence,
+        bool $isHoliday,
+        ?CarbonImmutable $entry = null,
+        ?CarbonImmutable $exit = null,
+        int $workedMinutes = 0,
+    ): AttendanceShiftAnalysis {
+        return new AttendanceShiftAnalysis(
+            AttendanceShiftAnalysis::INVALID_RATE_BANDS,
+            $occurrence->workDate,
+            $entry,
+            $exit,
+            $workedMinutes,
+            0,
+            new BandSplit,
+            collect(),
+            collect(),
+            $isHoliday,
+            $occurrence->publicationId,
+            $occurrence->payrollPolicyKey,
         );
     }
 
@@ -583,6 +618,13 @@ class AttendanceShiftAnalyzer
         $revisions = $mark?->metadata['revisions'] ?? [];
 
         return hash('sha256', json_encode($revisions, JSON_THROW_ON_ERROR));
+    }
+
+    private function hasCompleteRateBandCoverage(ShiftOccurrence $occurrence, bool $isHoliday): bool
+    {
+        return $isHoliday
+            || $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY
+            || $this->rules->hasCompleteRateBandCoverage($occurrence->schedule?->banding_json);
     }
 
     private function ratesFor(

@@ -10,6 +10,7 @@ use App\Services\Attendance\ShiftOccurrence;
 use App\Services\Payroll\Policy\InCodePayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyDefinition;
+use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 
 test('resolves schedule overlap through the policy catalog without changing analysis identity', function () {
@@ -331,6 +332,37 @@ test('ignores incomplete historical rate bands and uses canonical coverage', fun
     expect($analysis->status)->toBe(ShiftOccurrence::RESOLVED)
         ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
         ->and($analysis->scheduledRates->totalMinutes())->toBe(480);
+});
+
+test('schedule overlap fails closed when canonical rate coverage is unavailable', function () {
+    app()->instance(PayrollRules::class, new class extends PayrollRules
+    {
+        public function hasCompleteRateBandCoverage(mixed $rawBands): bool
+        {
+            return false;
+        }
+    });
+    $resolved = attendanceOccurrence('2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:00:00');
+    $noMarks = new ShiftOccurrence(
+        workDate: $resolved->workDate,
+        assignment: $resolved->assignment,
+        schedule: $resolved->schedule,
+        scheduledStart: $resolved->scheduledStart,
+        scheduledEnd: $resolved->scheduledEnd,
+        marks: collect(),
+        status: ShiftOccurrence::NO_MARKS,
+        payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
+    );
+    $analyzer = app(AttendanceShiftAnalyzer::class);
+    $holiday = $analyzer->analyze($resolved, isHoliday: true);
+    $sunday = $analyzer->analyze(attendanceOccurrence(
+        '2026-07-19', '2026-07-19 06:00:00', '2026-07-19 14:00:00',
+    ));
+
+    expect($analyzer->analyze($noMarks)->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+        ->and($analyzer->analyze($resolved)->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+        ->and($holiday->status)->toBe(ShiftOccurrence::RESOLVED)
+        ->and($sunday->status)->toBe(ShiftOccurrence::RESOLVED);
 });
 
 test('propagates an unresolved occurrence without inventing observed time', function () {
