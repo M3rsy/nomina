@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Services\BackupArchiveVerifier;
 use App\Services\CurrentCompany;
 use App\Services\Payroll\PayrollRunMetrics;
+use App\Services\Payroll\Policy\InCodePayrollPolicyCatalog;
+use App\Services\Payroll\Policy\PayrollPolicyCatalog;
 use App\View\Components\AppLayout;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +31,7 @@ class AppServiceProvider extends ServiceProvider
         });
         $this->app->singleton(BackupArchiveVerifier::class);
         $this->app->singleton(PayrollRunMetrics::class);
+        $this->app->singleton(PayrollPolicyCatalog::class, InCodePayrollPolicyCatalog::class);
 
         if ($this->shouldUseFileCacheForMaintenanceCommands()) {
             config(['cache.default' => 'file']);
