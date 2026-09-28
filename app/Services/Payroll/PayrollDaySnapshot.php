@@ -32,7 +32,7 @@ final readonly class PayrollDaySnapshot
         $analysis = $review->analysis;
 
         return new self([
-            'schema_version' => 3,
+            'schema_version' => 4,
             'work_date' => $evaluation->workDate->toDateString(),
             'day_type' => $evaluation->dayType,
             'employee' => [
@@ -45,6 +45,7 @@ final readonly class PayrollDaySnapshot
             'publication' => [
                 'id' => $evaluation->publicationId,
                 'payroll_policy_key' => $evaluation->payrollPolicyKey,
+                'payroll_policy_definition_hash' => $analysis->definitionHash,
                 'assignment_id' => $occurrence->assignment?->id,
                 'profile_id' => $occurrence->assignment?->work_schedule_profile_id,
                 'schedule_id' => $occurrence->schedule?->id,

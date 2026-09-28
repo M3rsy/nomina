@@ -7,9 +7,11 @@ use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\ShiftOccurrence;
+use App\Services\Payroll\Policy\DurationFirstPolicyDefinition;
 use App\Services\Payroll\Policy\InCodePayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyCatalog;
 use App\Services\Payroll\Policy\PayrollPolicyDefinition;
+use App\Services\Payroll\Policy\ScheduleOverlapPolicyDefinition;
 use App\Services\PayrollRules;
 use Carbon\CarbonImmutable;
 
@@ -35,16 +37,35 @@ test('resolves schedule overlap through the policy catalog without changing anal
         ->and($candidate->fingerprint)->toBe($repeated->overtimeCandidates->sole()->fingerprint);
 });
 
+test('analysis carries the resolved immutable policy definition hash through compatibility handling', function () {
+    $catalog = new InCodePayrollPolicyCatalog;
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 09:30:00', '2026-07-20 18:30:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $historical = $analysis->withDecisionSegments($analysis->deficits, $analysis->overtimeCandidates);
+
+    $definition = $catalog->resolve(WorkScheduleProfilePublication::DURATION_FIRST_V2);
+    assert($definition instanceof DurationFirstPolicyDefinition);
+
+    expect($analysis->definitionHash)->toBe($definition->definitionHash)
+        ->and($historical->definitionHash)->toBe($definition->definitionHash);
+});
+
 test('legacy occurrences without a policy key keep schedule overlap behavior and identity', function () {
-    $legacy = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+    $legacyAnalysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:30:00',
         payrollPolicyKey: null,
-    ))->overtimeCandidates->sole();
-    $explicit = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+    ));
+    $explicitAnalysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         '2026-07-20', '2026-07-20 06:00:00', '2026-07-20 14:30:00',
-    ))->overtimeCandidates->sole();
+    ));
+    $legacy = $legacyAnalysis->overtimeCandidates->sole();
+    $explicit = $explicitAnalysis->overtimeCandidates->sole();
 
-    expect($legacy->kind)->toBe('post_shift')
+    expect($legacyAnalysis->definitionHash)
+        ->toBe('0d24692c1022ff3cea6457170641c9ce00a3c7b57df9ced8df2d1c352c818488')
+        ->and($legacy->kind)->toBe('post_shift')
         ->and($legacy->rateMinutes->extra25Minutes)->toBe(30)
         ->and($explicit->identities())->toHaveCount(2)
         ->and($legacy->fingerprint)->toBe($explicit->identities()[1]->fingerprint);
@@ -354,13 +375,19 @@ test('schedule overlap fails closed when canonical rate coverage is unavailable'
         payrollPolicyKey: WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1,
     );
     $analyzer = app(AttendanceShiftAnalyzer::class);
+    $definition = (new InCodePayrollPolicyCatalog)->resolve(WorkScheduleProfilePublication::SCHEDULE_OVERLAP_V1);
+    assert($definition instanceof ScheduleOverlapPolicyDefinition);
+    $noMarksAnalysis = $analyzer->analyze($noMarks);
+    $resolvedAnalysis = $analyzer->analyze($resolved);
     $holiday = $analyzer->analyze($resolved, isHoliday: true);
     $sunday = $analyzer->analyze(attendanceOccurrence(
         '2026-07-19', '2026-07-19 06:00:00', '2026-07-19 14:00:00',
     ));
 
-    expect($analyzer->analyze($noMarks)->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
-        ->and($analyzer->analyze($resolved)->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+    expect($noMarksAnalysis->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+        ->and($noMarksAnalysis->definitionHash)->toBe($definition->definitionHash)
+        ->and($resolvedAnalysis->status)->toBe(AttendanceShiftAnalysis::INVALID_RATE_BANDS)
+        ->and($resolvedAnalysis->definitionHash)->toBe($definition->definitionHash)
         ->and($holiday->status)->toBe(ShiftOccurrence::RESOLVED)
         ->and($sunday->status)->toBe(ShiftOccurrence::RESOLVED);
 });
@@ -385,6 +412,25 @@ test('propagates an unresolved occurrence without inventing observed time', func
         ->and($analysis->scheduledMinutes)->toBe(0)
         ->and($analysis->deficits)->toBeEmpty()
         ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('does not invent a definition hash for an unsupported unresolved policy', function () {
+    $occurrence = new ShiftOccurrence(
+        workDate: CarbonImmutable::parse('2026-07-20'),
+        assignment: null,
+        schedule: null,
+        scheduledStart: null,
+        scheduledEnd: null,
+        marks: collect(),
+        status: ShiftOccurrence::AMBIGUOUS,
+        payrollPolicyKey: 'duration-first-v3',
+    );
+
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze($occurrence);
+
+    expect($analysis->status)->toBe(ShiftOccurrence::AMBIGUOUS)
+        ->and($analysis->payrollPolicyKey)->toBe('duration-first-v3')
+        ->and($analysis->definitionHash)->toBeNull();
 });
 
 test('blocks a resolved pair whose timestamps do not form an interval', function () {
@@ -689,7 +735,8 @@ test('rejects a resolved occurrence with an unsupported immutable payroll policy
         ->and($analysis->scheduledRates->totalMinutes())->toBe(0)
         ->and($analysis->deficits)->toBeEmpty()
         ->and($analysis->overtimeCandidates)->toBeEmpty()
-        ->and($analysis->payrollPolicyKey)->toBe('duration-first-v3');
+        ->and($analysis->payrollPolicyKey)->toBe('duration-first-v3')
+        ->and($analysis->definitionHash)->toBeNull();
 });
 
 function attendanceOccurrence(

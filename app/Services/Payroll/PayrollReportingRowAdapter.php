@@ -11,7 +11,7 @@ final class PayrollReportingRowAdapter
     public function adapt(PayrollResult $result): array
     {
         $snapshot = $result->day_snapshot;
-        if (is_array($snapshot) && in_array(($snapshot['schema_version'] ?? null), [2, 3], true)) {
+        if (is_array($snapshot) && in_array(($snapshot['schema_version'] ?? null), [2, 3, 4], true)) {
             return [
                 ...$this->adaptSnapshot($snapshot),
                 'employee_payment_code' => $result->employee_payment_code,

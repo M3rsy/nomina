@@ -14,6 +14,8 @@ readonly class AttendanceShiftAnalysis
 
     public const UNSUPPORTED_PAYROLL_POLICY = 'unsupported_payroll_policy';
 
+    public ?string $definitionHash;
+
     /**
      * @param  Collection<int, AttendanceSegment>  $deficits
      * @param  Collection<int, AttendanceSegment>  $overtimeCandidates
@@ -33,7 +35,10 @@ readonly class AttendanceShiftAnalysis
         public ?string $payrollPolicyKey = null,
         public Collection $variations = new Collection,
         public int $excludedTransferMinutes = 0,
-    ) {}
+        ?string $definitionHash = null,
+    ) {
+        $this->definitionHash = $definitionHash;
+    }
 
     /**
      * @param  Collection<int, AttendanceSegment>  $deficits
@@ -56,6 +61,7 @@ readonly class AttendanceShiftAnalysis
             $this->payrollPolicyKey,
             $this->variations,
             $this->excludedTransferMinutes,
+            $this->definitionHash,
         );
     }
 }
