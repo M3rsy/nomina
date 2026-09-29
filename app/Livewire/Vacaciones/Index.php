@@ -5,6 +5,7 @@ namespace App\Livewire\Vacaciones;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\Vacation;
+use App\Models\VacationBalanceMovement;
 use App\Services\Vacations\VacationManager;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -51,6 +52,8 @@ class Index extends Component
     public ?int $cancellingId = null;
 
     public string $cancellationReason = '';
+
+    public ?string $successMessage = null;
 
     public function mount(): void
     {
@@ -141,6 +144,7 @@ class Index extends Component
         );
         $this->showAdjustmentModal = false;
         $this->resetAdjustmentForm();
+        $this->successMessage = 'Saldo ajustado correctamente.';
         $this->dispatch('vacation-balance-adjusted');
     }
 
@@ -185,15 +189,32 @@ class Index extends Component
             })
             ->latest('start_date')
             ->paginate(15);
-        $balances = $companyId === null
+        $balanceEmployees = $companyId === null
             ? collect()
             : Employee::withoutCompanyScope()
                 ->where('company_id', $companyId)
+                ->whereHas('vacationBalanceMovements')
                 ->withSum('vacationBalanceMovements as vacation_balance', 'days')
-                ->get()->pluck('vacation_balance', 'id');
+                ->orderBy('first_name')
+                ->orderBy('last_name')
+                ->get();
+        $balances = $balanceEmployees->pluck('vacation_balance', 'id');
+        $recentBalanceMovements = $companyId === null
+            ? collect()
+            : VacationBalanceMovement::withoutCompanyScope()
+                ->where('company_id', $companyId)
+                ->with([
+                    'employee' => fn ($relation) => $relation->withTrashed(),
+                    'recorder',
+                ])
+                ->latest('created_at')
+                ->latest('id')
+                ->limit(10)
+                ->get();
 
         return view('livewire.vacaciones.index', compact(
-            'vacations', 'vacationEmployees', 'adjustmentEmployees', 'balances', 'companyId'
+            'vacations', 'vacationEmployees', 'adjustmentEmployees', 'balanceEmployees', 'balances',
+            'recentBalanceMovements', 'companyId'
         ));
     }
 
@@ -248,5 +269,4 @@ class Index extends Component
             ->orderBy('last_name')
             ->get();
     }
-
 }

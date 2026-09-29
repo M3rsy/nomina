@@ -204,6 +204,72 @@ test('approve vacation modal filters active employees independently from the pag
         ->assertSet('search', 'page-level search');
 });
 
+test('an adjusted employee without vacations appears in the balance ledger', function () {
+    $context = vacationContext();
+
+    expect(Vacation::withoutCompanyScope()->where('employee_id', $context['employee']->id)->count())->toBe(0);
+
+    Livewire::actingAs($context['actor'])->test(Index::class)
+        ->set('employeeId', $context['employee']->id)
+        ->set('adjustmentDays', 7)
+        ->set('adjustmentReason', 'Saldo inicial confirmado')
+        ->call('adjustBalance')
+        ->assertHasNoErrors()
+        ->assertSee('data-vacation-section="balances"', false)
+        ->assertSee($context['employee']->full_name)
+        ->assertSee('7 día(s)');
+
+    expect(VacationBalanceMovement::withoutCompanyScope()
+        ->where('employee_id', $context['employee']->id)
+        ->where('days', 7)
+        ->where('reason', 'Saldo inicial confirmado')
+        ->count())->toBe(1);
+});
+
+test('an inactive adjusted employee keeps the exact balance in the ledger and vacation record', function () {
+    $context = vacationContext();
+    $context['employee']->update(['is_active' => false]);
+    Vacation::factory()
+        ->for($context['company'])
+        ->for($context['employee'])
+        ->create([
+            'status' => Vacation::APPROVED,
+            'approved_by' => $context['actor']->id,
+        ]);
+
+    $component = Livewire::actingAs($context['actor'])->test(Index::class)
+        ->set('employeeId', $context['employee']->id)
+        ->set('adjustmentDays', 8)
+        ->set('adjustmentReason', 'Saldo previo al egreso')
+        ->call('adjustBalance')
+        ->assertHasNoErrors()
+        ->assertSee($context['employee']->full_name)
+        ->assertSee('Inactivo');
+
+    expect(substr_count($component->html(), '8 día(s)'))->toBe(2);
+});
+
+test('movement history preserves a soft-deleted employee identity', function () {
+    $context = vacationContext();
+    $context['employee']->update([
+        'first_name' => 'Empleado',
+        'last_name' => 'Archivado',
+    ]);
+    app(VacationManager::class)->adjustBalance(
+        $context['company'],
+        $context['employee'],
+        3,
+        'Ajuste histórico conservado',
+        $context['actor'],
+    );
+    $context['employee']->delete();
+
+    Livewire::actingAs($context['actor'])->test(Index::class)
+        ->assertOk()
+        ->assertSee('Empleado Archivado')
+        ->assertSee('Ajuste histórico conservado');
+});
+
 test('vacations page requires permissions and renders company data', function () {
     $context = vacationContext();
     app(CurrentCompany::class)->set($context['company']);

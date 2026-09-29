@@ -21,6 +21,10 @@
             </div>
         </header>
 
+        @if ($successMessage)
+            <div role="status" class="rounded-2xl border border-success/30 bg-success/10 px-4 py-3 text-sm font-semibold text-success-strong">{{ $successMessage }}</div>
+        @endif
+
         @if ($companyId === null)
             <div class="rounded-3xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning-strong">Seleccioná una empresa para consultar y gestionar sus vacaciones.</div>
         @else
@@ -28,6 +32,55 @@
                 <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Registros visibles</p><p class="mt-2 text-3xl font-black text-text">{{ $vacations->total() }}</p><p class="mt-2 text-xs text-text-muted">Solicitudes según los filtros.</p></article>
                 <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Estado consultado</p><p class="mt-2 text-xl font-black text-text">{{ match ($status) { 'approved' => 'Aprobadas', 'cancelled' => 'Canceladas', default => 'Todos' } }}</p><p class="mt-2 text-xs text-text-muted">Segmento actual del historial.</p></article>
                 <article class="rounded-3xl border border-border bg-surface p-5 shadow-sm"><p class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">Saldo gestionable</p><p class="mt-2 text-xl font-black text-text">{{ count($balances) }} empleados</p><p class="mt-2 text-xs text-text-muted">Personas con saldo en la empresa activa.</p></article>
+            </section>
+
+            <section data-vacation-section="balances" aria-labelledby="vacation-balances-title" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
+                <div class="border-b border-border px-5 py-4">
+                    <h2 id="vacation-balances-title" class="text-lg font-black text-text">Saldos del equipo</h2>
+                    <p class="mt-1 text-sm text-text-muted">Saldo actual por empleado, aun cuando no tenga vacaciones registradas.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead class="bg-surface-muted text-left text-xs font-bold uppercase tracking-[0.12em] text-text-muted"><tr><th class="px-4 py-3">Empleado</th><th class="px-4 py-3">Saldo actual</th></tr></thead>
+                        <tbody>
+                            @forelse ($balanceEmployees as $employee)
+                                @php($balance = (int) $employee->vacation_balance)
+                                <tr class="border-t border-border" wire:key="vacation-balance-{{ $employee->id }}">
+                                    <td class="px-4 py-3.5"><p class="flex items-center gap-2 text-sm font-bold text-text">{{ $employee->full_name }} @unless ($employee->is_active)<span class="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-semibold text-text-muted">Inactivo</span>@endunless</p><p class="text-xs text-text-muted">Código {{ $employee->external_id }}</p></td>
+                                    <td class="px-4 py-3.5"><span class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $balance < 0 ? 'bg-danger/10 text-danger' : 'bg-dashboard-info/10 text-dashboard-info-strong' }}">{{ $balance }} día(s)</span></td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="2" class="px-4 py-8 text-center text-sm text-text-muted">No hay empleados para mostrar.</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section data-vacation-section="movements" aria-labelledby="vacation-movements-title" class="overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
+                <div class="border-b border-border px-5 py-4">
+                    <h2 id="vacation-movements-title" class="text-lg font-black text-text">Movimientos recientes</h2>
+                    <p class="mt-1 text-sm text-text-muted">Historial inmutable de créditos y consumos de la empresa activa.</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead class="bg-surface-muted text-left text-xs font-bold uppercase tracking-[0.12em] text-text-muted"><tr><th class="px-4 py-3">Fecha</th><th class="px-4 py-3">Empleado</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Variación</th><th class="px-4 py-3">Motivo</th><th class="px-4 py-3">Registrado por</th></tr></thead>
+                        <tbody>
+                            @forelse ($recentBalanceMovements as $movement)
+                                <tr class="border-t border-border align-top" wire:key="vacation-movement-{{ $movement->id }}">
+                                    <td class="whitespace-nowrap px-4 py-3.5 text-sm text-text-muted"><time datetime="{{ $movement->created_at->toIso8601String() }}">{{ $movement->created_at->format('d/m/Y H:i') }}</time></td>
+                                    <td class="px-4 py-3.5 text-sm font-bold text-text">{{ $movement->employee?->full_name ?? 'Empleado no disponible' }}</td>
+                                    <td class="px-4 py-3.5 text-sm text-text-muted">{{ match ($movement->type) { 'manual_adjustment' => 'Ajuste manual', 'vacation_consumption' => 'Consumo de vacaciones', 'vacation_reversal' => 'Reversión de vacaciones', default => 'Movimiento de saldo' } }}</td>
+                                    <td class="px-4 py-3.5 text-sm font-bold {{ $movement->days < 0 ? 'text-danger' : 'text-success-strong' }}">{{ sprintf('%+d días', $movement->days) }}</td>
+                                    <td class="px-4 py-3.5 text-sm text-text-muted">{{ $movement->reason }}</td>
+                                    <td class="px-4 py-3.5 text-sm text-text-muted">{{ $movement->recorder?->name ?? 'Usuario eliminado' }}</td>
+                                </tr>
+                            @empty
+                                <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-text-muted">No hay movimientos registrados.</td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
             </section>
 
             <section data-vacation-section="filters" class="rounded-3xl border border-border bg-surface p-5 shadow-sm">
