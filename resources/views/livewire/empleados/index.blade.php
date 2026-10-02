@@ -13,10 +13,48 @@
                 </div>
 
                 @can('create', App\Models\Employee::class)
-                    <x-ui.button href="/empleados/crear">Nuevo empleado</x-ui.button>
+                    <div class="flex flex-wrap gap-2">
+                        <x-ui.button href="{{ route('empleados.template') }}" variant="secondary">Descargar plantilla Excel</x-ui.button>
+                        <x-ui.button href="/empleados/crear">Nuevo empleado</x-ui.button>
+                    </div>
                 @endcan
             </div>
         </section>
+
+        @can('create', App\Models\Employee::class)
+            <section data-employee-section="bulk-import" aria-labelledby="employee-import-heading" class="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-6">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <p class="text-xs font-bold uppercase tracking-wider text-brand">Carga masiva</p>
+                        <h2 id="employee-import-heading" class="mt-1 text-xl font-bold text-text">Importar empleados desde Excel</h2>
+                        <p class="mt-2 text-sm text-text-muted">Usá la plantilla oficial. Las columnas con * son obligatorias y la importación es todo o nada.</p>
+                    </div>
+                    <a href="{{ route('empleados.template') }}" class="text-sm font-semibold text-brand-strong hover:underline">Descargar plantilla</a>
+                </div>
+                <form wire:submit="importEmployees" class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <label for="employee-import-file" class="min-w-0 flex-1">
+                        <span class="mb-1.5 block text-sm font-semibold text-text">Archivo .xlsx</span>
+                        <input id="employee-import-file" type="file" wire:model="importFile" accept=".xlsx" class="block h-11 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-subtle file:px-3 file:py-1.5 file:font-semibold file:text-brand-strong">
+                    </label>
+                    <x-ui.button type="submit">Importar empleados</x-ui.button>
+                </form>
+                <div wire:loading wire:target="importFile,importEmployees" class="mt-3 text-sm font-semibold text-text-muted">Procesando archivo…</div>
+                @error('importFile') <p class="mt-3 text-sm font-semibold text-danger" role="alert">{{ $message }}</p> @enderror
+                @if ($importSummary)
+                    <p class="mt-4 rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm font-semibold text-success" role="status">Se importaron {{ $importSummary['count'] }} {{ $importSummary['count'] === 1 ? 'empleado' : 'empleados' }} correctamente.</p>
+                @endif
+                @if ($importErrors !== [])
+                    <div class="mt-4 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger" role="alert">
+                        <p class="font-bold">No se creó ningún empleado. Revisá estos errores:</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-5">
+                            @foreach ($importErrors as $error)
+                                <li>Fila {{ preg_match('/rows\.(\d+)/', $error['key'], $match) ? $match[1] : 'general' }}: {{ implode(' ', $error['messages']) }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+            </section>
+        @endcan
 
         <section data-employee-section="metrics" aria-labelledby="employee-summary-heading">
             <div class="mb-4 flex flex-wrap items-end justify-between gap-2">
