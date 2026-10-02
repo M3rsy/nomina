@@ -3,10 +3,12 @@
 namespace App\Services\Employees;
 
 use App\Models\Employee;
+use App\Models\EmployeeImportBatch;
 use App\Models\User;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\GeneralWorkScheduleResolver;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -50,87 +52,127 @@ class EmployeeBulkImportService
         'Apellido',
     ];
 
-    /** @return array{count: int} */
+    /** @return array{count: int, batch_id: int} */
     public function import(UploadedFile $file, int $companyId, User $actor): array
     {
-        [$rows, $errors] = $this->readRows($file);
+        $batch = EmployeeImportBatch::create([
+            'company_id' => $companyId,
+            'actor_id' => $actor->id,
+            'original_filename' => mb_substr($file->getClientOriginalName(), 0, 255),
+            'status' => EmployeeImportBatch::FAILED,
+        ]);
 
-        if ($rows === [] && $errors === []) {
-            $errors['import_file'][] = 'El archivo no contiene filas para importar.';
-        }
+        try {
+            [$rows, $errors, $rowStats] = $this->readRows($file);
+            $batch->update($rowStats);
 
-        foreach ($rows as &$row) {
-            $row['attributes']['company_id'] = $companyId;
-        }
-        unset($row);
-
-        $codes = [];
-        foreach ($rows as $row) {
-            $code = $row['attributes']['external_id'];
-            $codes[$code][] = $row['row'];
-        }
-
-        foreach ($codes as $code => $rowNumbers) {
-            if (count($rowNumbers) > 1) {
-                foreach ($rowNumbers as $rowNumber) {
-                    $errors["rows.{$rowNumber}.external_id"][] = 'El código de empleado está repetido dentro del archivo.';
-                }
+            if ($rows === [] && $errors === []) {
+                $errors['import_file'][] = 'El archivo no contiene filas para importar.';
             }
-        }
 
-        if ($codes !== []) {
-            $existingCodes = Employee::withoutCompanyScope()
-                ->where('company_id', $companyId)
-                ->whereIn('external_id', array_keys($codes))
-                ->pluck('external_id')
-                ->all();
-
-            foreach ($existingCodes as $code) {
-                foreach ($codes[$code] as $rowNumber) {
-                    $errors["rows.{$rowNumber}.external_id"][] = 'El código de empleado ya existe en esta empresa.';
-                }
+            foreach ($rows as &$row) {
+                $row['attributes']['company_id'] = $companyId;
             }
-        }
+            unset($row);
 
-        foreach ($rows as $row) {
-            try {
-                app(GeneralWorkScheduleResolver::class)->resolve($companyId, $row['attributes']['hired_at']);
-            } catch (ValidationException) {
-                $errors["rows.{$row['row']}.hired_at"][] = 'No existe una jornada general vigente para la fecha de contratación.';
-            }
-        }
-
-        if ($errors !== []) {
-            throw ValidationException::withMessages($errors);
-        }
-
-        DB::transaction(function () use ($rows, $actor): void {
+            $codes = [];
             foreach ($rows as $row) {
-                $attributes = $row['attributes'];
-                $positionTitle = $row['position_title'];
-                $hiredAt = $attributes['hired_at'];
-                $reason = 'Importación masiva de empleados';
+                $code = $row['attributes']['external_id'];
+                $codes[$code][] = $row['row'];
+            }
 
-                $assignment = app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
-                    $attributes,
-                    $hiredAt,
-                    $reason,
-                    $actor,
-                );
+            foreach ($codes as $code => $rowNumbers) {
+                if (count($rowNumbers) > 1) {
+                    foreach ($rowNumbers as $rowNumber) {
+                        $errors["rows.{$rowNumber}.external_id"][] = 'El código de empleado está repetido dentro del archivo.';
+                    }
+                }
+            }
 
-                if ($positionTitle !== null) {
-                    app(EmployeePositionAssigner::class)->assign(
-                        $assignment->employee,
-                        $positionTitle,
+            if ($codes !== []) {
+                $existingCodes = Employee::withoutCompanyScope()
+                    ->where('company_id', $companyId)
+                    ->whereIn('external_id', array_keys($codes))
+                    ->pluck('external_id')
+                    ->all();
+
+                foreach ($existingCodes as $code) {
+                    foreach ($codes[$code] as $rowNumber) {
+                        $errors["rows.{$rowNumber}.external_id"][] = 'El código de empleado ya existe en esta empresa.';
+                    }
+                }
+            }
+
+            foreach ($rows as $row) {
+                try {
+                    app(GeneralWorkScheduleResolver::class)->resolve($companyId, $row['attributes']['hired_at']);
+                } catch (ValidationException) {
+                    $errors["rows.{$row['row']}.hired_at"][] = 'No existe una jornada general vigente para la fecha de contratación.';
+                }
+            }
+
+            if ($errors !== []) {
+                throw ValidationException::withMessages($errors);
+            }
+
+            DB::transaction(function () use ($rows, $actor): void {
+                foreach ($rows as $row) {
+                    $attributes = $row['attributes'];
+                    $positionTitle = $row['position_title'];
+                    $hiredAt = $attributes['hired_at'];
+                    $reason = 'Importación masiva de empleados';
+
+                    $assignment = app(EmployeeScheduleAssigner::class)->createAndAssignGeneral(
+                        $attributes,
                         $hiredAt,
                         $reason,
                         $actor,
                     );
-                }
-            }
-        });
 
-        return ['count' => count($rows)];
+                    if ($positionTitle !== null) {
+                        app(EmployeePositionAssigner::class)->assign(
+                            $assignment->employee,
+                            $positionTitle,
+                            $hiredAt,
+                            $reason,
+                            $actor,
+                        );
+                    }
+                }
+            });
+
+            $batch->update([
+                'status' => EmployeeImportBatch::COMPLETED,
+                'imported_rows' => count($rows),
+                'error_summary' => null,
+                'error_details' => null,
+            ]);
+
+            return ['count' => count($rows), 'batch_id' => $batch->id];
+        } catch (ValidationException $exception) {
+            $this->failBatch($batch, $exception->errors());
+
+            throw $exception;
+        } catch (QueryException $exception) {
+            if (! $this->isEmployeeExternalIdUniqueViolation($exception)) {
+                $this->failBatch($batch, ['import_file' => ['No se pudo completar la importación.']]);
+
+                throw $exception;
+            }
+
+            $errors = [
+                'import_file' => [
+                    'Otro proceso creó uno de estos códigos de empleado durante la importación. Volvé a validar el archivo.',
+                ],
+            ];
+            $this->failBatch($batch, $errors);
+
+            throw ValidationException::withMessages($errors);
+        } catch (\Throwable $exception) {
+            $this->failBatch($batch, ['import_file' => ['No se pudo completar la importación.']]);
+
+            throw $exception;
+        }
     }
 
     public function writeTemplate(): void
@@ -178,21 +220,24 @@ class EmployeeBulkImportService
         }
     }
 
-    /** @return array{0: list<array{row: int, attributes: array<string, mixed>, position_title: ?string}>, 1: array<string, list<string>>} */
+    /** @return array{0: list<array{row: int, attributes: array<string, mixed>, position_title: ?string}>, 1: array<string, list<string>>, 2: array{total_rows: int, read_rows: int}} */
     private function readRows(UploadedFile $file): array
     {
         try {
             $spreadsheet = IOFactory::load($file->getRealPath());
         } catch (\Throwable) {
-            throw ValidationException::withMessages([
-                'import_file' => 'No se pudo leer el archivo Excel. Descargue la plantilla oficial y vuelva a intentarlo.',
-            ]);
+            return [
+                [],
+                ['import_file' => ['No se pudo leer el archivo Excel. Descargue la plantilla oficial y vuelva a intentarlo.']],
+                ['total_rows' => 0, 'read_rows' => 0],
+            ];
         }
 
         $sheet = $spreadsheet->getSheet(0);
         $errors = [];
         $highestRow = $sheet->getHighestRow();
         $highestColumnIndex = Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        $rowStats = ['total_rows' => max(0, $highestRow - 1), 'read_rows' => 0];
 
         if ($highestRow - 1 > self::MAX_IMPORT_DATA_ROWS) {
             $errors['import_file'][] = sprintf(
@@ -209,7 +254,7 @@ class EmployeeBulkImportService
         }
 
         if ($highestRow - 1 > self::MAX_IMPORT_DATA_ROWS) {
-            return [[], $errors];
+            return [[], $errors, $rowStats];
         }
 
         $headerEndColumn = Coordinate::stringFromColumnIndex(min($highestColumnIndex, self::MAX_IMPORT_HEADER_COLUMNS));
@@ -237,7 +282,7 @@ class EmployeeBulkImportService
         }
 
         if ($errors !== []) {
-            return [[], $errors];
+            return [[], $errors, $rowStats];
         }
 
         $rows = [];
@@ -255,6 +300,7 @@ class EmployeeBulkImportService
                 continue;
             }
 
+            $rowStats['read_rows']++;
             $rowErrors = [];
             $attributes = [
                 'external_id' => $this->text($values['Código empleado'] ?? null),
@@ -325,7 +371,57 @@ class EmployeeBulkImportService
             ];
         }
 
-        return [$rows, $errors];
+        return [$rows, $errors, $rowStats];
+    }
+
+    /** @param array<string, list<string>> $errors */
+    private function failBatch(EmployeeImportBatch $batch, array $errors): void
+    {
+        $batch->update([
+            'status' => EmployeeImportBatch::FAILED,
+            'imported_rows' => 0,
+            'error_summary' => $this->summarizeErrors($errors),
+            'error_details' => $errors,
+        ]);
+    }
+
+    /** @param array<string, list<string>> $errors */
+    private function summarizeErrors(array $errors): array
+    {
+        $summary = [];
+
+        foreach ($errors as $key => $messages) {
+            preg_match('/^rows\\.(\\d+)/', $key, $match);
+            $row = isset($match[1]) ? (int) $match[1] : null;
+
+            foreach ($messages as $message) {
+                $summaryKey = $message;
+                $summary[$summaryKey] ??= ['message' => $message, 'count' => 0, 'rows' => []];
+                $summary[$summaryKey]['count']++;
+                if ($row !== null && ! in_array($row, $summary[$summaryKey]['rows'], true)) {
+                    $summary[$summaryKey]['rows'][] = $row;
+                }
+            }
+        }
+
+        return array_values($summary);
+    }
+
+    private function isEmployeeExternalIdUniqueViolation(QueryException $exception): bool
+    {
+        $errorInfo = $exception->errorInfo ?? [];
+        $haystack = strtolower(implode(' ', array_map(
+            static fn (mixed $value): string => (string) $value,
+            [$exception->getMessage(), ...$errorInfo],
+        )));
+        $isUnique = in_array((string) $exception->getCode(), ['23000', '23505'], true)
+            || in_array((string) ($errorInfo[1] ?? ''), ['19', '1062'], true)
+            || str_contains($haystack, 'unique constraint failed')
+            || str_contains($haystack, 'duplicate key value violates unique');
+
+        return $isUnique
+            && str_contains($haystack, 'employee')
+            && (str_contains($haystack, 'external_id') || str_contains($haystack, 'company_id_external_id'));
     }
 
     private function normalizeHeader(mixed $header): string

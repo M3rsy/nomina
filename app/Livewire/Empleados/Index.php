@@ -26,7 +26,7 @@ class Index extends Component
 
     public ?TemporaryUploadedFile $importFile = null;
 
-    /** @var list<array{key: string, messages: list<string>}> */
+    /** @var list<array{message: string, count: int, rows: list<int>}> */
     public array $importErrors = [];
 
     public ?array $importSummary = null;
@@ -78,13 +78,30 @@ class Index extends Component
             $this->importSummary = $result;
             $this->reset('importFile');
         } catch (ValidationException $exception) {
-            foreach ($exception->errors() as $key => $messages) {
-                foreach ($messages as $message) {
-                    $this->importErrors[] = ['key' => $key, 'messages' => [$message]];
-                }
-            }
+            $this->importErrors = $this->groupImportErrors($exception->errors());
             $this->addError('importFile', 'No se importó ningún empleado. Corregí los errores indicados.');
         }
+    }
+
+    /** @param array<string, list<string>> $errors */
+    private function groupImportErrors(array $errors): array
+    {
+        $grouped = [];
+
+        foreach ($errors as $key => $messages) {
+            preg_match('/^rows\\.(\\d+)/', $key, $match);
+            $row = isset($match[1]) ? (int) $match[1] : null;
+
+            foreach ($messages as $message) {
+                $grouped[$message] ??= ['message' => $message, 'count' => 0, 'rows' => []];
+                $grouped[$message]['count']++;
+                if ($row !== null && ! in_array($row, $grouped[$message]['rows'], true)) {
+                    $grouped[$message]['rows'][] = $row;
+                }
+            }
+        }
+
+        return array_values($grouped);
     }
 
     #[On('employee-deleted')]
