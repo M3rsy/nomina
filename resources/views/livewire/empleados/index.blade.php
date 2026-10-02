@@ -48,7 +48,13 @@
                         <p class="font-bold">No se creó ningún empleado. Revisá estos errores:</p>
                         <ul class="mt-2 list-disc space-y-1 pl-5">
                             @foreach ($importErrors as $error)
-                                <li>Fila {{ preg_match('/rows\.(\d+)/', $error['key'], $match) ? $match[1] : 'general' }}: {{ implode(' ', $error['messages']) }}</li>
+                                <li>
+                                    @if ($error['rows'] !== [])
+                                        {{ $error['count'] }} {{ $error['count'] === 1 ? 'fila' : 'filas' }}: {{ $error['message'] }} (filas {{ implode(', ', $error['rows']) }})
+                                    @else
+                                        {{ $error['message'] }}
+                                    @endif
+                                </li>
                             @endforeach
                         </ul>
                     </div>

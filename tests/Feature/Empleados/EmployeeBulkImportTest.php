@@ -3,9 +3,12 @@
 use App\Livewire\Empleados\Index;
 use App\Models\Company;
 use App\Models\Employee;
+use App\Models\EmployeeImportBatch;
 use App\Models\User;
 use App\Models\WorkScheduleProfile;
+use App\Services\Attendance\EmployeeScheduleAssigner;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile as LaravelUploadedFile;
 use Livewire\Livewire;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -80,11 +83,19 @@ test('employee import creates employees and schedule assignments', function () {
     $first = Employee::query()->where('external_id', 'IMP-001')->firstOrFail();
     $second = Employee::query()->where('external_id', 'IMP-002')->firstOrFail();
 
+    $batch = EmployeeImportBatch::query()->latest('id')->firstOrFail();
+
     expect($first->payment_code)->toBe('PAY-001')
         ->and($first->first_name)->toBe('Ana')
         ->and($first->scheduleAssignments()->count())->toBe(1)
         ->and($second->payment_code)->toBe('PAY-002')
-        ->and($second->scheduleAssignments()->count())->toBe(1);
+        ->and($second->scheduleAssignments()->count())->toBe(1)
+        ->and($batch->status)->toBe(EmployeeImportBatch::COMPLETED)
+        ->and($batch->total_rows)->toBe(2)
+        ->and($batch->read_rows)->toBe(2)
+        ->and($batch->imported_rows)->toBe(2)
+        ->and($batch->actor_id)->toBe($admin->id)
+        ->and($batch->original_filename)->toBe('empleados.xlsx');
 });
 
 test('employee import rejects missing required fields without creating employees', function () {
@@ -102,7 +113,31 @@ test('employee import rejects missing required fields without creating employees
         ->assertHasErrors('importFile')
         ->assertSee('La clave es obligatoria.');
 
-    expect(Employee::query()->where('first_name', 'Ana')->exists())->toBeFalse();
+    $batch = EmployeeImportBatch::query()->latest('id')->firstOrFail();
+
+    expect(Employee::query()->where('first_name', 'Ana')->exists())->toBeFalse()
+        ->and($batch->status)->toBe(EmployeeImportBatch::FAILED)
+        ->and($batch->imported_rows)->toBe(0)
+        ->and($batch->error_details)->not->toBeEmpty();
+});
+
+test('employee import groups repeated schedule errors with row numbers', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $this->actingAs($admin);
+
+    Livewire::test(Index::class)
+        ->set('importFile', employeeImportXlsx([
+            ['IMP-001', 'PAY-001', '2026-01-15', 'Ana', 'Pérez'],
+            ['IMP-002', 'PAY-002', '2026-01-15', 'Luis', 'Ramos'],
+        ]))
+        ->call('importEmployees')
+        ->assertSee('2 filas: No existe una jornada general vigente para la fecha de contratación.')
+        ->assertSee('(filas 2, 3)');
+
+    expect(Employee::query()->count())->toBe(0)
+        ->and(EmployeeImportBatch::query()->latest('id')->value('status'))->toBe(EmployeeImportBatch::FAILED);
 });
 
 test('employee import rejects duplicate codes safely', function () {
@@ -125,6 +160,43 @@ test('employee import rejects duplicate codes safely', function () {
         ->assertSee('El código de empleado está repetido dentro del archivo.');
 
     expect(Employee::query()->whereIn('external_id', ['NEW-001'])->exists())->toBeFalse();
+});
+
+test('employee import converts a concurrent employee code race into a validation error', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $this->actingAs($admin);
+
+    $previousExceptionClass = 'PDOException';
+
+    $this->mock(EmployeeScheduleAssigner::class)
+        ->shouldReceive('createAndAssignGeneral')
+        ->once()
+        ->andThrow(new QueryException(
+            'sqlite',
+            'insert into employees (...) values (...)',
+            [],
+            new $previousExceptionClass(
+                'SQLSTATE[23000]: Integrity constraint violation: 19 UNIQUE constraint failed: employees.company_id, employees.external_id',
+                23000,
+            ),
+        ));
+
+    Livewire::test(Index::class)
+        ->set('importFile', employeeImportXlsx([
+            ['RACE-001', 'PAY-001', '2026-01-15', 'Ana', 'Pérez'],
+        ]))
+        ->call('importEmployees')
+        ->assertHasErrors('importFile')
+        ->assertSee('Otro proceso creó uno de estos códigos de empleado durante la importación. Volvé a validar el archivo.');
+
+    $batch = EmployeeImportBatch::query()->latest('id')->firstOrFail();
+
+    expect(Employee::query()->count())->toBe(0)
+        ->and($batch->status)->toBe(EmployeeImportBatch::FAILED)
+        ->and($batch->error_summary[0]['message'])->toBe('Otro proceso creó uno de estos códigos de empleado durante la importación. Volvé a validar el archivo.');
 });
 
 test('employee import rejects duplicate normalized headers without creating employees', function () {
