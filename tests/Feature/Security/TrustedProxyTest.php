@@ -41,10 +41,10 @@ test('untrusted clients cannot spoof forwarded host scheme or ip', function (): 
     config(['trustedproxy.proxies' => ['10.10.0.5']]);
 
     $this->withServerVariables([
-            'HTTP_HOST' => 'internal.test',
-            'REMOTE_ADDR' => '203.0.113.44',
-            'SERVER_NAME' => 'internal.test',
-        ])
+        'HTTP_HOST' => 'internal.test',
+        'REMOTE_ADDR' => '203.0.113.44',
+        'SERVER_NAME' => 'internal.test',
+    ])
         ->withHeaders([
             'X-Forwarded-For' => '198.51.100.23',
             'X-Forwarded-Host' => 'evil.example.com',
@@ -64,10 +64,10 @@ test('local requests ignore forwarded headers when no proxies are configured', f
     config(['trustedproxy.proxies' => null]);
 
     $this->withServerVariables([
-            'HTTP_HOST' => 'localhost',
-            'REMOTE_ADDR' => '127.0.0.1',
-            'SERVER_NAME' => 'localhost',
-        ])
+        'HTTP_HOST' => 'localhost',
+        'REMOTE_ADDR' => '127.0.0.1',
+        'SERVER_NAME' => 'localhost',
+    ])
         ->withHeaders([
             'X-Forwarded-For' => '198.51.100.23',
             'X-Forwarded-Host' => 'nomina.example.com',
@@ -78,5 +78,6 @@ test('local requests ignore forwarded headers when no proxies are configured', f
         ->assertJsonPath('client_ip', '127.0.0.1')
         ->assertJsonPath('scheme', 'http')
         ->assertJsonPath('secure', false)
+        ->assertJsonPath('url', fn (string $url): bool => str_starts_with($url, 'http://'))
         ->assertJsonMissing(['host' => 'nomina.example.com']);
 });

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CurrentCompanyController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\EmployeeImportController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\PayrollExportController;
 use App\Http\Controllers\UploadedFileReportController;
@@ -107,6 +108,9 @@ Route::middleware(['auth', 'can:employees.view'])
     ->prefix('empleados')
     ->group(function () {
         Route::get('/', EmployeesIndex::class)->name('empleados.index');
+        Route::get('/plantilla', [EmployeeImportController::class, 'template'])
+            ->name('empleados.template')
+            ->can('employees.create');
         Route::get('/crear', EmployeeCreate::class)->name('empleados.create')->can('employees.create');
         Route::get('/{employee}/editar', EmployeeEdit::class)->name('empleados.edit')->can('employees.update');
         Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('empleados.destroy')->can('employees.delete');
