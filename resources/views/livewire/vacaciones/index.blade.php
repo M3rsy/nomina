@@ -139,16 +139,62 @@
     @endif
 
     @if ($showAdjustmentModal)
-        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="vacation-adjustment-title" tabindex="-1" x-data x-ref="dialog" x-init="$nextTick(() => $refs.dialog.focus())" @keydown.escape.window="$wire.closeAdjustmentModal()"><div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <h2 id="vacation-adjustment-title" class="text-lg font-bold text-slate-900">Ajustar saldo</h2><p class="mt-1 text-sm text-slate-600">Positivo acredita, negativo descuenta. El saldo puede quedar negativo.</p>
-            <div class="mt-4 space-y-4">
-                <label class="block"><span class="text-sm font-medium text-slate-700">Buscar empleado</span><input wire:model.live.debounce.300ms="adjustmentEmployeeSearch" type="search" placeholder="Nombre, apellido, código o clave…" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"></label>
-                <label class="block"><span class="text-sm font-medium text-slate-700">Empleado</span><select wire:model="employeeId" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm"><option value="">Seleccionar…</option>@foreach($adjustmentEmployees as $employee)<option value="{{ $employee->id }}">{{ $employee->full_name }} — saldo {{ (int) ($balances[$employee->id] ?? 0) }}</option>@endforeach</select>@error('employeeId')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror</label>
-                <label class="block"><span class="text-sm font-medium text-slate-700">Días</span><input wire:model="adjustmentDays" type="number" class="mt-1 h-11 w-full rounded-xl border border-slate-300 px-3">@error('adjustmentDays')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror</label>
-                <label class="block"><span class="text-sm font-medium text-slate-700">Motivo</span><textarea wire:model="adjustmentReason" rows="3" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>@error('adjustmentReason')<p class="mt-1 text-sm text-rose-700">{{ $message }}</p>@enderror</label>
+        <div class="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-text/50 p-4 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-labelledby="vacation-adjustment-title" tabindex="-1" x-data x-ref="dialog" x-init="$nextTick(() => $refs.dialog.focus())" @keydown.escape.window="$wire.closeAdjustmentModal()">
+            <div data-vacation-modal="balance-adjustment" class="relative my-auto w-full max-w-xl overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
+                <div data-vacation-modal-section="header" class="flex items-start justify-between gap-4 border-b border-border px-6 py-5 sm:px-7">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h2 id="vacation-adjustment-title" class="text-xl font-black tracking-tight text-text">Ajustar saldo</h2>
+                            <span class="inline-flex rounded-full border border-dashboard-info/20 bg-dashboard-info/10 px-2 py-0.5 text-[11px] font-bold text-dashboard-info-strong">Movimiento auditable</span>
+                        </div>
+                        <p class="mt-1.5 text-xs leading-5 text-text-muted">Acreditá o descontá días sin reemplazar el historial de movimientos del empleado.</p>
+                    </div>
+                    <button type="button" wire:click="closeAdjustmentModal" aria-label="Cerrar ventana" class="rounded-full p-1.5 text-text-muted transition hover:bg-surface-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"><span aria-hidden="true" class="text-xl leading-none">×</span></button>
+                </div>
+
+                <div data-vacation-modal-section="body" class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-6 py-5 sm:px-7">
+                    <div data-vacation-modal-section="employee-picker" class="space-y-2">
+                        <label for="adjustment-employee-search" class="block text-xs font-bold uppercase tracking-[0.12em] text-text-muted">Empleado destinatario</label>
+                        <input id="adjustment-employee-search" wire:model.live.debounce.300ms="adjustmentEmployeeSearch" type="search" placeholder="Buscar por nombre, código o clave…" class="h-11 w-full rounded-xl border border-border bg-surface-muted px-3 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:bg-surface focus-visible:ring-2 focus-visible:ring-brand/30">
+                        <label for="adjustment-employee" class="sr-only">Seleccionar empleado</label>
+                        <select id="adjustment-employee" wire:model.live="employeeId" class="h-11 w-full rounded-xl border border-border bg-surface-muted px-3 text-sm font-medium text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:bg-surface focus-visible:ring-2 focus-visible:ring-brand/30"><option value="">Seleccionar empleado…</option>@foreach($adjustmentEmployees as $employee)<option value="{{ $employee->id }}">{{ $employee->full_name }} — saldo {{ (int) ($balances[$employee->id] ?? 0) }} días</option>@endforeach</select>
+                        @if ($employeeId !== null)
+                            <p class="flex items-center justify-between px-1 text-xs text-text-muted"><span>Saldo actual</span><strong class="rounded-md border border-dashboard-info/20 bg-dashboard-info/10 px-2 py-0.5 text-dashboard-info-strong">{{ (int) ($balances[$employeeId] ?? 0) }} días</strong></p>
+                        @endif
+                        @error('employeeId')<p class="text-sm text-danger">{{ $message }}</p>@enderror
+                    </div>
+
+                    <div data-vacation-modal-section="impact-preview" class="space-y-3 rounded-2xl border border-border bg-surface-muted p-4">
+                        <div>
+                            <p class="text-xs font-bold uppercase tracking-[0.12em] text-text-muted">Impacto del ajuste</p>
+                            <p class="mt-1 text-xs leading-5 text-text-muted">Los créditos suman días y las deducciones pueden dejar un saldo negativo.</p>
+                        </div>
+                        <label for="adjustment-days" class="block"><span class="mb-1.5 block text-sm font-semibold text-text">Variación en días</span><input id="adjustment-days" wire:model.live.debounce.300ms="adjustmentDays" type="number" class="h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30">@error('adjustmentDays')<p class="mt-1 text-sm text-danger">{{ $message }}</p>@enderror</label>
+                        @if ($employeeId !== null)
+                            @php($currentAdjustmentBalance = (int) ($balances[$employeeId] ?? 0))
+                            @php($adjustmentDelta = is_numeric($adjustmentDays) ? (int) $adjustmentDays : null)
+                            @php($projectedAdjustmentBalance = $adjustmentDelta === null ? null : $currentAdjustmentBalance + $adjustmentDelta)
+                            <dl class="grid grid-cols-1 gap-2 text-center sm:grid-cols-3">
+                                <div class="rounded-xl border border-border bg-surface p-2"><dt class="text-[11px] font-bold uppercase tracking-wide text-text-muted">Saldo actual</dt><dd data-vacation-balance-value="current" class="mt-1 text-sm font-black text-text">{{ $currentAdjustmentBalance }} días</dd></div>
+                                <div class="rounded-xl border p-2 {{ $adjustmentDelta === null || $adjustmentDelta === 0 ? 'border-border bg-surface' : ($adjustmentDelta > 0 ? 'border-success/30 bg-success/10' : 'border-danger/30 bg-danger/10') }}"><dt class="text-[11px] font-bold uppercase tracking-wide text-text-muted">Variación</dt><dd data-vacation-balance-value="variation" class="mt-1 text-sm font-black {{ $adjustmentDelta === null || $adjustmentDelta === 0 ? 'text-text-muted' : ($adjustmentDelta > 0 ? 'text-success-strong' : 'text-danger') }}">{{ $adjustmentDelta === null ? '—' : ($adjustmentDelta === 0 ? '0 días' : sprintf('%+d días', $adjustmentDelta)) }}</dd></div>
+                                <div class="rounded-xl border p-2 {{ $projectedAdjustmentBalance !== null && $projectedAdjustmentBalance < 0 ? 'border-danger/30 bg-danger/10' : 'border-border bg-surface' }}"><dt class="text-[11px] font-bold uppercase tracking-wide text-text-muted">Saldo proyectado</dt><dd data-vacation-balance-value="projected" class="mt-1 text-sm font-black {{ $projectedAdjustmentBalance === null ? 'text-text-muted' : ($projectedAdjustmentBalance < 0 ? 'text-danger' : 'text-text') }}">{{ $projectedAdjustmentBalance === null ? '—' : $projectedAdjustmentBalance.' días' }}</dd></div>
+                            </dl>
+                        @endif
+                    </div>
+
+                    <div data-vacation-modal-section="audit-evidence" class="space-y-2">
+                        <label for="adjustment-reason" class="block"><span class="text-sm font-semibold text-text">Motivo del ajuste <span class="text-danger">(obligatorio)</span></span><span class="mt-1 block text-xs leading-5 text-text-muted">Esta justificación queda como evidencia de auditoría en el historial inmutable.</span></label>
+                        <textarea id="adjustment-reason" wire:model="adjustmentReason" rows="3" placeholder="Describí el respaldo del crédito o descuento…" class="w-full rounded-xl border border-border bg-surface-muted px-3 py-2 text-sm text-text shadow-sm outline-none transition placeholder:text-text-muted focus-visible:border-brand focus-visible:bg-surface focus-visible:ring-2 focus-visible:ring-brand/30"></textarea>
+                        @error('adjustmentReason')<p class="text-sm text-danger">{{ $message }}</p>@enderror
+                    </div>
+                </div>
+
+                <div data-vacation-modal-section="footer" class="flex items-center justify-end gap-3 border-t border-border px-6 py-4 sm:px-7">
+                    <button type="button" wire:click="closeAdjustmentModal" class="min-h-11 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-text transition hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">Cerrar</button>
+                    <x-ui.loading-button wire:click="adjustBalance" target="adjustBalance" loading-label="Guardando…" class="min-h-11 rounded-xl bg-brand px-5 text-sm font-bold text-surface shadow-sm transition hover:bg-brand-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">Guardar ajuste</x-ui.loading-button>
+                </div>
             </div>
-            <div class="mt-6 flex justify-end gap-2"><button wire:click="closeAdjustmentModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cerrar</button><x-ui.loading-button wire:click="adjustBalance" target="adjustBalance" loading-label="Guardando…" class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">Guardar ajuste</x-ui.loading-button></div>
-        </div></div>
+        </div>
     @endif
 
     @if ($showCancelModal)
