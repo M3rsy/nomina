@@ -45,6 +45,7 @@ use InvalidArgumentException;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -528,11 +529,11 @@ class Revisar extends Component
 
         $this->assignRawMarkId = $rawMark->id;
         $this->assignEmployeeId = $rawMark->employee_id;
-            $this->assignApplyAll = false;
-            $this->assignReason = '';
-            $this->canCreateEmployeeFromAssignModal = $rawMark->employee_id === null
-                && $rawMark->status === 'unknown_employee';
-            $this->showAssignModal = true;
+        $this->assignApplyAll = false;
+        $this->assignReason = '';
+        $this->canCreateEmployeeFromAssignModal = $rawMark->employee_id === null
+            && $rawMark->status === 'unknown_employee';
+        $this->showAssignModal = true;
     }
 
     public function closeAssignModal(): void
@@ -897,6 +898,7 @@ class Revisar extends Component
     }
 
     #[On('overtime-decision-submitted')]
+    #[Renderless]
     public function saveOvertimeDecisionFromPanel(array $decision): void
     {
         if ($this->isBlocked()) {

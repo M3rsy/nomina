@@ -21,12 +21,15 @@ use Carbon\Carbon;
 use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
+use Tests\TestCase;
 
 beforeEach(function () {
+    /** @var TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
 test('super admin can render revisar page', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
@@ -39,6 +42,7 @@ test('super admin can render revisar page', function () {
 });
 
 test('super admin without active company cannot render revisar page', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
@@ -51,6 +55,7 @@ test('super admin without active company cannot render revisar page', function (
 });
 
 test('company admin can render revisar page of own company', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -61,6 +66,7 @@ test('company admin can render revisar page of own company', function () {
 });
 
 test('company admin cannot render revisar page of other company', function () {
+    /** @var TestCase $this */
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
     $payPeriodB = PayPeriod::factory()->forCompany($companyB)->create();
@@ -72,6 +78,7 @@ test('company admin cannot render revisar page of other company', function () {
 });
 
 test('component exposes status classes and labels for badges', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -92,6 +99,7 @@ test('component exposes status classes and labels for badges', function () {
 });
 
 test('table shows raw mark rows with badges', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -125,7 +133,7 @@ test('table shows raw mark rows with badges', function () {
 });
 
 test('search filter narrows raw marks by employee external id', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -150,7 +158,7 @@ test('search filter narrows raw marks by employee external id', function () {
 });
 
 test('status filter narrows raw marks by status', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -175,7 +183,7 @@ test('status filter narrows raw marks by status', function () {
 });
 
 test('uploaded file filter narrows raw marks by source file', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $payPeriod = PayPeriod::factory()->forCompany($company)->create();
     $fileA = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create();
@@ -199,7 +207,7 @@ test('uploaded file filter narrows raw marks by source file', function () {
 });
 
 test('variation transfer tail is auditable and pay neutral in payroll review', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -268,7 +276,7 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
 });
 
 test('variation acknowledgement writes nothing for foreign unauthorized stale or locked requests', function (string $threat) {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -347,7 +355,7 @@ test('variation acknowledgement writes nothing for foreign unauthorized stale or
 })->with(['foreign', 'unauthorized', 'stale', 'locked']);
 
 test('daily shortfall stays pending until the complete audited deficit is granted or rejected', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
@@ -483,8 +491,59 @@ test('daily shortfall stays pending until the complete audited deficit is grante
         ->and(AttendanceException::query()->count())->toBe(4);
 });
 
+test('single overtime decision dispatches refresh event without rendering parent html', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-20',
+        'status' => 'uploaded',
+    ]);
+    foreach (['2026-07-20 09:00:00', '2026-07-20 19:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+            'event_at' => $eventAt,
+            'status' => 'valid',
+        ]);
+    }
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+        'payroll_policy_key' => 'duration-first-v2',
+        'published_by' => $admin->id,
+    ]);
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($admin);
+    $candidate = app(PayrollShiftEvaluationResolver::class)
+        ->review($period, $employee, '2026-07-20')
+        ->analysis
+        ->overtimeCandidates
+        ->sole();
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('saveOvertimeDecisionFromPanel', [
+            'overtimeDecisionEmployeeId' => $employee->id,
+            'overtimeDecisionWorkDate' => '2026-07-20',
+            'overtimeCandidateKey' => $candidate->key,
+            'overtimeDecision' => OvertimeDecision::APPROVED,
+            'overtimeDecisionReason' => 'Approved after review',
+        ])
+        ->assertHasNoErrors()
+        ->assertDispatched('overtime-decision-recorded');
+
+    expect($component->effects)->not->toHaveKey('html');
+});
+
 test('partial overtime approval preserves exact rejected complements and payable bands', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
