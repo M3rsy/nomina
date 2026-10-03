@@ -19,7 +19,7 @@ Prevent single overtime decisions from returning HTTP 500 after exceeding PHP's 
 ## Tasks
 - [x] Add a renderless single overtime decision handler and focused regression test.
 - [x] Run focused overtime tests, formatting, and performance checks.
-- [ ] Record the work-unit commit and close with user-facing QA instructions.
+- [x] Record the work-unit commit and close with user-facing QA instructions.
 
 ## Decisions
 - Use Livewire's renderless action boundary rather than increasing `max_execution_time` or removing readiness checks.
@@ -34,4 +34,4 @@ Prevent single overtime decisions from returning HTTP 500 after exceeding PHP's 
 - The period-35 wall-clock harness was not rerun after the fix; browser QA remains required for the child-to-parent-to-child cycle.
 
 ## Commits
-- Pending.
+- `4dc866d fix(nomina): avoid overtime approval render timeout`
