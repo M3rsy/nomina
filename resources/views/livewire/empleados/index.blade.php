@@ -79,7 +79,7 @@
                 </article>
                 <article class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
                     <p class="text-sm font-semibold text-text-muted">Estado consultado</p>
-                    <p class="mt-2 text-xl font-black text-text">{{ match ($filter) { 'inactive' => 'Inactivos', 'all' => 'Todos', default => 'Activos' } }}</p>
+                    <p class="mt-2 text-xl font-black text-text">{{ match ($filter) { 'inactive' => 'Inactivos', 'retired' => 'Retirados', 'all' => 'Todos', default => 'Activos' } }}</p>
                     <p class="mt-2 text-xs text-text-muted">Segmento actual del directorio.</p>
                 </article>
                 <article class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
@@ -107,7 +107,8 @@
                     <select id="employee-filter" wire:model.live="filter" class="h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-text shadow-sm outline-none transition focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30">
                         <option value="active">Activos</option>
                         <option value="inactive">Inactivos</option>
-                        <option value="all">Todos</option>
+                        <option value="retired">Retirados del directorio</option>
+                        <option value="all">Todos activos e inactivos</option>
                     </select>
                 </label>
 
@@ -118,7 +119,7 @@
 
             <div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs">
                 <div class="flex flex-wrap gap-2" aria-label="Filtros aplicados">
-                    <x-ui.badge>Estado: {{ match ($filter) { 'inactive' => 'Inactivos', 'all' => 'Todos', default => 'Activos' } }}</x-ui.badge>
+                    <x-ui.badge>Estado: {{ match ($filter) { 'inactive' => 'Inactivos', 'retired' => 'Retirados', 'all' => 'Todos', default => 'Activos' } }}</x-ui.badge>
                     @if ($search !== '')
                         <x-ui.badge variant="brand">Búsqueda: {{ $search }}</x-ui.badge>
                     @endif
@@ -190,19 +191,27 @@
                                     @endif
                                     <td class="grid grid-cols-[8rem_1fr] items-center gap-3 py-1.5 md:table-cell md:px-5 md:py-4">
                                         <span class="font-semibold text-text-muted md:hidden">Estado</span>
-                                        <x-ui.badge :variant="$employee->is_active ? 'success' : 'neutral'">{{ $employee->is_active ? 'Activo' : 'Inactivo' }}</x-ui.badge>
+                                        <x-ui.badge :variant="$employee->trashed() ? 'danger' : ($employee->is_active ? 'success' : 'neutral')">
+                                            {{ $employee->trashed() ? 'Retirado' : ($employee->is_active ? 'Activo' : 'Inactivo') }}
+                                        </x-ui.badge>
                                     </td>
                                     <td class="mt-2 block border-t border-border pt-3 md:mt-0 md:table-cell md:border-0 md:px-5 md:py-4">
                                         <div data-employee-actions class="flex min-w-max flex-nowrap items-center gap-2">
-                                            @can('update', $employee)
-                                                <a href="/empleados/{{ $employee->id }}/editar" class="inline-flex min-h-9 items-center rounded-lg border border-brand/20 bg-brand-subtle px-3 py-1.5 text-sm font-semibold text-brand-strong transition hover:bg-brand/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">Editar</a>
-                                            @endcan
-                                            @can('activate', $employee)
-                                                <livewire:empleados.toggle-activate :employee="$employee" :key="'toggle-'.$employee->id" />
-                                            @endcan
-                                            @can('delete', $employee)
-                                                <livewire:empleados.delete :employee="$employee" :key="'delete-'.$employee->id" />
-                                            @endcan
+                                            @if ($employee->trashed())
+                                                @can('restore', $employee)
+                                                    <livewire:empleados.restore :employee="$employee" :key="'restore-'.$employee->id" />
+                                                @endcan
+                                            @else
+                                                @can('update', $employee)
+                                                    <a href="/empleados/{{ $employee->id }}/editar" class="inline-flex min-h-9 items-center rounded-lg border border-brand/20 bg-brand-subtle px-3 py-1.5 text-sm font-semibold text-brand-strong transition hover:bg-brand/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2">Editar</a>
+                                                @endcan
+                                                @can('activate', $employee)
+                                                    <livewire:empleados.toggle-activate :employee="$employee" :key="'toggle-'.$employee->id" />
+                                                @endcan
+                                                @can('delete', $employee)
+                                                    <livewire:empleados.delete :employee="$employee" :key="'delete-'.$employee->id" />
+                                                @endcan
+                                            @endif
                                         </div>
                                     </td>
                                 </tr>

@@ -2,6 +2,7 @@
 
 use App\Livewire\Empleados\Delete;
 use App\Livewire\Empleados\Index;
+use App\Livewire\Empleados\Restore;
 use App\Livewire\Empleados\ToggleActivate;
 use App\Models\Company;
 use App\Models\Employee;
@@ -9,14 +10,15 @@ use App\Models\User;
 use App\Services\CurrentCompany;
 use Database\Seeders\PermissionRoleSeeder;
 use Livewire\Livewire;
+use Tests\TestCase;
 
 beforeEach(function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $this->seed(PermissionRoleSeeder::class);
 });
 
 test('super admin paginates all company employees with stable ordering', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $companies = Company::factory()->count(2)->create();
     $superAdmin = User::factory()->create(['company_id' => null])->assignRole('super_admin');
 
@@ -47,7 +49,7 @@ test('super admin paginates all company employees with stable ordering', functio
 });
 
 test('company employee filters reset page two and remain tenant scoped', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $otherCompany = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -80,7 +82,7 @@ test('company employee filters reset page two and remain tenant scoped', functio
 });
 
 test('employees can be filtered to inactive records and filters can be cleared', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     Employee::factory()->forCompany($company)->create(['external_id' => 'CURRENT-RECORD']);
@@ -102,8 +104,34 @@ test('employees can be filtered to inactive records and filters can be cleared',
         ->assertDontSee('DORMANT-RECORD');
 });
 
-test('employee list refreshes after nested status and delete actions', function () {
-    /** @var \Tests\TestCase $this */
+test('retired employees have a separate tenant-scoped directory state and restore action', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $otherCompany = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    Employee::factory()->forCompany($company)->create(['external_id' => 'CURRENT-EMPLOYEE']);
+    Employee::factory()->inactive()->forCompany($company)->create(['external_id' => 'INACTIVE-EMPLOYEE']);
+    $retired = Employee::factory()->forCompany($company)->create(['external_id' => 'RETIRED-EMPLOYEE']);
+    $foreignRetired = Employee::factory()->forCompany($otherCompany)->create(['external_id' => 'FOREIGN-RETIRED']);
+    $retired->delete();
+    $foreignRetired->delete();
+
+    $this->actingAs($admin);
+    app(CurrentCompany::class)->set($company);
+
+    Livewire::test(Index::class)
+        ->set('filter', 'retired')
+        ->assertSee('RETIRED-EMPLOYEE')
+        ->assertSee('Retirado')
+        ->assertSee('Restaurar')
+        ->assertDontSee('CURRENT-EMPLOYEE')
+        ->assertDontSee('INACTIVE-EMPLOYEE')
+        ->assertDontSee('FOREIGN-RETIRED')
+        ->assertDontSee('Editar');
+});
+
+test('employee list refreshes after nested status delete and restore actions', function () {
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     $employee = Employee::factory()->forCompany($company)->create(['external_id' => 'REFRESH-ME']);
@@ -124,10 +152,16 @@ test('employee list refreshes after nested status and delete actions', function 
         ->assertDispatched('employee-deleted');
 
     expect($employee->fresh()->trashed())->toBeTrue();
+
+    Livewire::test(Restore::class, ['employee' => $employee->fresh()])
+        ->call('restore')
+        ->assertDispatched('employee-restored');
+
+    expect($employee->fresh()->trashed())->toBeFalse();
 });
 
 test('employee directory presents the Stitch-inspired hierarchy with real result data', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     Employee::factory()->forCompany($company)->create([
@@ -158,7 +192,7 @@ test('employee directory presents the Stitch-inspired hierarchy with real result
 });
 
 test('employee row actions stay together in one ordered action bar', function () {
-    /** @var \Tests\TestCase $this */
+    /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
     Employee::factory()->forCompany($company)->create();
@@ -167,7 +201,8 @@ test('employee row actions stay together in one ordered action bar', function ()
     app(CurrentCompany::class)->set($company);
 
     $html = Livewire::test(Index::class)
-        ->assertSeeInOrder(['Editar', 'Desactivar', 'Eliminar'])
+        ->assertSeeInOrder(['Editar', 'Desactivar', 'Retirar del directorio'])
+        ->assertDontSee('Eliminar')
         ->html();
 
     preg_match('/<div\b[^>]*data-employee-actions[^>]*>/', $html, $actionBar);

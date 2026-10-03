@@ -56,6 +56,11 @@ class EmployeePolicy
         return $user->company_id === $employee->company_id;
     }
 
+    public function restore(User $user, Employee $employee): bool
+    {
+        return $this->delete($user, $employee);
+    }
+
     public function activate(User $user, Employee $employee): bool
     {
         if (! $user->can('employees.activate')) {

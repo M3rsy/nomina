@@ -20,7 +20,7 @@ class Delete extends Component
         $this->authorize('delete', $this->employee);
 
         if ($this->employee->trashed()) {
-            $this->addError('employee', 'El empleado ya está desactivado.');
+            $this->addError('employee', 'El empleado ya fue retirado del directorio.');
 
             return;
         }

@@ -162,6 +162,43 @@ test('employee import rejects duplicate codes safely', function () {
     expect(Employee::query()->whereIn('external_id', ['NEW-001'])->exists())->toBeFalse();
 });
 
+test('employee import rejects retired employee codes and fails the whole batch', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $retiredEmployees = Employee::factory()->forCompany($company)->count(2)->sequence(
+        ['external_id' => 'RETIRED-001'],
+        ['external_id' => 'RETIRED-002'],
+    )->create();
+    $retiredEmployees->each->delete();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $this->actingAs($admin);
+
+    Livewire::test(Index::class)
+        ->set('importFile', employeeImportXlsx([
+            ['RETIRED-001', 'PAY-001', '2026-01-15', 'Ana', 'Pérez'],
+            ['RETIRED-002', 'PAY-002', '2026-01-16', 'Luis', 'Ramos'],
+            ['NEW-001', 'PAY-003', '2026-01-17', 'Marta', 'López'],
+        ]))
+        ->call('importEmployees')
+        ->assertHasErrors('importFile')
+        ->assertSee('El código de empleado pertenece a un empleado retirado. Restaurá ese registro en lugar de crear un duplicado.')
+        ->assertSee('(filas 2, 3)');
+
+    $batch = EmployeeImportBatch::query()->latest('id')->firstOrFail();
+    $message = 'El código de empleado pertenece a un empleado retirado. Restaurá ese registro en lugar de crear un duplicado.';
+
+    expect(Employee::query()->where('external_id', 'NEW-001')->exists())->toBeFalse()
+        ->and(Employee::withoutCompanyScope()->withTrashed()
+            ->where('company_id', $company->id)
+            ->whereIn('external_id', ['RETIRED-001', 'RETIRED-002'])
+            ->count())->toBe(2)
+        ->and($batch->status)->toBe(EmployeeImportBatch::FAILED)
+        ->and($batch->imported_rows)->toBe(0)
+        ->and($batch->error_details['rows.2.external_id'])->toBe([$message])
+        ->and($batch->error_details['rows.3.external_id'])->toBe([$message]);
+});
+
 test('employee import converts a concurrent employee code race into a validation error', function () {
     /** @var TestCase $this */
     $company = Company::factory()->create();
