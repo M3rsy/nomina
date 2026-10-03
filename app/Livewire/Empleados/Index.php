@@ -105,6 +105,7 @@ class Index extends Component
     }
 
     #[On('employee-deleted')]
+    #[On('employee-restored')]
     #[On('employee-status-changed')]
     public function refreshEmployees(): void
     {
@@ -121,6 +122,9 @@ class Index extends Component
 
         $employees = Employee::query()
             ->with('company')
+            ->when($this->filter === 'retired', function ($query) {
+                $query->onlyTrashed();
+            })
             ->when($this->filter === 'active', function ($query) {
                 $query->where('is_active', true);
             })

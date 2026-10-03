@@ -90,15 +90,19 @@ class EmployeeBulkImportService
             }
 
             if ($codes !== []) {
-                $existingCodes = Employee::withoutCompanyScope()
+                $existingEmployees = Employee::withoutCompanyScope()
+                    ->withTrashed()
                     ->where('company_id', $companyId)
                     ->whereIn('external_id', array_keys($codes))
-                    ->pluck('external_id')
-                    ->all();
+                    ->get(['external_id', 'deleted_at']);
 
-                foreach ($existingCodes as $code) {
-                    foreach ($codes[$code] as $rowNumber) {
-                        $errors["rows.{$rowNumber}.external_id"][] = 'El código de empleado ya existe en esta empresa.';
+                foreach ($existingEmployees as $employee) {
+                    $message = $employee->trashed()
+                        ? 'El código de empleado pertenece a un empleado retirado. Restaurá ese registro en lugar de crear un duplicado.'
+                        : 'El código de empleado ya existe en esta empresa.';
+
+                    foreach ($codes[$employee->external_id] as $rowNumber) {
+                        $errors["rows.{$rowNumber}.external_id"][] = $message;
                     }
                 }
             }

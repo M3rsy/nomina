@@ -91,6 +91,16 @@ class Create extends Component
             return;
         }
 
+        if (Employee::withoutCompanyScope()
+            ->onlyTrashed()
+            ->where('company_id', $companyId)
+            ->where('external_id', $this->external_id)
+            ->exists()) {
+            throw ValidationException::withMessages([
+                'external_id' => 'El código de empleado pertenece a un empleado retirado. Restaurá ese registro en lugar de crear un duplicado.',
+            ]);
+        }
+
         $rules = [
             'external_id' => ['required', 'string', 'max:50', Rule::unique('employees', 'external_id')->where(fn ($query) => $query->where('company_id', $companyId))],
             'payment_code' => ['nullable', 'string', 'max:50'],

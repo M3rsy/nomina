@@ -2,6 +2,7 @@
 
 use App\Livewire\Empleados\Create;
 use App\Livewire\Empleados\Edit;
+use App\Livewire\Empleados\Restore;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\PayPeriod;
@@ -266,6 +267,37 @@ test('duplicate external id within same company is rejected', function () {
         ->assertSee('El código de empleado ya existe en esta empresa.');
 });
 
+test('manual creation rejects a code reserved by a retired employee', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $retired = Employee::factory()->forCompany($company)->create([
+        'external_id' => 'RETIRED-001',
+        'first_name' => 'Empleado',
+        'last_name' => 'Retirado',
+    ]);
+    $retired->delete();
+
+    $this->actingAs($admin);
+
+    Livewire::test(Create::class)
+        ->set('external_id', 'RETIRED-001')
+        ->set('first_name', 'Empleado')
+        ->set('last_name', 'Duplicado')
+        ->set('schedule_profile_id', $profile->id)
+        ->set('schedule_reason', 'Asignación inicial')
+        ->call('save')
+        ->assertHasErrors('external_id')
+        ->assertSee('El código de empleado pertenece a un empleado retirado. Restaurá ese registro en lugar de crear un duplicado.');
+
+    expect(Employee::withoutCompanyScope()->withTrashed()
+        ->where('company_id', $company->id)
+        ->where('external_id', 'RETIRED-001')
+        ->count())->toBe(1)
+        ->and($retired->fresh()->trashed())->toBeTrue();
+});
+
 test('duplicate external id in other company is allowed', function () {
     /** @var TestCase $this */
     $companyA = Company::factory()->create();
@@ -454,6 +486,33 @@ test('soft delete employee preserves revisions', function () {
 
     expect($employee->trashed())->toBeTrue();
     expect($employee->revisions()->count())->toBe(1);
+});
+
+test('restoring an employee preserves identity code and revision history', function () {
+    /** @var TestCase $this */
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $employee = Employee::factory()->forCompany($company)->create([
+        'external_id' => 'HISTORIC-EMPLOYEE',
+        'dni' => '1111111111111',
+    ]);
+    $employee->update(['dni' => '2222222222222']);
+    $originalId = $employee->id;
+    $revisionIds = $employee->revisions()->pluck('id')->all();
+    $employee->delete();
+
+    $this->actingAs($admin);
+
+    Livewire::test(Restore::class, ['employee' => $employee])
+        ->call('restore')
+        ->assertHasNoErrors();
+
+    $restored = Employee::query()->findOrFail($originalId);
+
+    expect($restored->id)->toBe($originalId)
+        ->and($restored->external_id)->toBe('HISTORIC-EMPLOYEE')
+        ->and($restored->revisions()->pluck('id')->all())->toBe($revisionIds)
+        ->and($restored->trashed())->toBeFalse();
 });
 
 test('employee create resolves the sole general profile on the assignment date', function () {
