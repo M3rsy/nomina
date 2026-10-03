@@ -41,6 +41,7 @@ Make normal attendance files such as a 69 KB GLG export complete within the sync
 - The default 128 MB full-suite process exhausted accumulated memory later in the unrelated Excel-template test; that test passed alone (1 test, 4 assertions).
 - Pint, `git diff --check`, and LSP diagnostics passed.
 - Native review was unavailable because the package-local Gentle AI binary is missing; no review lineage was created.
+- Work-unit commit: `2768454` (`fix(attendance): bound upload validation queries`).
 
 ## Rollback boundary
 Revert the FileValidator/resolver batching changes and their focused regressions. No migration or data rollback is required.
