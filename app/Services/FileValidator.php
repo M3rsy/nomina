@@ -7,13 +7,16 @@ use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Services\Attendance\AttendanceFactGenerationTracker;
+use App\Services\Attendance\ScheduleResolutionSnapshot;
 use App\Services\Attendance\ShiftOccurrenceResolver;
 use App\Services\Parsers\RawMarkPayload;
 use App\Services\Payroll\LockedPayrollContext;
 use App\Services\Payroll\PayrollContextLocker;
 use App\Services\Payroll\PayrollContextTargets;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
+use LogicException;
 
 class FileValidator
 {
@@ -28,12 +31,25 @@ class FileValidator
      */
     public function validate(UploadedFile $uploadedFile, Collection $records): ValidationReport
     {
+        $scheduleSnapshot = null;
+
         $this->contextLocker->within(
             $uploadedFile->company_id,
-            fn (): PayrollContextTargets => $this->resolveTargets($uploadedFile, $records),
-            function (LockedPayrollContext $context) use ($uploadedFile, $records): void {
-                $this->insertRecords($uploadedFile, $records);
-                $this->runValidation($uploadedFile, $records, $context);
+            function () use ($uploadedFile, $records, &$scheduleSnapshot): PayrollContextTargets {
+                return $this->resolveTargets($uploadedFile, $records, $scheduleSnapshot);
+            },
+            function (LockedPayrollContext $context) use ($uploadedFile, $records, &$scheduleSnapshot): void {
+                if (! $scheduleSnapshot instanceof ScheduleResolutionSnapshot) {
+                    throw new LogicException('Schedule resolution snapshot was not captured.');
+                }
+
+                $this->shiftOccurrenceResolver->withinScheduleSnapshot(
+                    $scheduleSnapshot,
+                    function () use ($uploadedFile, $records, $context): void {
+                        $this->insertRecords($uploadedFile, $records);
+                        $this->runValidation($uploadedFile, $records, $context);
+                    },
+                );
             },
         );
 
@@ -42,11 +58,12 @@ class FileValidator
 
     private function insertRecords(UploadedFile $uploadedFile, Collection $records): void
     {
-        $companyId = $uploadedFile->company_id;
+        $timestamp = now();
 
-        foreach ($records as $record) {
-            RawMark::create([
-                'company_id' => $companyId,
+        // Parsed uploads have no revision audit events yet, so one no-op model event per row is avoidable.
+        $records->chunk(50)->each(function (Collection $chunk) use ($uploadedFile, $timestamp): void {
+            RawMark::query()->insert($chunk->map(fn (RawMarkPayload $record): array => [
+                'company_id' => $uploadedFile->company_id,
                 'pay_period_id' => $uploadedFile->pay_period_id,
                 'uploaded_file_id' => $uploadedFile->id,
                 'employee_external_id' => $record->employee_external_id,
@@ -57,9 +74,11 @@ class FileValidator
                 'row_number' => $record->row_number,
                 'status' => 'pending',
                 'notes' => null,
-                'metadata' => $record->metadata,
-            ]);
-        }
+                'metadata' => json_encode($record->metadata, JSON_THROW_ON_ERROR),
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ])->all());
+        });
     }
 
     private function runValidation(
@@ -187,8 +206,11 @@ class FileValidator
     }
 
     /** @param Collection<int, RawMarkPayload> $records */
-    private function resolveTargets(UploadedFile $uploadedFile, Collection $records): PayrollContextTargets
-    {
+    private function resolveTargets(
+        UploadedFile $uploadedFile,
+        Collection $records,
+        ?ScheduleResolutionSnapshot &$scheduleSnapshot,
+    ): PayrollContextTargets {
         $employees = Employee::withoutCompanyScope()
             ->where('company_id', $uploadedFile->company_id)
             ->whereNull('deleted_at')
@@ -196,13 +218,28 @@ class FileValidator
             ->orderBy('id')
             ->get()
             ->keyBy('external_id');
-        $workDates = $records->map(function (RawMarkPayload $record) use ($employees): ?string {
-            $employee = $employees->get($record->employee_external_id);
+        $eventDates = $records
+            ->map(fn (RawMarkPayload $record): CarbonImmutable => CarbonImmutable::parse($record->event_at))
+            ->sortBy(fn (CarbonImmutable $eventAt): int => $eventAt->getTimestamp())
+            ->values();
+        $rangeStart = ($eventDates->first() ?? CarbonImmutable::parse('1970-01-01'))->subDays(3);
+        $rangeEnd = ($eventDates->last() ?? $rangeStart)->addDays(3);
+        $scheduleSnapshot = ScheduleResolutionSnapshot::capture(
+            $uploadedFile->company_id,
+            $employees->values(),
+            $rangeStart,
+            $rangeEnd,
+        );
+        $workDates = $this->shiftOccurrenceResolver->withinScheduleSnapshot(
+            $scheduleSnapshot,
+            fn (): Collection => $records->map(function (RawMarkPayload $record) use ($employees): ?string {
+                $employee = $employees->get($record->employee_external_id);
 
-            return $employee === null
-                ? null
-                : $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at)->toDateString();
-        })->filter()->unique()->sort()->values();
+                return $employee === null
+                    ? null
+                    : $this->shiftOccurrenceResolver->workDateFor($employee, $record->event_at)->toDateString();
+            })->filter()->unique()->sort()->values(),
+        );
         $periodIds = PayPeriod::withoutCompanyScope()
             ->where('company_id', $uploadedFile->company_id)
             ->where(function ($query) use ($uploadedFile, $workDates): void {
