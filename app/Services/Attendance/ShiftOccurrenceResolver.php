@@ -9,11 +9,14 @@ use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfilePublication;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Closure;
 use Illuminate\Support\Collection;
 
 class ShiftOccurrenceResolver
 {
     private ?PayrollPeriodSnapshotData $snapshot = null;
+
+    private ?ScheduleResolutionSnapshot $scheduleSnapshot = null;
 
     public function __construct(private AttendanceFactGenerationTracker $factGenerations) {}
 
@@ -29,6 +32,18 @@ class ShiftOccurrenceResolver
             return $this->resolve($employee, $workDate);
         } finally {
             $this->snapshot = $previous;
+        }
+    }
+
+    public function withinScheduleSnapshot(ScheduleResolutionSnapshot $snapshot, Closure $work): mixed
+    {
+        $previous = $this->scheduleSnapshot;
+        $this->scheduleSnapshot = $snapshot;
+
+        try {
+            return $work();
+        } finally {
+            $this->scheduleSnapshot = $previous;
         }
     }
 
@@ -92,6 +107,7 @@ class ShiftOccurrenceResolver
             },
             // Adjacent facts can move a boundary, so they also invalidate this occurrence identity.
             factGeneration: $this->snapshot?->factGeneration($employee, [$date->subDay(), $date, $date->addDay()])
+                ?? $this->scheduleSnapshot?->factGeneration($employee, [$date->subDay(), $date, $date->addDay()])
                 ?? $this->factGenerations->currentForDates($employee, [$date->subDay(), $date, $date->addDay()]),
             publicationId: $publication->id,
             payrollPolicyKey: $publication->payroll_policy_key,
@@ -149,6 +165,10 @@ class ShiftOccurrenceResolver
             return $this->snapshot->publications($assignment, $date);
         }
 
+        if ($this->scheduleSnapshot !== null) {
+            return $this->scheduleSnapshot->publications($assignment, $date);
+        }
+
         return WorkScheduleProfilePublication::withoutCompanyScope()
             ->where('company_id', $employee->company_id)
             ->where('profile_id', $assignment->work_schedule_profile_id)
@@ -163,6 +183,10 @@ class ShiftOccurrenceResolver
     {
         if ($this->snapshot !== null) {
             return $this->snapshot->assignments($employee, $date);
+        }
+
+        if ($this->scheduleSnapshot !== null) {
+            return $this->scheduleSnapshot->assignments($employee, $date);
         }
 
         return EmployeeScheduleAssignment::withoutCompanyScope()
@@ -342,6 +366,10 @@ class ShiftOccurrenceResolver
     ): ?WorkSchedule {
         if ($this->snapshot !== null) {
             return $this->snapshot->schedule($assignment, $date);
+        }
+
+        if ($this->scheduleSnapshot !== null) {
+            return $this->scheduleSnapshot->schedule($assignment, $date);
         }
 
         return WorkSchedule::withoutCompanyScope()

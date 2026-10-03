@@ -506,3 +506,62 @@ test('validator rejects an imported mark that would break an active manual pair'
         ->and($occurrence->marks)->toHaveCount(2)
         ->and($generations->current($employee, '2026-01-05'))->toBe(2);
 });
+
+test('validator bounds schedule resolution queries as uploaded rows grow', function () {
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    foreach (range(0, 6) as $dayOfWeek) {
+        WorkSchedule::factory()->forProfile($profile)->create(['day_of_week' => $dayOfWeek]);
+    }
+    $employeeCount = 10;
+    $dayCount = 5;
+    $employees = collect(range(1, $employeeCount))->map(function (int $number) use ($company, $profile): Employee {
+        $employee = Employee::factory()->forCompany($company)->create([
+            'external_id' => str_pad((string) $number, 5, '0', STR_PAD_LEFT),
+        ]);
+        app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-01-01', 'Jornada diurna');
+
+        return $employee;
+    });
+    $payPeriod = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-01-31',
+        'status' => 'draft',
+    ]);
+    $uploadedFile = UploadedFile::factory()->forCompany($company)->forPayPeriod($payPeriod)->create([
+        'status' => 'pending',
+    ]);
+    $row = 0;
+    $records = collect(range(0, $dayCount - 1))->flatMap(function (int $day) use ($employees, &$row): array {
+        $date = Carbon::parse('2026-01-01')->addDays($day);
+
+        return $employees->flatMap(function (Employee $employee) use ($date, &$row): array {
+            return [
+                buildPayload($employee->external_id, $date->copy()->setTime(8, 0)->toDateTimeString(), ++$row),
+                buildPayload($employee->external_id, $date->copy()->setTime(17, 0)->toDateTimeString(), ++$row),
+            ];
+        })->all();
+    });
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    try {
+        $report = app(FileValidator::class)->validate($uploadedFile, $records);
+        $queries = collect(DB::getQueryLog())->pluck('query');
+        $scheduleQueries = $queries->filter(fn (string $query): bool => str_contains($query, 'employee_schedule_assignments')
+            || str_contains($query, 'work_schedule_profile_publications')
+            || str_contains($query, 'work_schedules'));
+        $perRowGenerationQueries = $queries->filter(
+            fn (string $query): bool => str_contains($query, 'select sum("generation") as aggregate')
+                && str_contains($query, 'attendance_fact_generations'),
+        );
+    } finally {
+        DB::disableQueryLog();
+    }
+
+    expect($report->counts['valid'])->toBe($employeeCount * $dayCount * 2)
+        ->and($scheduleQueries->count())->toBeLessThanOrEqual(12)
+        ->and($perRowGenerationQueries)->toBeEmpty()
+        ->and(RawMark::where('uploaded_file_id', $uploadedFile->id)->firstOrFail()->metadata)->toBe([]);
+});
