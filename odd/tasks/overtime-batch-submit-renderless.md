@@ -49,3 +49,4 @@ Make the `Confirmar lote` child dispatch and parent queue request return without
 
 ## Commits
 - `e619c0d perf(nomina): return batch submissions immediately`
+- `0936865 fix(nomina): accept all-filtered overtime batches`
