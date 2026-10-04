@@ -27,6 +27,8 @@ The feature branch inherits evidence and fixes from:
 - Original successful child batch submit: approximately 22.8s because it rescanned targets and rendered the panel.
 - Follow-up child submit after stored-intent dispatch: approximately 0.016s with no HTML effect.
 - Current authoritative parent action for 249 targets: approximately 16.52s, 294 queries, no HTML effect, temporary batch with 249 items.
+- Partial Xdebug/query baseline after the real batch consumed every pending target: `Revisar` mount 15.06s/31 queries/1,387,442 HTML bytes; panel mount 7.45s/16 queries/6,231 bytes; select-all 7.36s/18 queries; open modal 15.07s/32 queries. The empty result path prevented a second successful acceptance measurement.
+- Snapshot call evidence: initial parent and panel mounts each construct one period snapshot; opening the modal calls `pendingTargetsForPeriod` once and constructs two snapshots because the action scan is followed by a panel render scan.
 - On `main`, `requestOvertimeBatchFromPanel` is not renderless and `submitOvertimeBatch` rescans before dispatch.
 - Current worker processes 20 items per execution and releases normal continuation with the same 10-second error backoff.
 
@@ -60,9 +62,22 @@ Record before/after for:
 
 Avoid brittle absolute-time CI assertions. Prefer bounded renders, scans, snapshots, query counts, inserts, state transitions, and deterministic continuation timing.
 
+### Worker baseline — 249 items
+A reversible PostgreSQL scheduler harness used one synthetic batch with 249 items and a recorder test double, then rolled the transaction back:
+- 13 handle invocations at chunk size 20;
+- 2.348s total handle wall time and 2,023 queries;
+- 12 observed successful continuations released with 10-second delays;
+- 120s deterministic artificial idle and 122.348s scheduler total including idle;
+- steady full chunk: 162 queries, including 20 repeated loads each for actor, batch, period, and employee;
+- all 249 items ended succeeded with one attempt and the batch ended completed;
+- synthetic bulk setup demonstrated 249 item rows can be inserted in one statement in 22.8ms on the local PostgreSQL dataset.
+- current `createMany()` persistence was measured independently at 249 INSERT statements, 210.2ms wall time, and 83.42ms PostgreSQL-reported time for 249 items; the transaction rollback restored row counts.
+
+The real local batch #10 provides end-to-end observational evidence: 249 items and 249 decisions succeeded, created/started at 16:45:18 and finished at 16:48:15 (177s). Removing the 120s scheduled idle implies about 57s of real processing/overhead in that run; this is observational, not an isolated recorder benchmark.
+
 ## Tasks
 - [x] Create approved issue #396 and branch `perf/overtime-batch-flow` without touching `main`.
-- [ ] Capture a reproducible baseline for request, transaction, insert, chunk, render, scan, and snapshot behavior.
+- [x] Capture a reproducible baseline for request, transaction, insert, chunk, render, scan, and snapshot behavior.
 - [ ] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
 - [ ] Remove artificial normal continuation delay while preserving transient-error backoff.
 - [ ] Reduce duplicate candidate resolution to one authoritative path.
@@ -78,13 +93,19 @@ Avoid brittle absolute-time CI assertions. Prefer bounded renders, scans, snapsh
 - Start serial and remove idle time before considering 2–4 controlled workers.
 - A batch is accepted when durable rows commit; overtime decisions are recorded only when items reach terminal processing.
 - Current follow-up commits are retained as prerequisite evidence rather than reimplemented.
+- Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice must name its predecessor and remain independently reviewable.
 
 ## Verification
-Pending baseline and tracer-bullet implementation.
+- Reversible local PostgreSQL measurements restored batch/item/decision row counts after each harness.
+- `createMany()` baseline: 249 requested/unique rows, 249 INSERT statements, 210.2ms wall, 83.42ms database time.
+- Worker baseline: 249/249 terminal successes, 13 chunks, 12 releases of 10s, 120s deterministic idle, 2,023 scheduler queries.
+- Real batch #10: 249 items and decisions succeeded with no duplicates and terminal `completed` status in 177s.
+- No source changes were made during baseline capture; only this ODD evidence document changed. PostgreSQL sequences are nontransactional and advanced during preliminary/reversible harness attempts; persisted row counts and content remained intact.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
-- New initiative commits: pending.
+- `fae820b docs(odd): plan overtime batch performance`
+- Baseline evidence commit: pending.
 
 ## QA plan
 1. Load a representative payroll and open Review.
@@ -97,4 +118,6 @@ Pending baseline and tracer-bullet implementation.
 8. Exercise double click, invalid candidate, partial failure, 500 candidates, 501 candidates, approval, and rejection.
 
 ## Results
-Pending.
+- Issue #396 is approved and tracks the complete outcome.
+- Baseline confirms normal continuation delay, per-item invariant N+1 loads, opt-in worker risk, long requester lock scope, upload-filter projection incompatibility, and acceptance/terminal event ambiguity.
+- Implementation results remain pending.
