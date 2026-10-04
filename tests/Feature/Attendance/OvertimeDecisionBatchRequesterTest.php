@@ -244,7 +244,7 @@ test('releases a recovered job until the expired worker overlap lock clears', fu
     expect($nextWasCalled)->toBeFalse()
         ->and($middleware->releaseAfter)->toBe(300);
 });
-test('releases the same queued job between bounded chunks until terminal', function () {
+test('immediately releases the same queued job between bounded chunks until terminal', function () {
     $context = batchRequestFixture();
     $targets = [batchTarget($context)];
     foreach (range(2, 21) as $_) {
@@ -253,10 +253,11 @@ test('releases the same queued job between bounded chunks until terminal', funct
     $batch = requestBatch($context, ['targets' => $targets]);
     $job = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
     $job->handle(app(OvertimeDecisionRecorder::class));
-    $job->assertReleased(10);
+    $job->assertReleased(0);
     expect($batch->items()->where('status', 'succeeded')->count())->toBe(20)
         ->and($batch->items()->where('status', 'pending')->count())->toBe(1)
-        ->and($job->tries)->toBe(30);
+        ->and($job->tries)->toBe(30)
+        ->and($job->backoff)->toBe(10);
     Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
 
     $retry = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
@@ -264,6 +265,64 @@ test('releases the same queued job between bounded chunks until terminal', funct
     $retry->assertNotReleased();
     expect($batch->fresh()->status)->toBe('completed')
         ->and($batch->items()->where('status', 'succeeded')->count())->toBe(21);
+});
+test('reports deterministic progress across three immediate chunks with a validation failure', function () {
+    $context = batchRequestFixture();
+    $candidates = collect([$context]);
+    foreach (range(2, 41) as $_) {
+        $candidates->push(addBatchCandidate($context));
+    }
+    $batch = requestBatch($context, [
+        'targets' => $candidates->map(fn (array $candidate): array => batchTarget($candidate))->all(),
+    ]);
+    $failingCandidate = $candidates->last();
+    $failingCandidate['exit_mark']->update(['event_at' => '2026-07-20 14:45:00', 'status' => 'corrected']);
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $progress = Livewire::test(OvertimeBatchProgress::class, [
+        'payPeriod' => $context['period'], 'batchId' => $batch->id,
+    ]);
+
+    $firstChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $firstChunk->handle(app(OvertimeDecisionRecorder::class));
+    $firstChunk->assertReleased(0);
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::PROCESSING)
+        ->assertSet('progress.completed', 20)
+        ->assertSet('progress.remaining', 21)
+        ->assertSet('progress.percentage', 49);
+
+    $secondChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $secondChunk->handle(app(OvertimeDecisionRecorder::class));
+    $secondChunk->assertReleased(0);
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::PROCESSING)
+        ->assertSet('progress.completed', 40)
+        ->assertSet('progress.remaining', 1)
+        ->assertSet('progress.percentage', 98);
+
+    $finalChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $finalChunk->handle(app(OvertimeDecisionRecorder::class));
+    $finalChunk->assertNotReleased();
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::COMPLETED_WITH_ERRORS)
+        ->assertSet('progress.succeeded', 40)
+        ->assertSet('progress.failed', 1)
+        ->assertSet('progress.completed', 41)
+        ->assertSet('progress.pending', 0)
+        ->assertSet('progress.processing', 0)
+        ->assertSet('progress.remaining', 0)
+        ->assertSet('progress.percentage', 100)
+        ->assertSet('progress.terminal', true);
+
+    $batch->refresh();
+    expect($batch->status)->toBe(OvertimeDecisionBatch::COMPLETED_WITH_ERRORS)
+        ->and($batch->finished_at)->not->toBeNull()
+        ->and($batch->items()->where('status', 'succeeded')->count())->toBe(40)
+        ->and($batch->items()->where('status', 'failed')->count())->toBe(1)
+        ->and($batch->items()->whereIn('status', ['pending', 'processing'])->count())->toBe(0)
+        ->and($batch->items()->whereIn('status', ['succeeded', 'failed'])->count())->toBe($batch->total_items)
+        ->and($batch->items()->where('status', 'failed')->sole()->last_error)->not->toBeNull();
 });
 test('returns the original batch for an exact idempotent retry', function () {
     $context = batchRequestFixture();

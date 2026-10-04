@@ -79,7 +79,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Create approved issue #396 and branch `perf/overtime-batch-flow` without touching `main`.
 - [x] Capture a reproducible baseline for request, transaction, insert, chunk, render, scan, and snapshot behavior.
 - [x] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
-- [ ] Remove artificial normal continuation delay while preserving transient-error backoff.
+- [x] Remove artificial normal continuation delay while preserving transient-error backoff.
 - [ ] Reduce duplicate candidate resolution to one authoritative path.
 - [ ] Shorten the requester critical transaction and evaluate safe bulk item insertion.
 - [ ] Remove safe worker N+1 queries and validate lock-aware chunk processing.
@@ -110,6 +110,12 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 56 tests, 241 assertions.
 - `vendor/bin/pint app/Livewire/Nomina/Revisar.php app/Livewire/Nomina/OvertimeReviewPanel.php tests/Feature/Nomina/RevisarTest.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 - `git diff --check` passed with no output.
+- RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='immediately releases the same queued job between bounded chunks until terminal'` failed because the successful first chunk released with 10 seconds instead of the expected zero seconds (1 failed test, 2 assertions before failure).
+- GREEN: the same focused command passed after normal continuation changed to `release(0)` (1 test, 10 assertions); the job's public retry backoff remained 10 seconds.
+- Triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='reports deterministic progress across three immediate chunks with a validation failure'` passed (1 test, 29 assertions). Three explicit invocations reported 20, 40, and 41 completed items; the terminal state had 40 successes, 1 validation failure, no pending or processing items, 100% progress, zero remaining, `completed_with_errors`, and a non-null `finished_at`.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 57 tests, 271 assertions.
+- `vendor/bin/pint app/Jobs/ProcessOvertimeDecisionBatch.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- Current work unit: `git diff --check` passed with no output.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -134,3 +140,4 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Durable enqueue now emits `overtime-batch-accepted` to the review panel and preserves `overtime-batch-started` for isolated progress without emitting the terminal `overtime-batch-recorded` event.
 - The accepted event closes and clears batch modal/selection state; `overtime-batch-recorded` remains the terminal panel refresh event.
 - The parent terminal listener verifies the exact active actor-scoped batch, emits the terminal event once, and produces no HTML effect.
+- Successful non-terminal chunks now release immediately, while the queue job retains its public 10-second backoff for exception-driven retries.
