@@ -20,7 +20,7 @@ Make the `Confirmar lote` Livewire request return immediately after validating a
 - [x] Add a renderless request path and an always-mounted progress listener.
 - [x] Add focused regression coverage for renderless submission and progress notification.
 - [x] Run focused tests, formatting, and diff checks.
-- [ ] Commit the work unit and record evidence.
+- [x] Commit the work unit and record evidence.
 
 ## Verification
 - `OvertimeBatchProgressTest.php`: 2 tests, 11 assertions.
@@ -32,4 +32,4 @@ Make the `Confirmar lote` Livewire request return immediately after validating a
 - The request response has no parent HTML effect; it queues the batch and dispatches progress separately.
 
 ## Commits
-- Pending.
+- `e619c0d perf(nomina): return batch submissions immediately`
