@@ -115,6 +115,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
 - `fae820b docs(odd): plan overtime batch performance`
 - `a81899e docs(odd): record overtime batch baseline`
+- `16e7f3b docs(odd): link overtime baseline work unit`
+- `37ce605 refactor(nomina): separate batch acceptance from completion`
 
 ## QA plan
 1. Load a representative payroll and open Review.
