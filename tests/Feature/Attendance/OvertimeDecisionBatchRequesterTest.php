@@ -385,6 +385,37 @@ test('validated modal submission dispatches its stored batch intent without rend
     expect($component->effects)->not->toHaveKey('html')
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
+test('accepted batches close their modal while recorded batches refresh terminal data', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
+        ->call('selectCurrentOvertimePage')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada')
+        ->assertSet('showOvertimeBatchModal', true)
+        ->assertSet('selectedOvertimeCandidates', [$token]);
+
+    $component->dispatch('overtime-batch-accepted')
+        ->assertSet('showOvertimeBatchModal', false)
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->assertSet('overtimeBatchDecision', '')
+        ->assertSet('overtimeBatchReason', '')
+        ->assertSet('overtimeBatchRequestKey', '');
+
+    expect($component->effects)->toHaveKey('html');
+
+    $component
+        ->set('paginators.overtimePage', 2)
+        ->set('selectedOvertimeCandidates', [$token])
+        ->dispatch('overtime-batch-recorded')
+        ->assertSet('paginators.overtimePage', 1)
+        ->assertSet('selectedOvertimeCandidates', []);
+
+    expect($component->effects)->toHaveKey('html');
+});
 test('selects every filtered overtime match across pages with compact public state', function () {
     $context = batchRequestFixture();
     foreach (range(1, 25) as $_) {
@@ -738,18 +769,30 @@ test('stops isolated polling and notifies the parent when the batch becomes term
         ->assertDontSeeHtml('wire:poll.3s="poll"')
         ->assertDispatched('overtime-batch-terminal', batchId: $batch->id);
 });
-test('refreshes the parent once only after a verified terminal child event', function () {
+test('refreshes the panel once only after the exact active batch is verified terminal without rendering the parent', function () {
     $context = batchRequestFixture();
     $batch = requestBatch($context);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
     overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
-    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->dispatch('overtime-batch-terminal', batchId: $batch->id);
-    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']]);
+
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id + 1)
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
 
     $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
-        ->assertDispatched('overtime-batch-recorded');
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
+
+    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
+
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
 });
 test('clears only a verified unavailable active batch from the parent', function () {
     $context = batchRequestFixture();

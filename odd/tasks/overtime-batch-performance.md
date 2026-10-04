@@ -78,7 +78,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 ## Tasks
 - [x] Create approved issue #396 and branch `perf/overtime-batch-flow` without touching `main`.
 - [x] Capture a reproducible baseline for request, transaction, insert, chunk, render, scan, and snapshot behavior.
-- [ ] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
+- [x] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
 - [ ] Remove artificial normal continuation delay while preserving transient-error backoff.
 - [ ] Reduce duplicate candidate resolution to one authoritative path.
 - [ ] Shorten the requester critical transaction and evaluate safe bulk item insertion.
@@ -101,6 +101,15 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Worker baseline: 249/249 terminal successes, 13 chunks, 12 releases of 10s, 120s deterministic idle, 2,023 scheduler queries.
 - Real batch #10: 249 items and decisions succeeded with no duplicates and terminal `completed` status in 177s.
 - No source changes were made during baseline capture; only this ODD evidence document changed. PostgreSQL sequences are nontransactional and advanced during preliminary/reversible harness attempts; persisted row counts and content remained intact.
+- RED: `php artisan test tests/Feature/Nomina/RevisarTest.php --filter='batch request accepts durable work without claiming decisions are recorded'` failed because `overtime-batch-accepted` was not dispatched.
+- RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='accepted batches close their modal while recorded batches refresh terminal data'` failed because the accepted-event handler did not exist.
+- RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='refreshes the panel once only after the exact active batch is verified terminal without rendering the parent'` failed because the parent response contained an HTML effect.
+- GREEN: the same three focused commands passed with 8, 12, and 9 assertions respectively.
+- Triangulation: `php artisan test tests/Feature/Nomina/RevisarTest.php --filter='all-filtered batch accepts an empty explicit selection without rendering the payroll review'` passed with 14 assertions.
+- `php artisan test tests/Feature/Nomina/RevisarTest.php` passed: 19 tests, 148 assertions.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 56 tests, 241 assertions.
+- `vendor/bin/pint app/Livewire/Nomina/Revisar.php app/Livewire/Nomina/OvertimeReviewPanel.php tests/Feature/Nomina/RevisarTest.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- `git diff --check` passed with no output.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -120,4 +129,6 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 ## Results
 - Issue #396 is approved and tracks the complete outcome.
 - Baseline confirms normal continuation delay, per-item invariant N+1 loads, opt-in worker risk, long requester lock scope, upload-filter projection incompatibility, and acceptance/terminal event ambiguity.
-- Implementation results remain pending.
+- Durable enqueue now emits `overtime-batch-accepted` to the review panel and preserves `overtime-batch-started` for isolated progress without emitting the terminal `overtime-batch-recorded` event.
+- The accepted event closes and clears batch modal/selection state; `overtime-batch-recorded` remains the terminal panel refresh event.
+- The parent terminal listener verifies the exact active actor-scoped batch, emits the terminal event once, and produces no HTML effect.

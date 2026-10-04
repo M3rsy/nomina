@@ -555,7 +555,7 @@ test('single overtime decision skips readiness recomputation and refreshes only 
         ->and($recordedDecision->decision)->toBe(OvertimeDecision::APPROVED);
 });
 
-test('batch request queues without rendering the payroll review and starts isolated progress', function () {
+test('batch request accepts durable work without claiming decisions are recorded', function () {
     /** @var TestCase $this */
     Queue::fake();
     $company = Company::factory()->create();
@@ -616,7 +616,8 @@ test('batch request queues without rendering the payroll review and starts isola
             'overtime-batch-started',
             batchId: $batch->id,
         )
-        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-accepted')
+        ->assertNotDispatched('overtime-batch-recorded');
 
     expect($component->effects)->not->toHaveKey('html');
 });
@@ -685,7 +686,8 @@ test('all-filtered batch accepts an empty explicit selection without rendering t
             'overtime-batch-started',
             batchId: $batch->id,
         )
-        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-accepted')
+        ->assertNotDispatched('overtime-batch-recorded');
     Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
 
     expect($component->effects)->not->toHaveKey('html');
