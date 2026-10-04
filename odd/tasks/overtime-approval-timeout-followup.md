@@ -34,3 +34,4 @@ Remove the remaining full readiness recomputation from the renderless single ove
 
 ## Commits
 - `677c8ce fix(nomina): skip readiness scan after overtime decision`
+- `cfb5a7f perf(nomina): lazy-load overtime review panel`
