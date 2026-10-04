@@ -17,7 +17,7 @@ Remove the remaining full readiness recomputation from the renderless single ove
 ## Tasks
 - [x] Remove the wasted readiness recomputation and add regression coverage.
 - [x] Verify focused tests and formatting.
-- [ ] Commit and provide retest instructions.
+- [x] Commit and provide retest instructions.
 
 ## Verification
 - Passed focused single-decision test: 1 test, 6 assertions.
@@ -27,4 +27,4 @@ Remove the remaining full readiness recomputation from the renderless single ove
 - Regression confirms no readiness blocker recomputation, decision persistence, targeted child event, and no HTML render effect.
 
 ## Commits
-- Pending.
+- `677c8ce fix(nomina): skip readiness scan after overtime decision`
