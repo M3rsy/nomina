@@ -21,6 +21,7 @@ use App\Services\Attendance\AttendanceSegment;
 use App\Services\Attendance\AttendanceShiftAnalysis;
 use App\Services\Attendance\AttendanceShiftAnalyzer;
 use App\Services\Attendance\EmployeeScheduleAssigner;
+use App\Services\Attendance\OvertimeDecisionBatchRequest;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollShiftReview;
@@ -77,6 +78,32 @@ test('freezes authoritative pending candidates in a queued batch', function () {
         ->and($batch->items)->toHaveCount(1)
         ->and($batch->items->sole()->fingerprint)->toBe($context['candidate']->fingerprint)
         ->and($batch->items->sole()->status)->toBe('pending');
+});
+test('applies explicit selection after one authoritative filtered resolution', function () {
+    $context = batchRequestFixture();
+    addBatchCandidate($context);
+
+    $batch = requestBatch($context);
+
+    expect($batch->total_items)->toBe(1)
+        ->and($batch->items->sole()->employee_id)->toBe($context['employee']->id);
+});
+test('keeps all-match selection within its uploaded file scope', function () {
+    $context = batchRequestFixture();
+    $sameFile = addBatchCandidate($context);
+    $otherFile = UploadedFile::factory()->forCompany($context['company'])->forPayPeriod($context['period'])->create();
+    $otherFileCandidate = addBatchCandidate($context, $otherFile);
+
+    $batch = requestBatch($context, [
+        'targets' => [batchTarget($context), batchTarget($sameFile)],
+        'uploaded_file_id' => $context['file']->id,
+        'all' => true,
+        'selected' => [],
+    ]);
+
+    expect($batch->items)->toHaveCount(2)
+        ->and($batch->items->pluck('employee_id')->all())->toContain($context['employee']->id, $sameFile['employee']->id)
+        ->not->toContain($otherFileCandidate['employee']->id);
 });
 test('recorder safely reuses the decision linked to the same batch item', function () {
     $context = batchRequestFixture();
@@ -405,17 +432,64 @@ test('returns the original batch for an exact idempotent retry', function () {
         'candidate_key' => $context['candidate']->key,
         'work_date' => '2026-07-20',
         'employee_id' => $context['employee']->id,
+        'fingerprint' => $context['candidate']->fingerprint,
     ];
     $retry = requestBatch($context, ['key' => $key, 'targets' => [$reordered, $reordered]]);
     expect($retry->is($first))->toBeTrue()
         ->and(OvertimeDecisionBatch::query()->count())->toBe(1);
 });
-test('rejects reuse of an idempotency key with a different payload', function () {
+test('recovers an exact idempotent retry after its candidates were processed without rescanning', function () {
     $context = batchRequestFixture();
     $key = (string) Str::uuid();
-    requestBatch($context, ['key' => $key, 'reason' => 'Motivo A']);
-    expect(fn () => requestBatch($context, ['key' => $key, 'decision' => OvertimeDecision::REJECTED]))
-        ->toThrow(ValidationException::class)
+    $first = requestBatch($context, ['key' => $key]);
+    (new ProcessOvertimeDecisionBatch($first->id))->handle(app(OvertimeDecisionRecorder::class));
+    $rawMarkCaptures = 0;
+    DB::listen(function ($query) use (&$rawMarkCaptures): void {
+        if (str_contains($query->sql, 'from "raw_marks"')) {
+            $rawMarkCaptures++;
+        }
+    });
+
+    $retry = requestBatch($context, ['key' => $key]);
+
+    expect($retry->is($first))->toBeTrue()
+        ->and($retry->status)->toBe(OvertimeDecisionBatch::COMPLETED)
+        ->and($rawMarkCaptures)->toBe(0)
+        ->and(OvertimeDecisionBatch::query()->count())->toBe(1);
+});
+test('binds every selection input into the idempotency payload before rescanning', function () {
+    $context = batchRequestFixture();
+    $key = (string) Str::uuid();
+    requestBatch($context, ['key' => $key]);
+    $otherActor = User::factory()->forCompany($context['company'])->create()->assignRole('company_admin');
+    $otherPeriod = PayPeriod::factory()->forCompany($context['company'])->create([
+        'start_date' => '2026-07-20', 'end_date' => '2026-07-20', 'status' => 'uploaded',
+    ]);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $variants = [
+        ['decision' => OvertimeDecision::REJECTED],
+        ['reason' => 'Otro motivo'],
+        ['uploaded_file_id' => $context['file']->id],
+        ['filters' => ['search' => 'otro', 'status' => 'pending', 'date' => '', 'rate' => '']],
+        ['all' => true, 'selected' => []],
+        ['selected' => [$token, '999|2026-07-20|'.str_repeat('0', 64)]],
+        ['selection' => str_repeat('0', 64)],
+        ['actor' => $otherActor],
+        ['period' => $otherPeriod],
+    ];
+    $rawMarkCaptures = 0;
+    DB::listen(function ($query) use (&$rawMarkCaptures): void {
+        if (str_contains($query->sql, 'from "raw_marks"')) {
+            $rawMarkCaptures++;
+        }
+    });
+
+    foreach ($variants as $variant) {
+        expect(fn () => requestBatch($context, ['key' => $key, ...$variant]))
+            ->toThrow(ValidationException::class);
+    }
+
+    expect($rawMarkCaptures)->toBe(0)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(1);
 });
 test('rejects invalid request input without writing a batch', function (string $case) {
@@ -425,20 +499,17 @@ test('rejects invalid request input without writing a batch', function (string $
         'reason' => ['reason' => ' '],
         'key' => ['key' => 'not-a-uuid'],
         'targets' => ['targets' => []],
-        'shape' => ['targets' => [[...batchTarget($context), 'fingerprint' => str_repeat('f', 64)]]],
+        'token' => ['selected' => ['malformed']],
     };
     expect(fn () => requestBatch($context, $overrides))
         ->toThrow(ValidationException::class)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
-})->with(['decision', 'reason', 'key', 'targets', 'shape']);
+})->with(['decision', 'reason', 'key', 'targets', 'token']);
 test('prohibits partial batch authorization without appending a request or decision', function () {
     $context = batchRequestFixture();
 
     expect(fn () => requestBatch($context, ['decision' => OvertimeDecision::PARTIAL]))
         ->toThrow(ValidationException::class)
-        ->and(fn () => requestBatch($context, ['targets' => [[
-            ...batchTarget($context), 'approved_starts_at' => '2026-07-20 14:00:00',
-        ]]]))->toThrow(ValidationException::class)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0)
         ->and(OvertimeDecision::query()->count())->toBe(0);
 });
@@ -712,6 +783,33 @@ test('panel owns batch intent and emits a canonical request without creating a b
 
     expect(OvertimeDecisionBatch::query()->count())->toBe(0);
 });
+test('parent rejects malformed or unexpected batch intent fields before resolution', function (string $case) {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $intent = [
+        'decision' => OvertimeDecision::APPROVED,
+        'reason' => 'Cobertura confirmada',
+        'request_key' => (string) Str::uuid(),
+        'selection' => str_repeat('0', 64),
+        'filters' => ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''],
+        'all' => false,
+        'selected' => [$token],
+    ];
+    if ($case === 'token') {
+        $intent['selected'] = ['malformed'];
+    } else {
+        $intent['targets'] = [];
+    }
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('requestOvertimeBatchFromPanel', $intent)
+        ->assertHasErrors();
+
+    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
+})->with(['token', 'unexpected']);
 test('parent records only a verified canonical panel batch intent', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
@@ -803,7 +901,9 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
         ->assertSee('Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.')
         ->assertSet('showOvertimeBatchModal', false);
 
-    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+    expect(fn () => requestBatch($context, ['all' => true, 'selected' => []]))
+        ->toThrow(ValidationException::class)
+        ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 });
 test('changing all-match filters closes the modal before submission', function () {
     $context = batchRequestFixture();
@@ -946,18 +1046,43 @@ test('clears only a verified unavailable active batch from the parent', function
 });
 function requestBatch(array $context, array $overrides = []): OvertimeDecisionBatch
 {
+    $targets = $overrides['targets'] ?? [batchTarget($context)];
+    $filters = $overrides['filters'] ?? ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''];
+    $all = $overrides['all'] ?? false;
+    $selected = $overrides['selected'] ?? collect($targets)->map(fn (array $target): string => implode('|', [
+        $target['employee_id'], $target['work_date'], $target['candidate_key'],
+    ]))->all();
+    $selection = $overrides['selection'] ?? hash('sha256', json_encode([
+        'filters' => $filters,
+        'all' => $all,
+        'candidates' => collect($targets)->map(fn (array $target): string => implode('|', [
+            $target['employee_id'], $target['work_date'], $target['candidate_key'], $target['fingerprint'],
+        ]))->unique()->sort()->values()->all(),
+    ], JSON_THROW_ON_ERROR));
+
     return app(OvertimeDecisionBatchRequester::class)->request(
-        $context['period'],
-        $overrides['targets'] ?? [batchTarget($context)],
-        $overrides['decision'] ?? OvertimeDecision::APPROVED,
-        $overrides['reason'] ?? 'Cobertura extraordinaria confirmada',
+        $overrides['period'] ?? $context['period'],
+        new OvertimeDecisionBatchRequest(
+            decision: $overrides['decision'] ?? OvertimeDecision::APPROVED,
+            reason: $overrides['reason'] ?? 'Cobertura extraordinaria confirmada',
+            requestKey: $overrides['key'] ?? (string) Str::uuid(),
+            uploadedFileId: $overrides['uploaded_file_id'] ?? null,
+            filters: $filters,
+            all: $all,
+            selectedTokens: $selected,
+            expectedSelectionHash: $selection,
+        ),
         $overrides['actor'] ?? $context['actor'],
-        $overrides['key'] ?? (string) Str::uuid(),
     );
 }
 function batchTarget(array $context): array
 {
-    return ['employee_id' => $context['employee']->id, 'work_date' => '2026-07-20', 'candidate_key' => $context['candidate']->key];
+    return [
+        'employee_id' => $context['employee']->id,
+        'work_date' => '2026-07-20',
+        'candidate_key' => $context['candidate']->key,
+        'fingerprint' => $context['candidate']->fingerprint,
+    ];
 }
 function batchRequestFixture(string $periodStatus = 'uploaded'): array
 {

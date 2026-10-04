@@ -14,6 +14,7 @@ use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
 use App\Services\Attendance\HolidayCalendarContext;
 use App\Services\Attendance\ManualRawMarkRecorder;
+use App\Services\Attendance\OvertimeDecisionBatchRequest;
 use App\Services\Attendance\OvertimeDecisionBatchRequester;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\Attendance\PayrollPeriodReviewSnapshot;
@@ -28,7 +29,6 @@ use App\Services\Payroll\AssignRawMarkEmployeeCommand;
 use App\Services\Payroll\AuditedRawMarkRevision;
 use App\Services\Payroll\CreateEmployeeFromUnknownMarkCommand;
 use App\Services\Payroll\MarkRawMarkCorrectedCommand;
-use App\Services\Payroll\OvertimeReviewReader;
 use App\Services\Payroll\PayPeriodReopener;
 use App\Services\Payroll\PayrollReviewProjection;
 use App\Services\Payroll\StartPayrollProcessing;
@@ -54,8 +54,6 @@ use Livewire\WithPagination;
 class Revisar extends Component
 {
     use WithPagination;
-
-    private const MAX_OVERTIME_BATCH_TARGETS = 500;
 
     public PayPeriod $payPeriod;
 
@@ -918,45 +916,45 @@ class Revisar extends Component
             return;
         }
 
-        $validated = validator($intent, [
-            'decision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
-            'reason' => ['required', 'string', 'max:500'],
-            'request_key' => ['required', 'uuid'],
-            'selection' => ['required', 'string', 'size:64'],
-            'filters' => ['required', 'array:search,status,date,rate'],
-            'filters.search' => ['present', 'string', 'max:255'],
-            'filters.status' => ['required', Rule::in(['pending', 'approved', 'rejected', 'all'])],
-            'filters.date' => ['present', 'nullable', 'date_format:Y-m-d'],
-            'filters.rate' => ['present', Rule::in(['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'])],
-            'all' => ['required', 'boolean'],
-            'selected' => ['present', 'array'],
-            'selected.*' => ['string', 'regex:/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D'],
-        ])->validate();
-        $targets = app(OvertimeReviewReader::class)->pendingTargetsForPeriod(
-            $this->payPeriod, $this->uploaded_file_id, $validated['filters'],
-        );
-        if (! $validated['all']) {
-            $selected = array_flip($validated['selected']);
-            $targets = $targets->filter(fn (array $target, string $token): bool => isset($selected[$token]));
-        }
-        if ($targets->count() > self::MAX_OVERTIME_BATCH_TARGETS) {
-            $this->dispatch('overtime-batch-rejected', message: 'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.')
+        $validated = validator(['intent' => $intent], [
+            'intent' => ['required', 'array:decision,reason,request_key,selection,filters,all,selected'],
+            'intent.decision' => ['required', Rule::in([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED])],
+            'intent.reason' => ['required', 'string', 'max:500'],
+            'intent.request_key' => ['required', 'uuid'],
+            'intent.selection' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/D'],
+            'intent.filters' => ['required', 'array:search,status,date,rate'],
+            'intent.filters.search' => ['present', 'string', 'max:255'],
+            'intent.filters.status' => ['required', Rule::in(['pending', 'approved', 'rejected', 'all'])],
+            'intent.filters.date' => ['present', 'nullable', 'date_format:Y-m-d'],
+            'intent.filters.rate' => ['present', Rule::in(['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'])],
+            'intent.all' => ['required', 'boolean'],
+            'intent.selected' => ['present', 'array', 'list'],
+            'intent.selected.*' => ['string', 'regex:/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D'],
+        ])->validate()['intent'];
+        $validated['filters']['date'] ??= '';
+        try {
+            $batch = app(OvertimeDecisionBatchRequester::class)->request(
+                $this->payPeriod,
+                new OvertimeDecisionBatchRequest(
+                    decision: $validated['decision'],
+                    reason: $validated['reason'],
+                    requestKey: $validated['request_key'],
+                    uploadedFileId: $this->uploaded_file_id,
+                    filters: $validated['filters'],
+                    all: $validated['all'],
+                    selectedTokens: $validated['selected'],
+                    expectedSelectionHash: $validated['selection'],
+                ),
+                Auth::user(),
+            );
+        } catch (ValidationException $exception) {
+            $message = collect($exception->errors())->flatten()->first()
+                ?? 'La solicitud de decisiones no es válida.';
+            $this->dispatch('overtime-batch-rejected', message: $message)
                 ->to(OvertimeReviewPanel::class);
 
             return;
         }
-        if ($targets->isEmpty() || $this->overtimeBatchConfirmation($targets, $validated['filters'], $validated['all']) !== $validated['selection']) {
-            $this->dispatch('overtime-batch-rejected', message: 'La selección cambió. Revísela antes de continuar.')
-                ->to(OvertimeReviewPanel::class);
-
-            return;
-        }
-
-        $batch = app(OvertimeDecisionBatchRequester::class)->request(
-            $this->payPeriod, $targets->map(fn (array $target) => [
-                'employee_id' => $target['employee_id'], 'work_date' => $target['work_date'], 'candidate_key' => $target['candidate_key'],
-            ])->values()->all(), $validated['decision'], $validated['reason'], Auth::user(), $validated['request_key'],
-        );
         $this->activeOvertimeBatchId = $batch->id;
         $this->refreshedOvertimeBatchId = null;
         $this->dispatch('overtime-batch-started', batchId: $batch->id)->to(OvertimeBatchProgress::class);
@@ -1629,15 +1627,6 @@ class Revisar extends Component
         session()->flash('success', $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
             ? 'Tramo parcial aprobado y complemento rechazado.'
             : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.');
-    }
-
-    private function overtimeBatchConfirmation(Collection $targets, array $filters, bool $all): string
-    {
-        return hash('sha256', json_encode([
-            'filters' => $filters,
-            'all' => $all,
-            'candidates' => $targets->map(fn (array $target, string $token): string => $token.'|'.$target['fingerprint'])->sort()->values()->all(),
-        ], JSON_THROW_ON_ERROR));
     }
 
     private function lockMutablePayPeriod(): ?PayPeriod
