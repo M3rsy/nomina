@@ -7,6 +7,7 @@ use App\Models\PayPeriod;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 class OvertimeBatchProgress extends Component
@@ -23,12 +24,22 @@ class OvertimeBatchProgress extends Component
     #[Locked]
     public bool $terminalNotified = false;
 
-    public function mount(PayPeriod $payPeriod, int $batchId): void
+    public function mount(PayPeriod $payPeriod, ?int $batchId = null): void
     {
         $this->authorize('view', $payPeriod);
         Gate::authorize('marks.manage');
         $this->payPeriod = $payPeriod;
         $this->batchId = $batchId;
+        $this->poll();
+    }
+
+    #[On('overtime-batch-started')]
+    public function start(int $batchId): void
+    {
+        $this->batchId = $batchId;
+        $this->progress = [];
+        $this->batchErrors = [];
+        $this->terminalNotified = false;
         $this->poll();
     }
 
