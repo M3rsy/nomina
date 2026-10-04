@@ -1623,7 +1623,6 @@ class Revisar extends Component
             $recorder->decide($this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'], $validated['overtimeCandidateKey'], $validated['overtimeDecision'], $validated['overtimeDecisionReason'], Auth::user());
         }
 
-        $this->loadReadinessBlockers();
         session()->flash('success', $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
             ? 'Tramo parcial aprobado y complemento rechazado.'
             : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.');

@@ -491,7 +491,7 @@ test('daily shortfall stays pending until the complete audited deficit is grante
         ->and(AttendanceException::query()->count())->toBe(4);
 });
 
-test('single overtime decision dispatches refresh event without rendering parent html', function () {
+test('single overtime decision skips readiness recomputation and refreshes only the child panel', function () {
     /** @var TestCase $this */
     $company = Company::factory()->create();
     $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
@@ -527,6 +527,8 @@ test('single overtime decision dispatches refresh event without rendering parent
         ->analysis
         ->overtimeCandidates
         ->sole();
+    $this->mock(PayrollReadinessChecker::class)
+        ->shouldNotReceive('blockers');
 
     $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
         ->call('saveOvertimeDecisionFromPanel', [
@@ -537,9 +539,12 @@ test('single overtime decision dispatches refresh event without rendering parent
             'overtimeDecisionReason' => 'Approved after review',
         ])
         ->assertHasNoErrors()
-        ->assertDispatched('overtime-decision-recorded');
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-decision-recorded');
 
-    expect($component->effects)->not->toHaveKey('html');
+    $recordedDecision = OvertimeDecision::withoutCompanyScope()->sole();
+
+    expect($component->effects)->not->toHaveKey('html')
+        ->and($recordedDecision->decision)->toBe(OvertimeDecision::APPROVED);
 });
 
 test('partial overtime approval preserves exact rejected complements and payable bands', function () {
