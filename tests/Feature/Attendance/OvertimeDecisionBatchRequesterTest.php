@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
 use App\Models\OvertimeDecisionBatch;
+use App\Models\OvertimeDecisionBatchItem;
 use App\Models\PayPeriod;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
@@ -243,6 +244,78 @@ test('releases a recovered job until the expired worker overlap lock clears', fu
     $job->assertReleased(300);
     expect($nextWasCalled)->toBeFalse()
         ->and($middleware->releaseAfter)->toBe(300);
+});
+test('loads scheduler invariants once for a full worker chunk', function () {
+    $context = batchRequestFixture();
+    $candidates = collect([$context]);
+    foreach (range(2, 20) as $_) {
+        $candidates->push(addBatchCandidate($context));
+    }
+    $batch = requestBatch($context, [
+        'targets' => $candidates->map(fn (array $candidate): array => batchTarget($candidate))->all(),
+    ]);
+    $decision = Mockery::mock(OvertimeDecision::class);
+    $recorder = Mockery::mock(OvertimeDecisionRecorder::class);
+    $recorder->shouldReceive('decide')->times(20)->andReturn($decision);
+    $queries = collect();
+    DB::listen(function ($query) use ($queries): void {
+        $queries->push(strtolower($query->sql));
+    });
+
+    (new ProcessOvertimeDecisionBatch($batch->id))->handle($recorder);
+
+    $selects = $queries->filter(fn (string $sql): bool => str_starts_with(ltrim($sql), 'select '));
+    $employeeSelects = $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "employees"'));
+    $observed = [
+        'total' => $queries->count(),
+        'batch.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "overtime_decision_batches"'))->count(),
+        'actor.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "users"'))->count(),
+        'period.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "pay_periods"'))->count(),
+        'employee.select' => $employeeSelects->count(),
+        'employee.where_in' => $employeeSelects->filter(fn (string $sql): bool => str_contains($sql, ' in ('))->count(),
+    ];
+
+    expect($observed)->toBe([
+        'total' => 32,
+        'batch.select' => 3,
+        'actor.select' => 1,
+        'period.select' => 1,
+        'employee.select' => 1,
+        'employee.where_in' => 1,
+    ])->and($batch->items()->where('status', OvertimeDecisionBatchItem::SUCCEEDED)->count())->toBe(20);
+});
+test('claims a recovered processing item before pending work in the next chunk', function () {
+    $context = batchRequestFixture();
+    $candidates = collect([$context]);
+    foreach (range(2, 21) as $_) {
+        $candidates->push(addBatchCandidate($context));
+    }
+    $batch = requestBatch($context, [
+        'targets' => $candidates->map(fn (array $candidate): array => batchTarget($candidate))->all(),
+    ]);
+    $recovered = $batch->items()->where('employee_id', $candidates->last()['employee']->id)->sole();
+    $recovered->update(['status' => OvertimeDecisionBatchItem::PROCESSING, 'attempts' => 2]);
+    $processedItemIds = [];
+    $decision = Mockery::mock(OvertimeDecision::class);
+    $recorder = Mockery::mock(OvertimeDecisionRecorder::class);
+    $recorder->shouldReceive('decide')->times(20)->andReturnUsing(
+        function (...$arguments) use (&$processedItemIds, $decision): OvertimeDecision {
+            $processedItemIds[] = $arguments[7];
+
+            return $decision;
+        },
+    );
+    $job = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+
+    $job->handle($recorder);
+
+    $job->assertReleased(0);
+    expect($processedItemIds[0])->toBe($recovered->id)
+        ->and($recovered->fresh()->status)->toBe(OvertimeDecisionBatchItem::SUCCEEDED)
+        ->and($recovered->fresh()->attempts)->toBe(3)
+        ->and($batch->items()->where('status', OvertimeDecisionBatchItem::SUCCEEDED)->count())->toBe(20)
+        ->and($batch->items()->where('status', OvertimeDecisionBatchItem::PENDING)->count())->toBe(1)
+        ->and($batch->items()->where('status', OvertimeDecisionBatchItem::PROCESSING)->count())->toBe(0);
 });
 test('immediately releases the same queued job between bounded chunks until terminal', function () {
     $context = batchRequestFixture();

@@ -82,7 +82,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Remove artificial normal continuation delay while preserving transient-error backoff.
 - [ ] Reduce duplicate candidate resolution to one authoritative path.
 - [ ] Shorten the requester critical transaction and evaluate safe bulk item insertion.
-- [ ] Remove safe worker N+1 queries and validate lock-aware chunk processing.
+- [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [ ] Improve progress/error/worker-stalled observability and loading target isolation.
 - [ ] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs.
 - [ ] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
@@ -116,6 +116,12 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 57 tests, 271 assertions.
 - `vendor/bin/pint app/Jobs/ProcessOvertimeDecisionBatch.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 - Current work unit: `git diff --check` passed with no output.
+- Worker scheduler RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='loads scheduler invariants once for a full worker chunk'` failed with 165 queries. Normalized SELECT categories were `batch.select=41`, `actor.select=20`, `period.select=20`, `employee.select=20`, and `employee.where_in=0`.
+- Worker scheduler GREEN: the same focused command passed with 32 queries. Normalized SELECT categories were `batch.select=3`, `actor.select=1`, `period.select=1`, `employee.select=1`, and `employee.where_in=1`.
+- Recovery triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='claims a recovered processing item before pending work in the next chunk'` passed with 9 assertions; the pre-existing processing item ran first, its attempts increased from 2 to 3, 20 items succeeded, and one remained pending for immediate continuation.
+- Lifecycle triangulation covering revoked authorization, infrastructure failure, bounded continuation, and a validation failure passed: 4 tests, 49 assertions.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 59 tests, 283 assertions.
+- `vendor/bin/pint app/Jobs/ProcessOvertimeDecisionBatch.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -143,3 +149,5 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - The accepted event closes and clears batch modal/selection state; `overtime-batch-recorded` remains the terminal panel refresh event.
 - The parent terminal listener verifies the exact active actor-scoped batch, emits the terminal event once, and produces no HTML effect.
 - Successful non-terminal chunks now release immediately, while the queue job retains its public 10-second backoff for exception-driven retries.
+- The worker now claims and increments up to 20 items in one batch-row transaction, preserving processing-before-pending recovery order. It then loads batch, actor, and period once and all unique employees in one `whereIn` query; recorder-level batch/actor revalidation and payroll locking remain authoritative.
+- The deterministic SQLite `handle()` seam regression reduced a full mocked-recorder chunk from 165 to 32 queries, with batch SELECTs reduced from 41 to 3 and actor, period, and employee SELECTs reduced from 20 each to 1 each.
