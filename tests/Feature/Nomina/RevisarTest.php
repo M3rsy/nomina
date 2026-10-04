@@ -252,12 +252,14 @@ test('variation transfer tail is auditable and pay neutral in payroll review', f
 
     expect(AttendanceVariationAcknowledgement::withoutCompanyScope()->count())->toBe(0);
 
+    Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $payPeriod])
+        ->assertSee('120 min detectados')
+        ->assertSee('25 min de traslado excluidos')
+        ->assertSee('151 min detectados');
+
     Livewire::test(Revisar::class, ['payPeriod' => $payPeriod])
         ->assertSee('Variación de entrada')
         ->assertSee('480 min ordinarios; no cambia el pago')
-        ->assertSee('120 min detectados')
-        ->assertSee('25 min de traslado excluidos')
-        ->assertSee('151 min detectados')
         ->set('variationReason', 'Reviewed with employee')
         ->call('acknowledgeVariation', $employee->id, '2026-07-20', $variation->key, $variation->fingerprint)
         ->assertHasNoErrors()

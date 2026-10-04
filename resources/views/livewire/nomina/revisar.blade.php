@@ -258,7 +258,12 @@
     @endif
 
     @if ($status !== 'justified')
-        <livewire:nomina.overtime-review-panel :pay-period="$payPeriod" :uploaded-file-id="$uploaded_file_id" :is-blocked="$isBlocked" />
+        <livewire:nomina.overtime-review-panel
+            :pay-period="$payPeriod"
+            :uploaded-file-id="$uploaded_file_id"
+            :is-blocked="$isBlocked"
+            lazy="on-load"
+        />
     @endif
 
 
