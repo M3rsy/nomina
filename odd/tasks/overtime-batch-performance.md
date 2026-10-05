@@ -81,10 +81,10 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
 - [x] Remove artificial normal continuation delay while preserving transient-error backoff.
 - [x] Reduce duplicate candidate resolution to one authoritative path.
-- [ ] Shorten the requester critical transaction and evaluate safe bulk item insertion.
+- [x] Shorten the requester critical transaction and evaluate safe bulk item insertion; retain the authoritative scan under the period lock until every candidate dependency has a shared revision contract.
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [ ] Improve progress/error/worker-stalled observability and loading target isolation.
-- [ ] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs.
+- [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [ ] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
 - [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
 
@@ -94,6 +94,9 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - A batch is accepted when durable rows commit; overtime decisions are recorded only when items reach terminal processing.
 - Current follow-up commits are retained as prerequisite evidence rather than reimplemented.
 - Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice must name its predecessor and remain independently reviewable.
+- Keep `payroll_review_entries` as a UI/cache source, not the authoritative batch-request source. Its generation/build/read steps are not one atomic revision and omit snapshot dependencies such as fact generations and vacation inputs.
+- Do not project `uploaded_file_id` by candidate ownership. Current semantics retain an entire shift occurrence when any contributing mark came from the file, including every candidate in a mixed-file occurrence. Exact projection support would require generation-owned occurrence/upload membership (for example, an entry-to-upload link table) plus complete freshness coverage.
+- Add or remove no PostgreSQL index for this issue: measured snapshot SELECTs are milliseconds while candidate evaluation is seconds. The standalone `raw_marks(uploaded_file_id)` index may be structurally redundant with the unique `(uploaded_file_id, row_number)` prefix, but its cleanup is unrelated and unproven here.
 
 ## Verification
 - Reversible local PostgreSQL measurements restored batch/item/decision row counts after each harness.
@@ -132,6 +135,13 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Nomina/RevisarTest.php` passed: 19 tests, 149 assertions.
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 64 tests, 308 assertions.
 - `vendor/bin/pint app/Livewire/Nomina/Revisar.php app/Services/Attendance/OvertimeDecisionBatchRequester.php app/Services/Attendance/OvertimeDecisionBatchRequest.php tests/Feature/Nomina/RevisarTest.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- RED 500-candidate requester regression: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='durably requests 500 candidates with one item insert and hydrates them after commit'` failed because the query listener observed 500 item-table INSERT statements instead of one; the durable/default/fingerprint assertions preceding the query-count assertion passed.
+- GREEN 500-candidate requester regression: the same focused command passed with 15 assertions. It observed one item-table INSERT, 500 durable readable items with `pending` status, zero attempts, set timestamps, matching fingerprints independent of row order, and the first relation SELECT at the pre-request transaction level.
+- 501-candidate boundary triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejects more than 500 filtered overtime matches without creating a batch'` passed with 7 assertions and no batch row.
+- Requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed with 65 tests and 323 assertions.
+- `vendor/bin/pint app/Services/Attendance/OvertimeDecisionBatchRequester.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- Reversible PostgreSQL 249-candidate verification reduced item persistence from 249 INSERTs to one. Requester wall time was 50.564ms versus the 210.2ms `createMany()` baseline; item INSERT listener time was 15.370ms versus 83.42ms. The insert ran at the nested requester transaction level and relation hydration ran only after returning to the outer baseline transaction. All 249 rows were pending with zero attempts, matching fingerprints, and timestamps. Rollback restored 7 batches, 367 items, 367 decisions, zero jobs, and both affected sequence states exactly.
+- Read-only PostgreSQL period-35 evidence located the remaining canonical-read cost in PHP: 6,670.55ms wall and 15 queries/33.34ms DB time, with `forEachReview` alone taking 6,513.73ms and zero queries while producing 552 reviews, 249 overtime candidates, and 164 deficits. Five representative snapshot SELECTs totaled 2.887ms. Raw marks used bitmap scans on existing company and event-time indexes (1,191 rows, 2.173ms); decisions used rational sequential scans/hash anti-join over 367 rows (349 returned, 0.601ms). No index change is justified for the measured 7–16s path.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -145,6 +155,10 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `ef85bef perf(queue): preload overtime batch chunk context`
 - `2a0a921 docs(odd): record worker query improvement`
 - `105519d perf(attendance): resolve overtime batch selection once`
+- `b36dd69 docs(odd): link selection resolution work unit`
+- `106764f perf(attendance): bulk insert overtime batch items`
+- `8fc16d1 docs(odd): link batch insert work unit`
+- `ec087d5 docs(odd): record projection and index evidence`
 
 ## QA plan
 1. Load a representative payroll and open Review.

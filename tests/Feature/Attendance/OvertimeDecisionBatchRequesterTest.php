@@ -869,6 +869,68 @@ test('parent rejects a non-empty selection when its stored hash is stale', funct
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
     Queue::assertNothingPushed();
 });
+test('durably requests 500 candidates with one item insert and hydrates them after commit', function () {
+    $context = batchRequestFixture();
+    $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
+    $candidates = collect(range(1, 500))->map(fn (int $index) => new AttendanceSegment(
+        $review->analysis->overtimeCandidates->sole()->kind,
+        $review->analysis->overtimeCandidates->sole()->start,
+        $review->analysis->overtimeCandidates->sole()->end,
+        hash('sha256', "candidate-{$index}"),
+        $review->analysis->overtimeCandidates->sole()->rateMinutes,
+    ));
+    $analysis = new AttendanceShiftAnalysis(
+        $review->analysis->status, $review->analysis->workDate, $review->analysis->entryAt,
+        $review->analysis->exitAt, $review->analysis->workedMinutes, $review->analysis->scheduledMinutes,
+        $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
+    );
+    $bulkReview = new PayrollShiftReview(
+        $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
+        app(AttendanceDecisionMatcher::class),
+    );
+    $query = Mockery::mock(AttendanceReviewQuery::class);
+    $query->shouldReceive('forPeriod')->once()->andReturn(collect([$bulkReview]));
+    app()->instance(AttendanceReviewQuery::class, $query);
+    $targets = $candidates->map(fn (AttendanceSegment $candidate): array => [
+        'employee_id' => $review->employee->id,
+        'work_date' => $review->analysis->workDate->toDateString(),
+        'candidate_key' => $candidate->key,
+        'fingerprint' => $candidate->fingerprint,
+    ])->all();
+    $baselineTransactionLevel = DB::transactionLevel();
+    $itemInsertTransactionLevels = [];
+    $itemSelectTransactionLevels = [];
+    DB::listen(function ($query) use (&$itemInsertTransactionLevels, &$itemSelectTransactionLevels): void {
+        $sql = strtolower($query->sql);
+        if (str_starts_with(ltrim($sql), 'insert ') && str_contains($sql, 'into "overtime_decision_batch_items"')) {
+            $itemInsertTransactionLevels[] = DB::transactionLevel();
+        }
+        if (str_starts_with(ltrim($sql), 'select ') && str_contains($sql, 'from "overtime_decision_batch_items"')) {
+            $itemSelectTransactionLevels[] = DB::transactionLevel();
+        }
+    });
+
+    $batch = requestBatch($context, ['targets' => $targets, 'all' => true, 'selected' => []]);
+
+    $durableBatch = OvertimeDecisionBatch::withoutCompanyScope()->find($batch->id);
+    $persisted = OvertimeDecisionBatchItem::query()->where('batch_id', $batch->id)->get();
+    $expectedFingerprints = collect($targets)->pluck('fingerprint', 'candidate_key');
+    expect($durableBatch)->not->toBeNull()
+        ->and($durableBatch->status)->toBe(OvertimeDecisionBatch::QUEUED)
+        ->and($durableBatch->total_items)->toBe(500)
+        ->and($batch->total_items)->toBe(500)
+        ->and($batch->relationLoaded('items'))->toBeTrue()
+        ->and($batch->items)->toHaveCount(500)
+        ->and($persisted)->toHaveCount(500)
+        ->and($persisted->pluck('status')->unique()->values()->all())->toBe([OvertimeDecisionBatchItem::PENDING])
+        ->and($persisted->pluck('attempts')->unique()->values()->all())->toBe([0])
+        ->and($persisted->whereNull('created_at'))->toBeEmpty()
+        ->and($persisted->whereNull('updated_at'))->toBeEmpty()
+        ->and($persisted->pluck('fingerprint', 'candidate_key')->sortKeys()->all())
+        ->toBe($expectedFingerprints->sortKeys()->all())
+        ->and($itemInsertTransactionLevels)->toHaveCount(1)
+        ->and($itemSelectTransactionLevels[0] ?? null)->toBe($baselineTransactionLevel);
+});
 test('rejects more than 500 filtered overtime matches without creating a batch', function () {
     $context = batchRequestFixture();
     $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
