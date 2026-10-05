@@ -424,6 +424,106 @@ test('reports deterministic progress across three immediate chunks with a valida
         ->and($batch->items()->whereIn('status', ['succeeded', 'failed'])->count())->toBe($batch->total_items)
         ->and($batch->items()->where('status', 'failed')->sole()->last_error)->not->toBeNull();
 });
+test('processes 249 synthetic candidates in 13 immediate chunks with bounded invariant selects', function () {
+    $context = batchRequestFixture();
+    $targets = mockSyntheticPendingOvertimeReview($context, 249);
+    $batch = requestBatch($context, ['targets' => $targets, 'all' => true, 'selected' => []]);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
+
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $progress = Livewire::test(OvertimeBatchProgress::class, [
+        'payPeriod' => $context['period'], 'batchId' => $batch->id,
+    ])->assertSet('progress.total', 249)
+        ->assertSet('progress.terminal', false);
+
+    $processedItemIds = [];
+    $decision = Mockery::mock(OvertimeDecision::class);
+    $recorder = Mockery::mock(OvertimeDecisionRecorder::class);
+    $recorder->shouldReceive('decide')->times(249)->andReturnUsing(
+        function (...$arguments) use (&$processedItemIds, $decision): OvertimeDecision {
+            $processedItemIds[] = $arguments[7];
+
+            return $decision;
+        },
+    );
+    $schedulerQueries = collect();
+    $captureSchedulerQueries = true;
+    DB::listen(function ($query) use ($schedulerQueries, &$captureSchedulerQueries): void {
+        if ($captureSchedulerQueries) {
+            $schedulerQueries->push(strtolower($query->sql));
+        }
+    });
+
+    foreach (range(1, 13) as $invocation) {
+        $job = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+        $job->handle($recorder);
+
+        if ($invocation < 13) {
+            $job->assertReleased(0);
+        } else {
+            $job->assertNotReleased();
+        }
+    }
+    $captureSchedulerQueries = false;
+
+    $selects = $schedulerQueries->filter(fn (string $sql): bool => str_starts_with(ltrim($sql), 'select '));
+    $employeeSelects = $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "employees"'));
+    $invariantSelects = [
+        'batch.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "overtime_decision_batches"'))->count(),
+        'actor.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "users"'))->count(),
+        'period.select' => $selects->filter(fn (string $sql): bool => str_contains($sql, 'from "pay_periods"'))->count(),
+        'employee.select' => $employeeSelects->count(),
+        'employee.where_in' => $employeeSelects->filter(fn (string $sql): bool => str_contains($sql, ' in ('))->count(),
+    ];
+    $items = $batch->items()->orderBy('id')->get();
+    $terminalBatch = $batch->fresh();
+
+    expect($schedulerQueries->count())->toBeLessThanOrEqual(369)
+        ->and($invariantSelects)->toBe([
+            'batch.select' => 39,
+            'actor.select' => 13,
+            'period.select' => 13,
+            'employee.select' => 13,
+            'employee.where_in' => 13,
+        ])
+        ->and($processedItemIds)->toHaveCount(249)
+        ->and(collect($processedItemIds)->unique())->toHaveCount(249)
+        ->and(collect($processedItemIds)->sort()->values()->all())->toBe($items->modelKeys())
+        ->and($items)->toHaveCount(249)
+        ->and($items->pluck('status')->unique()->values()->all())->toBe([OvertimeDecisionBatchItem::SUCCEEDED])
+        ->and($items->min('attempts'))->toBe(1)
+        ->and($items->max('attempts'))->toBe(1)
+        ->and($items->sum('attempts'))->toBe(249)
+        ->and($items->whereIn('status', [
+            OvertimeDecisionBatchItem::PENDING,
+            OvertimeDecisionBatchItem::PROCESSING,
+            OvertimeDecisionBatchItem::FAILED,
+        ]))->toBeEmpty()
+        ->and($terminalBatch->status)->toBe(OvertimeDecisionBatch::COMPLETED)
+        ->and($terminalBatch->created_at)->not->toBeNull()
+        ->and($terminalBatch->started_at)->not->toBeNull()
+        ->and($terminalBatch->finished_at)->not->toBeNull()
+        ->and($terminalBatch->last_error)->toBeNull()
+        ->and(OvertimeDecision::query()->count())->toBe(0);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
+
+    $progress->call('poll')
+        ->assertSet('progress.total', 249)
+        ->assertSet('progress.succeeded', 249)
+        ->assertSet('progress.failed', 0)
+        ->assertSet('progress.completed', 249)
+        ->assertSet('progress.pending', 0)
+        ->assertSet('progress.processing', 0)
+        ->assertSet('progress.remaining', 0)
+        ->assertSet('progress.percentage', 100)
+        ->assertSet('progress.terminal', true)
+        ->assertDontSeeHtml('wire:poll.3s="poll"')
+        ->assertDispatched('overtime-batch-terminal', batchId: $batch->id);
+
+    $progress->call('poll')
+        ->assertNotDispatched('overtime-batch-terminal');
+});
 test('returns the original batch for an exact idempotent retry', function () {
     $context = batchRequestFixture();
     $key = (string) Str::uuid();
@@ -871,32 +971,7 @@ test('parent rejects a non-empty selection when its stored hash is stale', funct
 });
 test('durably requests 500 candidates with one item insert and hydrates them after commit', function () {
     $context = batchRequestFixture();
-    $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
-    $candidates = collect(range(1, 500))->map(fn (int $index) => new AttendanceSegment(
-        $review->analysis->overtimeCandidates->sole()->kind,
-        $review->analysis->overtimeCandidates->sole()->start,
-        $review->analysis->overtimeCandidates->sole()->end,
-        hash('sha256', "candidate-{$index}"),
-        $review->analysis->overtimeCandidates->sole()->rateMinutes,
-    ));
-    $analysis = new AttendanceShiftAnalysis(
-        $review->analysis->status, $review->analysis->workDate, $review->analysis->entryAt,
-        $review->analysis->exitAt, $review->analysis->workedMinutes, $review->analysis->scheduledMinutes,
-        $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
-    );
-    $bulkReview = new PayrollShiftReview(
-        $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
-        app(AttendanceDecisionMatcher::class),
-    );
-    $query = Mockery::mock(AttendanceReviewQuery::class);
-    $query->shouldReceive('forPeriod')->once()->andReturn(collect([$bulkReview]));
-    app()->instance(AttendanceReviewQuery::class, $query);
-    $targets = $candidates->map(fn (AttendanceSegment $candidate): array => [
-        'employee_id' => $review->employee->id,
-        'work_date' => $review->analysis->workDate->toDateString(),
-        'candidate_key' => $candidate->key,
-        'fingerprint' => $candidate->fingerprint,
-    ])->all();
+    $targets = mockSyntheticPendingOvertimeReview($context, 500);
     $baselineTransactionLevel = DB::transactionLevel();
     $itemInsertTransactionLevels = [];
     $itemSelectTransactionLevels = [];
@@ -933,26 +1008,7 @@ test('durably requests 500 candidates with one item insert and hydrates them aft
 });
 test('rejects more than 500 filtered overtime matches without creating a batch', function () {
     $context = batchRequestFixture();
-    $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
-    $candidates = collect(range(1, 501))->map(fn (int $index) => new AttendanceSegment(
-        $review->analysis->overtimeCandidates->sole()->kind,
-        $review->analysis->overtimeCandidates->sole()->start,
-        $review->analysis->overtimeCandidates->sole()->end,
-        hash('sha256', "candidate-{$index}"),
-        $review->analysis->overtimeCandidates->sole()->rateMinutes,
-    ));
-    $analysis = new AttendanceShiftAnalysis(
-        $review->analysis->status, $review->analysis->workDate, $review->analysis->entryAt,
-        $review->analysis->exitAt, $review->analysis->workedMinutes, $review->analysis->scheduledMinutes,
-        $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
-    );
-    $bulkReview = new PayrollShiftReview(
-        $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
-        app(AttendanceDecisionMatcher::class),
-    );
-    $query = Mockery::mock(AttendanceReviewQuery::class);
-    $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));
-    app()->instance(AttendanceReviewQuery::class, $query);
+    mockSyntheticPendingOvertimeReview($context, 501, expectedCalls: null);
     app(CurrentCompany::class)->set($context['company']);
     overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
@@ -1106,6 +1162,40 @@ test('clears only a verified unavailable active batch from the parent', function
     $component->dispatch('overtime-batch-unavailable', batchId: $batch->id)
         ->assertSet('activeOvertimeBatchId', null);
 });
+function mockSyntheticPendingOvertimeReview(array $context, int $candidateCount, ?int $expectedCalls = 1): array
+{
+    $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
+    $prototype = $review->analysis->overtimeCandidates->sole();
+    $candidates = collect(range(1, $candidateCount))->map(fn (int $index) => new AttendanceSegment(
+        $prototype->kind,
+        $prototype->start,
+        $prototype->end,
+        hash('sha256', "candidate-{$index}"),
+        $prototype->rateMinutes,
+    ));
+    $analysis = new AttendanceShiftAnalysis(
+        $review->analysis->status, $review->analysis->workDate, $review->analysis->entryAt,
+        $review->analysis->exitAt, $review->analysis->workedMinutes, $review->analysis->scheduledMinutes,
+        $review->analysis->scheduledRates, $review->analysis->deficits, $candidates,
+    );
+    $bulkReview = new PayrollShiftReview(
+        $review->employee, $review->occurrence, $analysis, collect(), collect(), collect(),
+        app(AttendanceDecisionMatcher::class),
+    );
+    $query = Mockery::mock(AttendanceReviewQuery::class);
+    $expectation = $query->shouldReceive('forPeriod')->andReturn(collect([$bulkReview]));
+    if ($expectedCalls !== null) {
+        $expectation->times($expectedCalls);
+    }
+    app()->instance(AttendanceReviewQuery::class, $query);
+
+    return $candidates->map(fn (AttendanceSegment $candidate): array => [
+        'employee_id' => $review->employee->id,
+        'work_date' => $review->analysis->workDate->toDateString(),
+        'candidate_key' => $candidate->key,
+        'fingerprint' => $candidate->fingerprint,
+    ])->all();
+}
 function requestBatch(array $context, array $overrides = []): OvertimeDecisionBatch
 {
     $targets = $overrides['targets'] ?? [batchTarget($context)];
