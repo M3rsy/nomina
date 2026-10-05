@@ -706,9 +706,12 @@ test('accepted batches close their modal while recorded batches refresh terminal
         ->assertSet('allFilteredOvertimeSelected', false)
         ->assertSet('overtimeBatchDecision', '')
         ->assertSet('overtimeBatchReason', '')
-        ->assertSet('overtimeBatchRequestKey', '');
+        ->assertSet('overtimeBatchRequestKey', '')
+        ->assertSet('overtimeBatchSelection', '')
+        ->assertSet('overtimeBatchCount', 0)
+        ->assertSet('overtimeBatchFilterSummary', '');
 
-    expect($component->effects)->toHaveKey('html');
+    expect($component->effects)->not->toHaveKey('html');
 
     $component
         ->set('paginators.overtimePage', 2)
@@ -716,6 +719,23 @@ test('accepted batches close their modal while recorded batches refresh terminal
         ->dispatch('overtime-batch-recorded')
         ->assertSet('paginators.overtimePage', 1)
         ->assertSet('selectedOvertimeCandidates', []);
+
+    expect($component->effects)->toHaveKey('html');
+});
+test('rejected batches keep the modal open and render their validation message', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $message = 'La selección cambió. Revísela antes de continuar.';
+
+    $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
+        ->call('selectCurrentOvertimePage')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->assertSet('showOvertimeBatchModal', true)
+        ->dispatch('overtime-batch-rejected', message: $message)
+        ->assertSet('showOvertimeBatchModal', true)
+        ->assertHasErrors(['selectedOvertimeCandidates'])
+        ->assertSee($message);
 
     expect($component->effects)->toHaveKey('html');
 });

@@ -32,6 +32,11 @@ The feature branch inherits evidence and fixes from:
 - On `main`, `requestOvertimeBatchFromPanel` is not renderless and `submitOvertimeBatch` rescans before dispatch.
 - Current worker processes 20 items per execution and releases normal continuation with the same 10-second error backoff.
 
+## Accepted-modal follow-up diagnosis
+Real batch #14 processed 249/249 items successfully in 13 chunks. During its 2m53s window, 58 Livewire updates completed with HTTP 200 responses at a 72ms median, plus one 14.253s outlier compatible with a heavyweight `OvertimeReviewPanel` render. This is diagnosis evidence, not causal proof: the existing tests cover the event descriptor and isolated PHP state, not real multi-component browser DOM timing.
+
+The installed Livewire client proves targeted events do not bubble: `vendor/livewire/livewire/dist/livewire.esm.js:9250-9254` dispatches to `target.el` with the bubbling argument set to `false`, and `vendor/livewire/livewire/dist/livewire.esm.js:9272-9277` creates the event with `{ bubbles: false }`. Therefore a modal-local `x-on:overtime-batch-accepted.window` listener cannot receive the parent event targeted to `OvertimeReviewPanel`. The component root must catch that event directly and bridge it to a distinct bubbling Alpine event for the modal-local window latch.
+
 ## Hypotheses to validate
 1. Normal successful chunk continuation adds about 120 seconds of avoidable idle time for 249 items.
 2. Parent resolution and requester snapshot construction still calculate the period more than once before enqueue.
@@ -84,16 +89,19 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Shorten the requester critical transaction and evaluate safe bulk item insertion; retain the authoritative scan under the period lock until every candidate dependency has a shared revision contract.
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [x] Improve progress/error/worker-stalled observability and loading target isolation.
+- [x] Close the accepted batch modal without triggering a heavyweight panel render; preserve rejection visibility.
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [x] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
-- [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
+- [x] Run related automated suites, review each work unit, push the stack, and open the linked PRs.
+- [x] Complete the post-modal manual QA; the user confirmed it passed before authorizing the ordered merge.
 
 ## Decisions
 - The domain batch tables remain the source of truth even if Laravel `Bus::batch()` is evaluated later.
 - Start serial and remove idle time before considering 2–4 controlled workers.
 - A batch is accepted when durable rows commit; overtime decisions are recorded only when items reach terminal processing.
 - Current follow-up commits are retained as prerequisite evidence rather than reimplemented.
-- Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice must name its predecessor and remain independently reviewable.
+- Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice names its predecessor and remains independently reviewable.
+- The user explicitly authorized `size:exception` for PR #401 at 494 changed lines because its typed request, requester migration, parent integration, and regression tests form one atomic API change; every other slice is at or below 286 changed lines.
 - Keep `payroll_review_entries` as a UI/cache source, not the authoritative batch-request source. Its generation/build/read steps are not one atomic revision and omit snapshot dependencies such as fact generations and vacation inputs.
 - Do not project `uploaded_file_id` by candidate ownership. Current semantics retain an entire shift occurrence when any contributing mark came from the file, including every candidate in a mixed-file occurrence. Exact projection support would require generation-owned occurrence/upload membership (for example, an entry-to-upload link table) plus complete freshness coverage.
 - Add or remove no PostgreSQL index for this issue: measured snapshot SELECTs are milliseconds while candidate evaluation is seconds. The standalone `raw_marks(uploaded_file_id)` index may be structurally redundant with the unique `(uploaded_file_id, row_number)` prefix, but its cleanup is unrelated and unproven here.
@@ -156,6 +164,37 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed in 39.85s: 66 tests, 383 assertions.
 - `vendor/bin/pint tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 - `git diff --check` passed with no output; the pre-existing `package-lock.json` modification remains untouched.
+- Accepted-modal RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='accepted batches close their modal while recorded batches refresh terminal data'` failed because the accepted listener response still contained an HTML effect after all server modal fields and selection state were reset (1 failed test, 9 assertions before failure).
+- Accepted-modal GREEN: the same focused command passed after making only `acceptOvertimeBatch()` renderless (1 test, 15 assertions). The recorded/terminal listener remained renderful.
+- Rejection triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejected batches keep the modal open and render their validation message'` passed (1 test, 7 assertions); the modal remained open, exposed the validation message, and returned an HTML effect.
+- Initial structural/loading coverage: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed (1 test, 23 assertions), but it incorrectly treated the targeted accepted event as observable at `window`; installed Livewire non-bubbling behavior invalidated that assertion.
+- Requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed (67 tests, 394 assertions).
+- `vendor/bin/pint app/Livewire/Nomina/OvertimeReviewPanel.php resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed.
+- Accepted-modal follow-up: `git diff --check` passed with no output; the unrelated `package-lock.json` modification remains untouched.
+- Event-bridge RED: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` failed after requiring the component root to catch `overtime-batch-accepted` directly and dispatch a distinct `overtime-batch-modal-close` event; the old markup only had the unreachable accepted-event window listener (1 failed test, 11 assertions before failure).
+- Event-bridge GREEN: the same UI command passed (1 test, 25 assertions) after adding both bridge halves and excluding accepted/rejected window listeners.
+- Alpine-root activation RED/GREEN: the UI command then failed while requiring `x-data` on the component root (1 failed test, 11 assertions before failure), and passed again (1 test, 25 assertions) after the root became an Alpine scope for its direct event listener.
+- Event-bridge acceptance/rejection checks passed independently: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='accepted batches close their modal while recorded batches refresh terminal data'` passed (1 test, 15 assertions), and `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejected batches keep the modal open and render their validation message'` passed (1 test, 7 assertions).
+- Event-bridge requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed (67 tests, 394 assertions).
+- `vendor/bin/pint resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed.
+- Event-bridge correction: `git diff --check` passed with no output; the unrelated `package-lock.json` modification remains untouched.
+- Independent event-bridge verification confirmed Livewire 3.8.2 targets the component root with `bubbles=false`, Alpine catches that event directly on the root, and the distinct close event bubbles to the modal-local window listener. Focused acceptance/rejection passed with 2 tests and 22 assertions; UI structure passed with 1 test and 25 assertions; the full requester suite passed with 67 tests and 394 assertions; focused Pint, LSP diagnostics, and `git diff --check` passed.
+- Live GitHub delivery verification confirmed issue #396 is open with `status:approved`, no prior PR for the issue existed, all nine branch names were free, and the unrelated local `package-lock.json` change remained excluded.
+- PR #397 targets `main`; PRs #398–#405 are drafts with clean predecessor-branch diffs. The repository workflow runs only for `main`/`master` and selected legacy bases, so each draft must be retargeted to `main` after its predecessor merges before checks/review. At publication, #397 PostgreSQL had passed and Pest was still running.
+- Final manual post-modal QA passed per the user's direct confirmation before merge authorization; the nine PRs must still merge in order with each successor retargeted and checked against `main`.
+
+## Pull request stack
+| Position | PR | Base | Head | Changed lines | Labels | State |
+| --- | --- | --- | --- | ---: | --- | --- |
+| 1 | #397 | `main` | `perf/overtime-request-latency` | 286 | `type:feature` | Ready |
+| 2 | #398 | `perf/overtime-request-latency` | `fix/overtime-all-filtered-selection` | 211 | `type:bug` | Draft |
+| 3 | #399 | `fix/overtime-all-filtered-selection` | `refactor/overtime-batch-lifecycle` | 282 | `type:refactor` | Draft |
+| 4 | #400 | `refactor/overtime-batch-lifecycle` | `perf/overtime-worker-context` | 160 | `type:feature` | Draft |
+| 5 | #401 | `perf/overtime-worker-context` | `perf/overtime-single-resolution` | 494 | `type:feature`, `size:exception` | Draft |
+| 6 | #402 | `perf/overtime-single-resolution` | `perf/overtime-bulk-insert` | 97 | `type:feature` | Draft |
+| 7 | #403 | `perf/overtime-bulk-insert` | `feat/overtime-batch-observability` | 286 | `type:feature` | Draft |
+| 8 | #404 | `feat/overtime-batch-observability` | `test/overtime-batch-scale` | 194 | `type:chore` | Draft |
+| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 84 | `type:bug` | Draft |
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -177,6 +216,10 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `cda04ff feat(nomina): surface overtime batch activity`
 - `ee538d1 docs(odd): link batch activity work unit`
 - `57241e8 test(attendance): cover overtime batch scale`
+- `c9a88c4 docs(odd): link batch scale work unit`
+- `92ba44d fix(nomina): close accepted batch modal`
+- `59b4477 docs(odd): link accepted modal work unit`
+- `43b8ff3 docs(odd): record stacked pull requests`
 
 ## QA plan
 1. Load a representative payroll and open Review.
@@ -189,7 +232,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 8. Exercise double click, invalid candidate, partial failure, 500 candidates, 501 candidates, approval, and rejection.
 
 ## Results
-- Issue #396 is approved and tracks the complete outcome.
+- Issue #396 is approved and tracks the complete outcome; PRs #397–#405 publish the nine-slice stack without merging it.
 - Baseline confirms normal continuation delay, per-item invariant N+1 loads, opt-in worker risk, long requester lock scope, upload-filter projection incompatibility, and acceptance/terminal event ambiguity.
 - Durable enqueue now emits `overtime-batch-accepted` to the review panel and preserves `overtime-batch-started` for isolated progress without emitting the terminal `overtime-batch-recorded` event.
 - The accepted event closes and clears batch modal/selection state; `overtime-batch-recorded` remains the terminal panel refresh event.
@@ -203,4 +246,5 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - The public renderless submit action now captures raw marks once instead of twice and preserves accepted/started event semantics without an HTML effect.
 - Overtime progress now exposes lifecycle timestamps, latest batch/item activity, batch errors, and queued-versus-processing delay reasons. Spanish UI labels and warnings remain truthful: inactivity suggests checking the queue worker if unchanged but does not claim it stopped.
 - Batch approve/reject open controls target only their exact action; confirmation and cancellation target only `submitOvertimeBatch`, while selection controls remain untargeted.
+- Durable acceptance now resets modal and selection state in a renderless panel listener. The Alpine-scoped panel root catches Livewire's targeted, non-bubbling accepted event directly and dispatches the distinct bubbling `overtime-batch-modal-close` event; the modal-local Alpine latch closes from that bridge event at window scope. Rejection remains renderful, keeps the modal open, and displays the server validation message without touching the close latch.
 - Idempotency payload validation remains ahead of candidate resolution. Exact retries after completed decisions recover with zero raw-mark captures, while every selection input is bound to the stored payload hash.

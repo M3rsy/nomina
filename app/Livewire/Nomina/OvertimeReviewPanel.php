@@ -12,6 +12,7 @@ use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Reactive;
+use Livewire\Attributes\Renderless;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -233,6 +234,7 @@ class OvertimeReviewPanel extends Component
     }
 
     #[On('overtime-batch-accepted')]
+    #[Renderless]
     public function acceptOvertimeBatch(): void
     {
         $this->closeOvertimeBatchModal();
