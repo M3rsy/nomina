@@ -20,6 +20,7 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class EmployeeBulkImportService
@@ -201,6 +202,12 @@ class EmployeeBulkImportService
             ];
             foreach ($example as $index => $value) {
                 $sheet->getCell(Coordinate::stringFromColumnIndex($index + 1).'2')->setValueExplicit((string) $value, DataType::TYPE_STRING);
+            }
+            $dateRangeEnd = self::MAX_IMPORT_DATA_ROWS + 1;
+            foreach (['C', 'H'] as $dateColumn) {
+                $sheet->getStyle("{$dateColumn}2:{$dateColumn}{$dateRangeEnd}")
+                    ->getNumberFormat()
+                    ->setFormatCode(NumberFormat::FORMAT_TEXT);
             }
             $sheet->getStyle('A1:M2')->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
             $sheet->freezePane('A2');
