@@ -26,10 +26,16 @@ Add an official Excel template and bulk employee upload flow to the Employees mo
 - [x] 4. Cover the flow with feature tests
   - Evidence: `tests/Feature/Empleados/EmployeeBulkImportTest.php` covers template download, successful import, required-field validation, duplicate protection, strict date validation, workbook row and column limits, and permission boundaries.
 
+- [x] 5. Protect downloaded template date columns from Excel serial upload failures
+  - Evidence: the official workbook keeps example date cells as explicit strings and formats date-entry ranges `C2:C1001` and `H2:H1001` as text (`@`) so editing and re-uploading does not turn them into unparseable serials.
+  - Files: `app/Services/Employees/EmployeeBulkImportService.php`, `tests/Feature/Empleados/EmployeeBulkImportTest.php`.
+
 ## Verification
 - Passed: `lerd php ./vendor/bin/pint --test app/Services/Employees/EmployeeBulkImportService.php tests/Feature/Empleados/EmployeeBulkImportTest.php`.
-- Passed: `lerd php artisan test tests/Feature/Empleados/EmployeeBulkImportTest.php` — 9 passed, 44 assertions, including row and column limit rejection.
-- Passed: `lerd php artisan test tests/Feature/Empleados/EmployeeCrudTest.php` — 21 passed, 107 assertions.
+- Passed: `lerd php artisan test tests/Feature/Empleados/EmployeeBulkImportTest.php --filter="authorized employee creator can download the official Excel template"` — 1 test, 11 assertions.
+- Passed: `lerd php artisan test tests/Feature/Empleados/EmployeeBulkImportTest.php` — 12 tests, 83 assertions.
+- Passed: `git diff --check -- app/Services/Employees/EmployeeBulkImportService.php tests/Feature/Empleados/EmployeeBulkImportTest.php odd/tasks/employee-bulk-import-template.md`.
+- Historical passed: `lerd php artisan test tests/Feature/Empleados/EmployeeCrudTest.php` — 21 passed, 107 assertions.
 
 ## Work-unit commits
-- Not committed; user did not authorize commits.
+- `72085d4` — `fix(employees): preserve template date columns as text`.

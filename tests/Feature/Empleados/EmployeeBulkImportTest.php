@@ -11,6 +11,8 @@ use Database\Seeders\PermissionRoleSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile as LaravelUploadedFile;
 use Livewire\Livewire;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
@@ -61,7 +63,26 @@ test('authorized employee creator can download the official Excel template', fun
 
     $response->assertOk();
     $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    expect($response->streamedContent())->not->toBe('');
+
+    $temporaryFile = tmpfile();
+    fwrite($temporaryFile, $response->streamedContent());
+    fflush($temporaryFile);
+    $reader = IOFactory::createReader('Xlsx');
+    $reader->setReadDataOnly(false);
+    $spreadsheet = $reader->load(stream_get_meta_data($temporaryFile)['uri']);
+    $sheet = $spreadsheet->getSheetByName('Empleados');
+
+    expect($sheet->getCell('C2')->getValue())->toBe('2026-01-15')
+        ->and($sheet->getCell('C2')->getDataType())->toBe(DataType::TYPE_STRING)
+        ->and($sheet->getCell('H2')->getValue())->toBe('1990-05-20')
+        ->and($sheet->getCell('H2')->getDataType())->toBe(DataType::TYPE_STRING)
+        ->and($sheet->getStyle('C2')->getNumberFormat()->getFormatCode())->toBe('@')
+        ->and($sheet->getStyle('H2')->getNumberFormat()->getFormatCode())->toBe('@')
+        ->and($sheet->getStyle('C1001')->getNumberFormat()->getFormatCode())->toBe('@')
+        ->and($sheet->getStyle('H1001')->getNumberFormat()->getFormatCode())->toBe('@');
+
+    $spreadsheet->disconnectWorksheets();
+    fclose($temporaryFile);
 });
 
 test('employee import creates employees and schedule assignments', function () {
