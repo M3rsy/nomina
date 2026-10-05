@@ -151,6 +151,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `ef85bef perf(queue): preload overtime batch chunk context`
 - `2a0a921 docs(odd): record worker query improvement`
 - `105519d perf(attendance): resolve overtime batch selection once`
+- `b36dd69 docs(odd): link selection resolution work unit`
+- `106764f perf(attendance): bulk insert overtime batch items`
 
 ## QA plan
 1. Load a representative payroll and open Review.
