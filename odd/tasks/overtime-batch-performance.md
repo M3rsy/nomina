@@ -166,6 +166,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `106764f perf(attendance): bulk insert overtime batch items`
 - `8fc16d1 docs(odd): link batch insert work unit`
 - `ec087d5 docs(odd): record projection and index evidence`
+- `d209c51 docs(odd): link projection evidence work unit`
+- `cda04ff feat(nomina): surface overtime batch activity`
 
 ## QA plan
 1. Load a representative payroll and open Review.
