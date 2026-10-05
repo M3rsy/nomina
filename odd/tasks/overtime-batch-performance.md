@@ -93,7 +93,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [x] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
 - [x] Run related automated suites, review each work unit, push the stack, and open the linked PRs.
-- [ ] Complete the user-deferred post-modal manual QA, then retarget and merge the stack in order.
+- [x] Complete the post-modal manual QA; the user confirmed it passed before authorizing the ordered merge.
 
 ## Decisions
 - The domain batch tables remain the source of truth even if Laravel `Bus::batch()` is evaluated later.
@@ -181,6 +181,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Independent event-bridge verification confirmed Livewire 3.8.2 targets the component root with `bubbles=false`, Alpine catches that event directly on the root, and the distinct close event bubbles to the modal-local window listener. Focused acceptance/rejection passed with 2 tests and 22 assertions; UI structure passed with 1 test and 25 assertions; the full requester suite passed with 67 tests and 394 assertions; focused Pint, LSP diagnostics, and `git diff --check` passed.
 - Live GitHub delivery verification confirmed issue #396 is open with `status:approved`, no prior PR for the issue existed, all nine branch names were free, and the unrelated local `package-lock.json` change remained excluded.
 - PR #397 targets `main`; PRs #398–#405 are drafts with clean predecessor-branch diffs. The repository workflow runs only for `main`/`master` and selected legacy bases, so each draft must be retargeted to `main` after its predecessor merges before checks/review. At publication, #397 PostgreSQL had passed and Pest was still running.
+- Final manual post-modal QA passed per the user's direct confirmation before merge authorization; the nine PRs must still merge in order with each successor retargeted and checked against `main`.
 
 ## Pull request stack
 | Position | PR | Base | Head | Changed lines | Labels | State |
@@ -193,7 +194,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 | 6 | #402 | `perf/overtime-single-resolution` | `perf/overtime-bulk-insert` | 97 | `type:feature` | Draft |
 | 7 | #403 | `perf/overtime-bulk-insert` | `feat/overtime-batch-observability` | 286 | `type:feature` | Draft |
 | 8 | #404 | `feat/overtime-batch-observability` | `test/overtime-batch-scale` | 194 | `type:chore` | Draft |
-| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 83 | `type:bug` | Draft |
+| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 84 | `type:bug` | Draft |
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
