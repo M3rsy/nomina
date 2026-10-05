@@ -85,7 +85,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [x] Improve progress/error/worker-stalled observability and loading target isolation.
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
-- [ ] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
+- [x] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
 - [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
 
 ## Decisions
@@ -98,6 +98,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Do not project `uploaded_file_id` by candidate ownership. Current semantics retain an entire shift occurrence when any contributing mark came from the file, including every candidate in a mixed-file occurrence. Exact projection support would require generation-owned occurrence/upload membership (for example, an entry-to-upload link table) plus complete freshness coverage.
 - Add or remove no PostgreSQL index for this issue: measured snapshot SELECTs are milliseconds while candidate evaluation is seconds. The standalone `raw_marks(uploaded_file_id)` index may be structurally redundant with the unique `(uploaded_file_id, row_number)` prefix, but its cleanup is unrelated and unproven here.
 - Treat 30 seconds without batch or item activity as an observability heuristic only. The payload distinguishes queued and processing delay reasons, keeps the durable batch status authoritative, and continues polling every nonterminal batch.
+- The 249-item regression characterizes already-implemented scale behavior. A meaningful RED is not expected; the first focused execution must establish GREEN evidence without production changes or wall-time thresholds.
 
 ## Verification
 - Reversible local PostgreSQL measurements restored batch/item/decision row counts after each harness.
@@ -149,6 +150,12 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Loading-target GREEN: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed with 1 test and 21 assertions.
 - Progress integration triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='reports deterministic progress|renders actor scoped batch progress|stops isolated polling'` passed with 3 tests and 47 assertions.
 - `vendor/bin/pint --test app/Livewire/Nomina/OvertimeBatchProgress.php resources/views/livewire/nomina/overtime-batch-progress.blade.php resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Nomina/OvertimeBatchProgressTest.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed after fixing test import ordering.
+- Scale characterization RED: not applicable because the optimized 249-item behavior was already implemented; no production change was permitted or needed. The first focused execution was GREEN: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='processes 249 synthetic candidates in 13 immediate chunks with bounded invariant selects'` passed in 1.07s with 60 assertions.
+- The focused 249-item verification rerun passed in 1.04s with 61 assertions. It observed 369 scheduler queries under an upper bound of 369 and asserted category counts of 39 batch SELECTs plus 13 actor, 13 period, and 13 employee `where in` SELECTs across 13 chunks. It also proved 12 zero-second releases, a non-released terminal invocation, 249 unique successful recorder calls, one attempt per item, terminal progress at 249/249 and 100%, stopped polling, and once-only terminal notification.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='durably requests 500 candidates with one item insert and hydrates them after commit|rejects more than 500 filtered overtime matches without creating a batch'` passed in 1.15s: 2 tests, 22 assertions. The exact 500 acceptance/one-INSERT and 501 rejection boundaries remain covered through the shared synthetic-review helper.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed in 39.85s: 66 tests, 383 assertions.
+- `vendor/bin/pint tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- `git diff --check` passed with no output; the pre-existing `package-lock.json` modification remains untouched.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -168,6 +175,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `ec087d5 docs(odd): record projection and index evidence`
 - `d209c51 docs(odd): link projection evidence work unit`
 - `cda04ff feat(nomina): surface overtime batch activity`
+- `ee538d1 docs(odd): link batch activity work unit`
+- `57241e8 test(attendance): cover overtime batch scale`
 
 ## QA plan
 1. Load a representative payroll and open Review.
@@ -189,6 +198,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Each worker invocation claims a bounded chunk transactionally, loads batch/actor/period once, loads employees with one `whereIn`, and leaves recorder/PayrollContextLocker revalidation authoritative per item.
 - The worker now claims and increments up to 20 items in one batch-row transaction, preserving processing-before-pending recovery order. It then loads batch, actor, and period once and all unique employees in one `whereIn` query; recorder-level batch/actor revalidation and payroll locking remain authoritative.
 - The deterministic SQLite `handle()` seam regression reduced a full mocked-recorder chunk from 165 to 32 queries, with batch SELECTs reduced from 41 to 3 and actor, period, and employee SELECTs reduced from 20 each to 1 each.
+- The deterministic test-only 249-item scale regression uses one synthetic review and the public requester, then drives 13 manual mocked-recorder chunks. It preserves the one acceptance dispatch, creates no decisions, releases only the 12 nonterminal chunks at zero seconds, and confirms invariant SELECTs scale with chunks rather than items.
 - `OvertimeDecisionBatchRequester` now owns the authoritative filtered pending-target resolution through a typed request value; the parent validates only the untrusted intent shape and no longer scans candidates or computes confirmation hashes.
 - The public renderless submit action now captures raw marks once instead of twice and preserves accepted/started event semantics without an HTML effect.
 - Overtime progress now exposes lifecycle timestamps, latest batch/item activity, batch errors, and queued-versus-processing delay reasons. Spanish UI labels and warnings remain truthful: inactivity suggests checking the queue worker if unchanged but does not claim it stopped.
