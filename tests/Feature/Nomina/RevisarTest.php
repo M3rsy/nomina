@@ -596,17 +596,25 @@ test('batch request accepts durable work without claiming decisions are recorded
         'candidates' => [$token.'|'.$targets->sole()['fingerprint']],
     ], JSON_THROW_ON_ERROR));
 
-    $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
-        ->call('requestOvertimeBatchFromPanel', [
-            'decision' => OvertimeDecision::APPROVED,
-            'reason' => 'Approved after review',
-            'request_key' => (string) Str::uuid(),
-            'selection' => $selection,
-            'filters' => $filters,
-            'all' => false,
-            'selected' => [$token],
-        ])
-        ->assertHasNoErrors();
+    $rawMarkCaptures = 0;
+    $captureActionQueries = false;
+    DB::listen(function ($query) use (&$rawMarkCaptures, &$captureActionQueries): void {
+        if ($captureActionQueries && str_contains($query->sql, 'from "raw_marks"')) {
+            $rawMarkCaptures++;
+        }
+    });
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $period]);
+    $captureActionQueries = true;
+    $component->call('requestOvertimeBatchFromPanel', [
+        'decision' => OvertimeDecision::APPROVED,
+        'reason' => 'Approved after review',
+        'request_key' => (string) Str::uuid(),
+        'selection' => $selection,
+        'filters' => $filters,
+        'all' => false,
+        'selected' => [$token],
+    ])->assertHasNoErrors();
+    $captureActionQueries = false;
     $batch = OvertimeDecisionBatch::withoutCompanyScope()->sole();
 
     $component
@@ -619,7 +627,8 @@ test('batch request accepts durable work without claiming decisions are recorded
         ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-accepted')
         ->assertNotDispatched('overtime-batch-recorded');
 
-    expect($component->effects)->not->toHaveKey('html');
+    expect($rawMarkCaptures)->toBe(1)
+        ->and($component->effects)->not->toHaveKey('html');
 });
 
 test('all-filtered batch accepts an empty explicit selection without rendering the payroll review', function () {

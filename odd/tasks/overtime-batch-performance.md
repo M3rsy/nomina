@@ -80,7 +80,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Capture a reproducible baseline for request, transaction, insert, chunk, render, scan, and snapshot behavior.
 - [x] Separate batch acceptance events from terminal refresh and keep isolated progress mounted.
 - [x] Remove artificial normal continuation delay while preserving transient-error backoff.
-- [ ] Reduce duplicate candidate resolution to one authoritative path.
+- [x] Reduce duplicate candidate resolution to one authoritative path.
 - [ ] Shorten the requester critical transaction and evaluate safe bulk item insertion.
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [ ] Improve progress/error/worker-stalled observability and loading target isolation.
@@ -125,6 +125,13 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Lifecycle triangulation covering revoked authorization, infrastructure failure, bounded continuation, and a validation failure passed: 4 tests, 49 assertions.
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 59 tests, 283 assertions.
 - `vendor/bin/pint app/Jobs/ProcessOvertimeDecisionBatch.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- RED selection-resolution regression: `php artisan test tests/Feature/Nomina/RevisarTest.php --filter='batch request accepts durable work without claiming decisions are recorded'` failed because the submit action captured raw marks twice instead of once (1 failed test, 8 assertions before failure).
+- GREEN selection-resolution regression: the same focused command passed with 9 assertions after the parent stopped resolving targets and the requester became the sole authoritative resolver.
+- Selection/idempotency triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='applies explicit selection after one authoritative filtered resolution|keeps all-match selection within its uploaded file scope|recovers an exact idempotent retry after its candidates were processed without rescanning|binds every selection input into the idempotency payload before rescanning'` passed: 4 tests, 21 assertions. A new request performs one filtered resolution; an exact retry after processing performs zero raw-mark captures; changed period, actor, decision, reason, uploaded-file scope, filters, all flag, selected tokens, or expected selection hash is rejected before rescanning.
+- Parent validation triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='parent rejects malformed or unexpected batch intent fields before resolution'` passed: 2 tests, 6 assertions.
+- `php artisan test tests/Feature/Nomina/RevisarTest.php` passed: 19 tests, 149 assertions.
+- `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 64 tests, 308 assertions.
+- `vendor/bin/pint app/Livewire/Nomina/Revisar.php app/Services/Attendance/OvertimeDecisionBatchRequester.php app/Services/Attendance/OvertimeDecisionBatchRequest.php tests/Feature/Nomina/RevisarTest.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -136,6 +143,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `e23adc4 perf(nomina): remove idle delay between overtime chunks`
 - `c576f3b docs(odd): link chunk continuation work unit`
 - `ef85bef perf(queue): preload overtime batch chunk context`
+- `2a0a921 docs(odd): record worker query improvement`
+- `105519d perf(attendance): resolve overtime batch selection once`
 
 ## QA plan
 1. Load a representative payroll and open Review.
@@ -157,3 +166,6 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Each worker invocation claims a bounded chunk transactionally, loads batch/actor/period once, loads employees with one `whereIn`, and leaves recorder/PayrollContextLocker revalidation authoritative per item.
 - The worker now claims and increments up to 20 items in one batch-row transaction, preserving processing-before-pending recovery order. It then loads batch, actor, and period once and all unique employees in one `whereIn` query; recorder-level batch/actor revalidation and payroll locking remain authoritative.
 - The deterministic SQLite `handle()` seam regression reduced a full mocked-recorder chunk from 165 to 32 queries, with batch SELECTs reduced from 41 to 3 and actor, period, and employee SELECTs reduced from 20 each to 1 each.
+- `OvertimeDecisionBatchRequester` now owns the authoritative filtered pending-target resolution through a typed request value; the parent validates only the untrusted intent shape and no longer scans candidates or computes confirmation hashes.
+- The public renderless submit action now captures raw marks once instead of twice and preserves accepted/started event semantics without an HTML effect.
+- Idempotency payload validation remains ahead of candidate resolution. Exact retries after completed decisions recover with zero raw-mark captures, while every selection input is bound to the stored payload hash.

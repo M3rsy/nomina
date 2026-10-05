@@ -8,6 +8,7 @@ use App\Models\OvertimeDecision;
 use App\Models\OvertimeDecisionBatch;
 use App\Models\PayPeriod;
 use App\Models\User;
+use App\Services\Payroll\OvertimeReviewReader;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
@@ -17,61 +18,67 @@ use Illuminate\Validation\ValidationException;
 
 final class OvertimeDecisionBatchRequester
 {
-    public function __construct(private PayrollPeriodReviewSnapshot $snapshot) {}
+    private const MAX_TARGETS = 500;
+
+    public function __construct(private OvertimeReviewReader $reviews) {}
 
     public function request(
         PayPeriod $period,
-        array $targets,
-        string $decision,
-        string $reason,
+        OvertimeDecisionBatchRequest $request,
         User $actor,
-        string $idempotencyKey,
     ): OvertimeDecisionBatch {
         $period = PayPeriod::withoutCompanyScope()->with('company')->findOrFail($period->id);
         $actor = User::query()->findOrFail($actor->id);
         $this->authorize($actor, $period->company);
-        $reason = trim($reason);
-        $canonical = $this->canonicalTargets($targets, $decision, $reason, $idempotencyKey);
-        $payloadHash = hash('sha256', json_encode([
-            $period->id, $actor->id, $decision, $reason, $canonical->all(),
-        ], JSON_THROW_ON_ERROR));
-        if ($existing = $this->existing($idempotencyKey, $payloadHash)) {
+        $this->validateRequest($request);
+        $payloadHash = $this->payloadHash($period, $actor, $request);
+        if ($existing = $this->existing($request->requestKey, $payloadHash)) {
             return $this->recover($existing);
         }
 
         try {
-            return DB::transaction(function () use (
-                $period, $actor, $decision, $reason, $idempotencyKey, $canonical, $payloadHash,
-            ): OvertimeDecisionBatch {
+            return DB::transaction(function () use ($period, $actor, $request, $payloadHash): OvertimeDecisionBatch {
                 $period = PayPeriod::withoutCompanyScope()->with('company')->lockForUpdate()->findOrFail($period->id);
                 $this->authorize($actor = User::query()->findOrFail($actor->id), $period->company);
                 $this->validatePeriod($period);
-                $requested = $canonical->mapWithKeys(fn (array $target): array => [
-                    $this->targetKey($target['employee_id'], $target['work_date'], $target['candidate_key']) => true,
-                ]);
-                $pending = collect();
-                $this->snapshot->forEachReview($this->snapshot->captureForPeriod($period), function (PayrollShiftReview $review) use ($requested, $pending): void {
-                    foreach ($review->analysis->overtimeCandidates as $candidate) {
-                        $key = $this->targetKey($review->employee->id, $review->occurrence->workDate->toDateString(), $candidate->key);
-                        if ($requested->has($key) && $review->decisionFor($candidate) === null) {
-                            $pending->put($key, $candidate);
-                        }
-                    }
-                });
-                $items = $canonical->map(function (array $target) use ($pending): array {
-                    $candidate = $pending->get($this->targetKey(
-                        $target['employee_id'], $target['work_date'], $target['candidate_key'],
-                    ));
-                    if ($candidate === null) {
-                        throw ValidationException::withMessages(['targets' => 'Uno o más candidatos ya no están pendientes o no existen.']);
-                    }
 
-                    return [...$target, 'fingerprint' => $candidate->fingerprint];
-                });
+                $targets = $this->reviews->pendingTargetsForPeriod(
+                    $period,
+                    $request->uploadedFileId,
+                    $request->filters,
+                );
+                if (! $request->all) {
+                    $targets = $targets->only($request->selectedTokens);
+                    if ($targets->count() !== count($request->selectedTokens)) {
+                        throw ValidationException::withMessages([
+                            'selection' => 'La selección cambió. Revísela antes de continuar.',
+                        ]);
+                    }
+                }
+                if ($targets->count() > self::MAX_TARGETS) {
+                    throw ValidationException::withMessages([
+                        'selection' => 'Hay más de 500 candidatos pendientes. Aplique filtros más específicos antes de continuar.',
+                    ]);
+                }
+                if ($targets->isEmpty() || ! hash_equals(
+                    $request->expectedSelectionHash,
+                    $this->selectionHash($targets, $request->filters, $request->all),
+                )) {
+                    throw ValidationException::withMessages([
+                        'selection' => 'La selección cambió. Revísela antes de continuar.',
+                    ]);
+                }
+
+                $items = $targets->values()->map(fn (array $target): array => [
+                    'employee_id' => $target['employee_id'],
+                    'work_date' => $target['work_date'],
+                    'candidate_key' => $target['candidate_key'],
+                    'fingerprint' => $target['fingerprint'],
+                ]);
                 $batch = OvertimeDecisionBatch::withoutCompanyScope()->create([
-                    'request_key' => $idempotencyKey, 'payload_hash' => $payloadHash,
+                    'request_key' => $request->requestKey, 'payload_hash' => $payloadHash,
                     'company_id' => $period->company_id, 'pay_period_id' => $period->id,
-                    'requested_by' => $actor->id, 'decision' => $decision, 'reason' => $reason,
+                    'requested_by' => $actor->id, 'decision' => $request->decision, 'reason' => $request->reason,
                     'status' => OvertimeDecisionBatch::QUEUED, 'total_items' => $items->count(),
                 ]);
                 $batch->items()->createMany($items->all());
@@ -80,7 +87,7 @@ final class OvertimeDecisionBatchRequester
                 return $batch->load('items');
             });
         } catch (UniqueConstraintViolationException $exception) {
-            return ($existing = $this->existing($idempotencyKey, $payloadHash))
+            return ($existing = $this->existing($request->requestKey, $payloadHash))
                 ? $this->recover($existing) : throw $exception;
         }
     }
@@ -116,6 +123,45 @@ final class OvertimeDecisionBatchRequester
         }
     }
 
+    private function validateRequest(OvertimeDecisionBatchRequest $request): void
+    {
+        $filters = $request->filters;
+        $validFilterShape = count($filters) === 4
+            && array_diff(array_keys($filters), ['search', 'status', 'date', 'rate']) === []
+            && is_string($filters['search'] ?? null) && mb_strlen($filters['search']) <= 255
+            && is_string($filters['status'] ?? null) && in_array($filters['status'], ['pending', 'approved', 'rejected', 'all'], true)
+            && is_string($filters['date'] ?? null) && ($filters['date'] === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $filters['date']))
+            && is_string($filters['rate'] ?? null) && in_array($filters['rate'], ['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'], true);
+        $validTokens = collect($request->selectedTokens)->every(
+            fn (mixed $token): bool => is_string($token)
+                && preg_match('/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D', $token),
+        );
+
+        if (! in_array($request->decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)
+            || $request->reason === '' || mb_strlen($request->reason) > 500
+            || ! Str::isUuid($request->requestKey)
+            || ($request->uploadedFileId !== null && $request->uploadedFileId < 1)
+            || ! $validFilterShape || ! $validTokens
+            || ! preg_match('/^[a-f0-9]{64}$/D', $request->expectedSelectionHash)) {
+            throw ValidationException::withMessages(['request' => 'La solicitud de decisiones no es válida.']);
+        }
+    }
+
+    private function payloadHash(PayPeriod $period, User $actor, OvertimeDecisionBatchRequest $request): string
+    {
+        return hash('sha256', json_encode([
+            'pay_period_id' => $period->id,
+            'actor_id' => $actor->id,
+            'decision' => $request->decision,
+            'reason' => $request->reason,
+            'uploaded_file_id' => $request->uploadedFileId,
+            'filters' => $request->filters,
+            'all' => $request->all,
+            'selected' => $request->selectedTokens,
+            'selection' => $request->expectedSelectionHash,
+        ], JSON_THROW_ON_ERROR));
+    }
+
     private function existing(string $key, string $payloadHash): ?OvertimeDecisionBatch
     {
         $batch = OvertimeDecisionBatch::withoutCompanyScope()->where('request_key', $key)->first();
@@ -126,37 +172,20 @@ final class OvertimeDecisionBatchRequester
         return $batch?->load('items');
     }
 
-    private function canonicalTargets(
-        array $targets,
-        string $decision,
-        string $reason,
-        string $idempotencyKey,
-    ): Collection {
-        if (! in_array($decision, [OvertimeDecision::APPROVED, OvertimeDecision::REJECTED], true)
-            || $reason === '' || mb_strlen($reason) > 500 || ! Str::isUuid($idempotencyKey)
-            || $targets === [] || count($targets) > 500) {
-            throw ValidationException::withMessages(['request' => 'La solicitud de decisiones no es válida.']);
-        }
-
-        return collect($targets)->map(function (mixed $target): array {
-            if (! is_array($target)
-                || array_diff(array_keys($target), ['employee_id', 'work_date', 'candidate_key']) !== []
-                || count($target) !== 3
-                || ! is_int($target['employee_id'] ?? null) || $target['employee_id'] < 1
-                || ! is_string($target['work_date'] ?? null)
-                || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $target['work_date'])
-                || ! is_string($target['candidate_key'] ?? null)
-                || ! preg_match('/^[a-f0-9]{64}$/', $target['candidate_key'])) {
-                throw ValidationException::withMessages(['targets' => 'Los candidatos seleccionados no son válidos.']);
-            }
-
-            return ['employee_id' => $target['employee_id'], 'work_date' => $target['work_date'], 'candidate_key' => $target['candidate_key']];
-        })->unique(fn (array $target): string => implode('|', $target))
-            ->sortBy(fn (array $target): string => implode('|', $target))->values();
-    }
-
-    private function targetKey(int $employeeId, string $workDate, string $candidateKey): string
+    /**
+     * @param  Collection<string, array{employee_id:int,work_date:string,candidate_key:string,fingerprint:string}>  $targets
+     * @param  array{search:string,status:string,date:string,rate:string}  $filters
+     */
+    private function selectionHash(Collection $targets, array $filters, bool $all): string
     {
-        return "{$employeeId}|{$workDate}|{$candidateKey}";
+        return hash('sha256', json_encode([
+            'filters' => $filters,
+            'all' => $all,
+            'candidates' => $targets
+                ->map(fn (array $target, string $token): string => $token.'|'.$target['fingerprint'])
+                ->sort()
+                ->values()
+                ->all(),
+        ], JSON_THROW_ON_ERROR));
     }
 }
