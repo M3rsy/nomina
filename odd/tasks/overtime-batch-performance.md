@@ -32,6 +32,11 @@ The feature branch inherits evidence and fixes from:
 - On `main`, `requestOvertimeBatchFromPanel` is not renderless and `submitOvertimeBatch` rescans before dispatch.
 - Current worker processes 20 items per execution and releases normal continuation with the same 10-second error backoff.
 
+## Accepted-modal follow-up diagnosis
+Real batch #14 processed 249/249 items successfully in 13 chunks. During its 2m53s window, 58 Livewire updates completed with HTTP 200 responses at a 72ms median, plus one 14.253s outlier compatible with a heavyweight `OvertimeReviewPanel` render. This is diagnosis evidence, not causal proof: the existing tests cover the event descriptor and isolated PHP state, not real multi-component browser DOM timing.
+
+The installed Livewire client proves targeted events do not bubble: `vendor/livewire/livewire/dist/livewire.esm.js:9250-9254` dispatches to `target.el` with the bubbling argument set to `false`, and `vendor/livewire/livewire/dist/livewire.esm.js:9272-9277` creates the event with `{ bubbles: false }`. Therefore a modal-local `x-on:overtime-batch-accepted.window` listener cannot receive the parent event targeted to `OvertimeReviewPanel`. The component root must catch that event directly and bridge it to a distinct bubbling Alpine event for the modal-local window latch.
+
 ## Hypotheses to validate
 1. Normal successful chunk continuation adds about 120 seconds of avoidable idle time for 249 items.
 2. Parent resolution and requester snapshot construction still calculate the period more than once before enqueue.
@@ -84,6 +89,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Shorten the requester critical transaction and evaluate safe bulk item insertion; retain the authoritative scan under the period lock until every candidate dependency has a shared revision contract.
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
 - [x] Improve progress/error/worker-stalled observability and loading target isolation.
+- [x] Close the accepted batch modal without triggering a heavyweight panel render; preserve rejection visibility.
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [x] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
 - [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
@@ -156,6 +162,21 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed in 39.85s: 66 tests, 383 assertions.
 - `vendor/bin/pint tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 - `git diff --check` passed with no output; the pre-existing `package-lock.json` modification remains untouched.
+- Accepted-modal RED: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='accepted batches close their modal while recorded batches refresh terminal data'` failed because the accepted listener response still contained an HTML effect after all server modal fields and selection state were reset (1 failed test, 9 assertions before failure).
+- Accepted-modal GREEN: the same focused command passed after making only `acceptOvertimeBatch()` renderless (1 test, 15 assertions). The recorded/terminal listener remained renderful.
+- Rejection triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejected batches keep the modal open and render their validation message'` passed (1 test, 7 assertions); the modal remained open, exposed the validation message, and returned an HTML effect.
+- Initial structural/loading coverage: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed (1 test, 23 assertions), but it incorrectly treated the targeted accepted event as observable at `window`; installed Livewire non-bubbling behavior invalidated that assertion.
+- Requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed (67 tests, 394 assertions).
+- `vendor/bin/pint app/Livewire/Nomina/OvertimeReviewPanel.php resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed.
+- Accepted-modal follow-up: `git diff --check` passed with no output; the unrelated `package-lock.json` modification remains untouched.
+- Event-bridge RED: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` failed after requiring the component root to catch `overtime-batch-accepted` directly and dispatch a distinct `overtime-batch-modal-close` event; the old markup only had the unreachable accepted-event window listener (1 failed test, 11 assertions before failure).
+- Event-bridge GREEN: the same UI command passed (1 test, 25 assertions) after adding both bridge halves and excluding accepted/rejected window listeners.
+- Alpine-root activation RED/GREEN: the UI command then failed while requiring `x-data` on the component root (1 failed test, 11 assertions before failure), and passed again (1 test, 25 assertions) after the root became an Alpine scope for its direct event listener.
+- Event-bridge acceptance/rejection checks passed independently: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='accepted batches close their modal while recorded batches refresh terminal data'` passed (1 test, 15 assertions), and `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejected batches keep the modal open and render their validation message'` passed (1 test, 7 assertions).
+- Event-bridge requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed (67 tests, 394 assertions).
+- `vendor/bin/pint resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed.
+- Event-bridge correction: `git diff --check` passed with no output; the unrelated `package-lock.json` modification remains untouched.
+- Independent event-bridge verification confirmed Livewire 3.8.2 targets the component root with `bubbles=false`, Alpine catches that event directly on the root, and the distinct close event bubbles to the modal-local window listener. Focused acceptance/rejection passed with 2 tests and 22 assertions; UI structure passed with 1 test and 25 assertions; the full requester suite passed with 67 tests and 394 assertions; focused Pint, LSP diagnostics, and `git diff --check` passed.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -203,4 +224,5 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - The public renderless submit action now captures raw marks once instead of twice and preserves accepted/started event semantics without an HTML effect.
 - Overtime progress now exposes lifecycle timestamps, latest batch/item activity, batch errors, and queued-versus-processing delay reasons. Spanish UI labels and warnings remain truthful: inactivity suggests checking the queue worker if unchanged but does not claim it stopped.
 - Batch approve/reject open controls target only their exact action; confirmation and cancellation target only `submitOvertimeBatch`, while selection controls remain untargeted.
+- Durable acceptance now resets modal and selection state in a renderless panel listener. The Alpine-scoped panel root catches Livewire's targeted, non-bubbling accepted event directly and dispatches the distinct bubbling `overtime-batch-modal-close` event; the modal-local Alpine latch closes from that bridge event at window scope. Rejection remains renderful, keeps the modal open, and displays the server validation message without touching the close latch.
 - Idempotency payload validation remains ahead of candidate resolution. Exact retries after completed decisions recover with zero raw-mark captures, while every selection input is bound to the stored payload hash.
