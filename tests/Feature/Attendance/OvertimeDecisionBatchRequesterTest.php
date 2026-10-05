@@ -344,7 +344,7 @@ test('rejects a locked period without writing a batch', function (string $status
     expect(fn () => requestBatch($context))->toThrow(ValidationException::class)
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with(PayPeriod::ATTENDANCE_LOCKED_STATUSES);
-test('queues only authoritative selected overtime candidates with stable idempotency', function (string $decision) {
+test('validated modal submission dispatches its stored batch intent without rendering', function (string $decision) {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
     overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
@@ -359,18 +359,31 @@ test('queues only authoritative selected overtime candidates with stable idempot
         ->assertSet('overtimeBatchCount', 1)
         ->assertSet('overtimeBatchSelection', fn ($value) => is_string($value) && strlen($value) === 64)
         ->call('submitOvertimeBatch')
-        ->assertHasErrors(['overtimeBatchReason'])
-        ->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada');
+        ->assertHasErrors(['overtimeBatchReason']);
+
+    expect($component->effects)->toHaveKey('html');
+
+    $component->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada');
     $requestKey = $component->get('overtimeBatchRequestKey');
+    $selection = $component->get('overtimeBatchSelection');
     $context['exit_mark']->update(['event_at' => '2026-07-20 14:45:00']);
-    $component->call('submitOvertimeBatch')->assertHasErrors(['selectedOvertimeCandidates'])
-        ->assertSet('overtimeBatchRequestKey', $requestKey);
-    $context['exit_mark']->update(['event_at' => '2026-07-20 14:30:00']);
+
     $component->call('submitOvertimeBatch')
         ->assertHasNoErrors()
         ->assertSet('selectedOvertimeCandidates', [$token])
-        ->assertDispatched('overtime-batch-submitted');
-    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
+        ->assertSet('overtimeBatchRequestKey', $requestKey)
+        ->assertDispatched('overtime-batch-submitted', intent: [
+            'decision' => $decision,
+            'reason' => 'Cobertura extraordinaria confirmada',
+            'request_key' => $requestKey,
+            'selection' => $selection,
+            'filters' => ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''],
+            'all' => false,
+            'selected' => [$token],
+        ]);
+
+    expect($component->effects)->not->toHaveKey('html')
+        ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
 test('selects every filtered overtime match across pages with compact public state', function () {
     $context = batchRequestFixture();
@@ -564,6 +577,37 @@ test('parent records only a verified canonical panel batch intent', function () 
 
     expect(OvertimeDecisionBatch::query()->sole()->total_items)->toBe(1);
 });
+test('parent rejects a non-empty selection when its stored hash is stale', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $filters = ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''];
+    $token = app(OvertimeReviewReader::class)
+        ->pendingTargetsForPeriod($context['period'], null, $filters)
+        ->keys()
+        ->sole();
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('requestOvertimeBatchFromPanel', [
+            'decision' => OvertimeDecision::APPROVED,
+            'reason' => 'Cobertura confirmada',
+            'request_key' => (string) Str::uuid(),
+            'selection' => str_repeat('0', 64),
+            'filters' => $filters,
+            'all' => false,
+            'selected' => [$token],
+        ])
+        ->assertHasNoErrors()
+        ->assertDispatchedTo(
+            OvertimeReviewPanel::class,
+            'overtime-batch-rejected',
+            message: 'La selección cambió. Revísela antes de continuar.',
+        );
+
+    expect($component->effects)->not->toHaveKey('html')
+        ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
+});
 test('rejects more than 500 filtered overtime matches without creating a batch', function () {
     $context = batchRequestFixture();
     $review = app(AttendanceReviewQuery::class)->forPeriod($context['period'])->sole();
@@ -598,21 +642,11 @@ test('rejects more than 500 filtered overtime matches without creating a batch',
 
     expect(OvertimeDecisionBatch::query()->count())->toBe(0);
 });
-test('all-match confirmation rejects candidate drift and filter changes before queueing', function () {
+test('changing all-match filters closes the modal before submission', function () {
     $context = batchRequestFixture();
     app(CurrentCompany::class)->set($context['company']);
     overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
 
-    $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
-        ->call('selectAllFilteredOvertime')
-        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
-        ->set('overtimeBatchReason', 'Confirmación congelada');
-    $context['exit_mark']->update(['event_at' => '2026-07-20 14:45:00']);
-    $component->call('submitOvertimeBatch')
-        ->assertHasErrors(['selectedOvertimeCandidates']);
-    expect(OvertimeDecisionBatch::query()->count())->toBe(0);
-
-    $context['exit_mark']->update(['event_at' => '2026-07-20 14:30:00']);
     Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
         ->call('selectAllFilteredOvertime')
         ->call('openOvertimeBatch', OvertimeDecision::APPROVED)

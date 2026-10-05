@@ -928,7 +928,7 @@ class Revisar extends Component
             'filters.date' => ['present', 'nullable', 'date_format:Y-m-d'],
             'filters.rate' => ['present', Rule::in(['', 'ordinary', 'extra25', 'extra50', 'extra75', 'extra100'])],
             'all' => ['required', 'boolean'],
-            'selected' => ['required', 'array'],
+            'selected' => ['present', 'array'],
             'selected.*' => ['string', 'regex:/^\d+\|\d{4}-\d{2}-\d{2}\|[a-f0-9]{64}$/D'],
         ])->validate();
         $targets = app(OvertimeReviewReader::class)->pendingTargetsForPeriod(

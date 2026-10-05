@@ -198,11 +198,6 @@ class OvertimeReviewPanel extends Component
             'overtimeBatchReason' => ['required', 'string', 'max:500'],
             'overtimeBatchRequestKey' => ['required', 'uuid'],
         ], ['overtimeBatchReason.required' => 'Debe indicar un motivo común.']);
-        if ($this->overtimeBatchConfirmation($this->resolvedOvertimeBatchTargets()) !== $this->overtimeBatchSelection) {
-            $this->addError('selectedOvertimeCandidates', 'La selección cambió. Revísela antes de continuar.');
-
-            return;
-        }
 
         $this->dispatch('overtime-batch-submitted', intent: [
             'decision' => $data['overtimeBatchDecision'],
@@ -213,6 +208,7 @@ class OvertimeReviewPanel extends Component
             'all' => $this->allFilteredOvertimeSelected,
             'selected' => $this->selectedOvertimeCandidates,
         ]);
+        $this->skipRender();
     }
 
     public function submitOvertimeDecision(): void

@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ProcessOvertimeDecisionBatch;
 use App\Livewire\Nomina\OvertimeBatchProgress;
 use App\Livewire\Nomina\OvertimeReviewPanel;
 use App\Livewire\Nomina\Revisar;
@@ -618,6 +619,101 @@ test('batch request queues without rendering the payroll review and starts isola
         ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
 
     expect($component->effects)->not->toHaveKey('html');
+});
+
+test('all-filtered batch accepts an empty explicit selection without rendering the payroll review', function () {
+    /** @var TestCase $this */
+    Queue::fake();
+    $company = Company::factory()->create();
+    $admin = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create(['profile_key' => 'general']);
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 1,
+        'start_time' => '06:00',
+        'end_time' => '14:00',
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create([
+        'hired_at' => '2020-01-01',
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'General schedule');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-20',
+        'end_date' => '2026-07-20',
+        'status' => 'uploaded',
+    ]);
+    foreach (['2026-07-20 09:00:00', '2026-07-20 19:00:00'] as $eventAt) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)->forEmployee($employee)->create([
+            'event_at' => $eventAt,
+            'status' => 'valid',
+        ]);
+    }
+    DB::table('work_schedule_profile_publications')->where('profile_id', $profile->id)->update([
+        'payroll_policy_key' => 'duration-first-v2',
+        'published_by' => $admin->id,
+    ]);
+    app(CurrentCompany::class)->set($company);
+    $this->actingAs($admin);
+    $filters = ['search' => '', 'status' => 'pending', 'date' => '', 'rate' => ''];
+    $targets = app(OvertimeReviewReader::class)->pendingTargetsForPeriod($period, null, $filters);
+    $selection = hash('sha256', json_encode([
+        'filters' => $filters,
+        'all' => true,
+        'candidates' => $targets
+            ->map(fn (array $target, string $token): string => $token.'|'.$target['fingerprint'])
+            ->sort()
+            ->values()
+            ->all(),
+    ], JSON_THROW_ON_ERROR));
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('requestOvertimeBatchFromPanel', [
+            'decision' => OvertimeDecision::APPROVED,
+            'reason' => 'Approved after review',
+            'request_key' => (string) Str::uuid(),
+            'selection' => $selection,
+            'filters' => $filters,
+            'all' => true,
+            'selected' => [],
+        ])
+        ->assertHasNoErrors();
+    $batch = OvertimeDecisionBatch::withoutCompanyScope()->sole();
+
+    $component
+        ->assertSet('activeOvertimeBatchId', $batch->id)
+        ->assertDispatchedTo(
+            OvertimeBatchProgress::class,
+            'overtime-batch-started',
+            batchId: $batch->id,
+        )
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
+
+    expect($component->effects)->not->toHaveKey('html');
+
+    $emptyExplicitSelection = hash('sha256', json_encode([
+        'filters' => $filters,
+        'all' => false,
+        'candidates' => [],
+    ], JSON_THROW_ON_ERROR));
+    Livewire::test(Revisar::class, ['payPeriod' => $period])
+        ->call('requestOvertimeBatchFromPanel', [
+            'decision' => OvertimeDecision::APPROVED,
+            'reason' => 'Approved after review',
+            'request_key' => (string) Str::uuid(),
+            'selection' => $emptyExplicitSelection,
+            'filters' => $filters,
+            'all' => false,
+            'selected' => [],
+        ])
+        ->assertHasNoErrors()
+        ->assertDispatchedTo(
+            OvertimeReviewPanel::class,
+            'overtime-batch-rejected',
+            message: 'La selección cambió. Revísela antes de continuar.',
+        );
+
+    expect(OvertimeDecisionBatch::withoutCompanyScope()->count())->toBe(1);
+    Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
 });
 
 test('partial overtime approval preserves exact rejected complements and payable bands', function () {
