@@ -92,14 +92,16 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Close the accepted batch modal without triggering a heavyweight panel render; preserve rejection visibility.
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [x] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
-- [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
+- [x] Run related automated suites, review each work unit, push the stack, and open the linked PRs.
+- [ ] Complete the user-deferred post-modal manual QA, then retarget and merge the stack in order.
 
 ## Decisions
 - The domain batch tables remain the source of truth even if Laravel `Bus::batch()` is evaluated later.
 - Start serial and remove idle time before considering 2–4 controlled workers.
 - A batch is accepted when durable rows commit; overtime decisions are recorded only when items reach terminal processing.
 - Current follow-up commits are retained as prerequisite evidence rather than reimplemented.
-- Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice must name its predecessor and remain independently reviewable.
+- Delivery uses stacked PRs to `main`, selected by the user after the running diff exceeded the 400-line review budget. Each slice names its predecessor and remains independently reviewable.
+- The user explicitly authorized `size:exception` for PR #401 at 494 changed lines because its typed request, requester migration, parent integration, and regression tests form one atomic API change; every other slice is at or below 286 changed lines.
 - Keep `payroll_review_entries` as a UI/cache source, not the authoritative batch-request source. Its generation/build/read steps are not one atomic revision and omit snapshot dependencies such as fact generations and vacation inputs.
 - Do not project `uploaded_file_id` by candidate ownership. Current semantics retain an entire shift occurrence when any contributing mark came from the file, including every candidate in a mixed-file occurrence. Exact projection support would require generation-owned occurrence/upload membership (for example, an entry-to-upload link table) plus complete freshness coverage.
 - Add or remove no PostgreSQL index for this issue: measured snapshot SELECTs are milliseconds while candidate evaluation is seconds. The standalone `raw_marks(uploaded_file_id)` index may be structurally redundant with the unique `(uploaded_file_id, row_number)` prefix, but its cleanup is unrelated and unproven here.
@@ -177,6 +179,21 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `vendor/bin/pint resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed.
 - Event-bridge correction: `git diff --check` passed with no output; the unrelated `package-lock.json` modification remains untouched.
 - Independent event-bridge verification confirmed Livewire 3.8.2 targets the component root with `bubbles=false`, Alpine catches that event directly on the root, and the distinct close event bubbles to the modal-local window listener. Focused acceptance/rejection passed with 2 tests and 22 assertions; UI structure passed with 1 test and 25 assertions; the full requester suite passed with 67 tests and 394 assertions; focused Pint, LSP diagnostics, and `git diff --check` passed.
+- Live GitHub delivery verification confirmed issue #396 is open with `status:approved`, no prior PR for the issue existed, all nine branch names were free, and the unrelated local `package-lock.json` change remained excluded.
+- PR #397 targets `main`; PRs #398–#405 are drafts with clean predecessor-branch diffs. The repository workflow runs only for `main`/`master` and selected legacy bases, so each draft must be retargeted to `main` after its predecessor merges before checks/review. At publication, #397 PostgreSQL had passed and Pest was still running.
+
+## Pull request stack
+| Position | PR | Base | Head | Changed lines | Labels | State |
+| --- | --- | --- | --- | ---: | --- | --- |
+| 1 | #397 | `main` | `perf/overtime-request-latency` | 286 | `type:feature` | Ready |
+| 2 | #398 | `perf/overtime-request-latency` | `fix/overtime-all-filtered-selection` | 211 | `type:bug` | Draft |
+| 3 | #399 | `fix/overtime-all-filtered-selection` | `refactor/overtime-batch-lifecycle` | 282 | `type:refactor` | Draft |
+| 4 | #400 | `refactor/overtime-batch-lifecycle` | `perf/overtime-worker-context` | 160 | `type:feature` | Draft |
+| 5 | #401 | `perf/overtime-worker-context` | `perf/overtime-single-resolution` | 494 | `type:feature`, `size:exception` | Draft |
+| 6 | #402 | `perf/overtime-single-resolution` | `perf/overtime-bulk-insert` | 97 | `type:feature` | Draft |
+| 7 | #403 | `perf/overtime-bulk-insert` | `feat/overtime-batch-observability` | 286 | `type:feature` | Draft |
+| 8 | #404 | `feat/overtime-batch-observability` | `test/overtime-batch-scale` | 194 | `type:chore` | Draft |
+| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 58 | `type:bug` | Draft |
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -200,6 +217,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `57241e8 test(attendance): cover overtime batch scale`
 - `c9a88c4 docs(odd): link batch scale work unit`
 - `92ba44d fix(nomina): close accepted batch modal`
+- `59b4477 docs(odd): link accepted modal work unit`
 
 ## QA plan
 1. Load a representative payroll and open Review.
@@ -212,7 +230,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 8. Exercise double click, invalid candidate, partial failure, 500 candidates, 501 candidates, approval, and rejection.
 
 ## Results
-- Issue #396 is approved and tracks the complete outcome.
+- Issue #396 is approved and tracks the complete outcome; PRs #397–#405 publish the nine-slice stack without merging it.
 - Baseline confirms normal continuation delay, per-item invariant N+1 loads, opt-in worker risk, long requester lock scope, upload-filter projection incompatibility, and acceptance/terminal event ambiguity.
 - Durable enqueue now emits `overtime-batch-accepted` to the review panel and preserves `overtime-batch-started` for isolated progress without emitting the terminal `overtime-batch-recorded` event.
 - The accepted event closes and clears batch modal/selection state; `overtime-batch-recorded` remains the terminal panel refresh event.
