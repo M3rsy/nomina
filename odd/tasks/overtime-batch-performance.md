@@ -132,6 +132,12 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `php artisan test tests/Feature/Nomina/RevisarTest.php` passed: 19 tests, 149 assertions.
 - `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed: 64 tests, 308 assertions.
 - `vendor/bin/pint app/Livewire/Nomina/Revisar.php app/Services/Attendance/OvertimeDecisionBatchRequester.php app/Services/Attendance/OvertimeDecisionBatchRequest.php tests/Feature/Nomina/RevisarTest.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- RED 500-candidate requester regression: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='durably requests 500 candidates with one item insert and hydrates them after commit'` failed because the query listener observed 500 item-table INSERT statements instead of one; the durable/default/fingerprint assertions preceding the query-count assertion passed.
+- GREEN 500-candidate requester regression: the same focused command passed with 15 assertions. It observed one item-table INSERT, 500 durable readable items with `pending` status, zero attempts, set timestamps, matching fingerprints independent of row order, and the first relation SELECT at the pre-request transaction level.
+- 501-candidate boundary triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='rejects more than 500 filtered overtime matches without creating a batch'` passed with 7 assertions and no batch row.
+- Requester suite: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed with 65 tests and 323 assertions.
+- `vendor/bin/pint app/Services/Attendance/OvertimeDecisionBatchRequester.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
+- Reversible PostgreSQL 249-candidate verification reduced item persistence from 249 INSERTs to one. Requester wall time was 50.564ms versus the 210.2ms `createMany()` baseline; item INSERT listener time was 15.370ms versus 83.42ms. The insert ran at the nested requester transaction level and relation hydration ran only after returning to the outer baseline transaction. All 249 rows were pending with zero attempts, matching fingerprints, and timestamps. Rollback restored 7 batches, 367 items, 367 decisions, zero jobs, and both affected sequence states exactly.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.

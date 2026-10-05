@@ -37,7 +37,7 @@ final class OvertimeDecisionBatchRequester
         }
 
         try {
-            return DB::transaction(function () use ($period, $actor, $request, $payloadHash): OvertimeDecisionBatch {
+            $batch = DB::transaction(function () use ($period, $actor, $request, $payloadHash): OvertimeDecisionBatch {
                 $period = PayPeriod::withoutCompanyScope()->with('company')->lockForUpdate()->findOrFail($period->id);
                 $this->authorize($actor = User::query()->findOrFail($actor->id), $period->company);
                 $this->validatePeriod($period);
@@ -81,15 +81,26 @@ final class OvertimeDecisionBatchRequester
                     'requested_by' => $actor->id, 'decision' => $request->decision, 'reason' => $request->reason,
                     'status' => OvertimeDecisionBatch::QUEUED, 'total_items' => $items->count(),
                 ]);
-                $batch->items()->createMany($items->all());
+                $timestamp = now();
+                DB::table('overtime_decision_batch_items')->insert($items->map(fn (array $item): array => [
+                    'batch_id' => $batch->id,
+                    'employee_id' => $item['employee_id'],
+                    'work_date' => $item['work_date'],
+                    'candidate_key' => $item['candidate_key'],
+                    'fingerprint' => $item['fingerprint'],
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ])->all());
                 DB::afterCommit(fn () => ProcessOvertimeDecisionBatch::dispatch($batch->id));
 
-                return $batch->load('items');
+                return $batch;
             });
         } catch (UniqueConstraintViolationException $exception) {
             return ($existing = $this->existing($request->requestKey, $payloadHash))
                 ? $this->recover($existing) : throw $exception;
         }
+
+        return $batch->load('items');
     }
 
     private function recover(OvertimeDecisionBatch $batch): OvertimeDecisionBatch
