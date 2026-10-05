@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\DB;
@@ -49,21 +51,39 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
 
     public function handle(OvertimeDecisionRecorder $recorder): void
     {
-        for ($processed = 0; $processed < self::CHUNK_SIZE; $processed++) {
-            $item = $this->claim();
-            if ($item === null) {
-                break;
-            }
+        $items = $this->claimChunk();
+        if ($items->isEmpty()) {
+            $this->finishOrRelease();
 
+            return;
+        }
+
+        try {
+            $batch = OvertimeDecisionBatch::withoutCompanyScope()->findOrFail($this->batchId);
+            $actor = $batch->requested_by === null ? null : User::query()->find($batch->requested_by);
+            $period = PayPeriod::withoutCompanyScope()->findOrFail($batch->pay_period_id);
+            $employees = Employee::withoutCompanyScope()
+                ->whereKey($items->pluck('employee_id')->unique()->values()->all())
+                ->get()
+                ->keyBy('id');
+        } catch (Throwable $exception) {
+            $this->recordInfrastructureFailure($exception);
+
+            throw $exception;
+        }
+
+        foreach ($items as $item) {
             try {
-                $batch = OvertimeDecisionBatch::withoutCompanyScope()->findOrFail($this->batchId);
-                $actor = $batch->requested_by === null ? null : User::query()->find($batch->requested_by);
                 if ($actor === null) {
                     throw new AuthorizationException('El solicitante del lote ya no está disponible.');
                 }
+                $employee = $employees->get($item->employee_id);
+                if ($employee === null) {
+                    throw (new ModelNotFoundException)->setModel(Employee::class, [$item->employee_id]);
+                }
                 $recorder->decide(
-                    PayPeriod::withoutCompanyScope()->findOrFail($batch->pay_period_id),
-                    Employee::withoutCompanyScope()->findOrFail($item->employee_id),
+                    $period,
+                    $employee,
                     $item->work_date,
                     $item->candidate_key,
                     $batch->decision,
@@ -75,8 +95,8 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
             } catch (ValidationException|AuthorizationException $exception) {
                 $this->finishItem($item->id, OvertimeDecisionBatchItem::FAILED, $exception->getMessage());
             } catch (Throwable $exception) {
-                OvertimeDecisionBatch::withoutCompanyScope()->whereKey($this->batchId)
-                    ->update(['last_error' => $exception->getMessage()]);
+                $this->recordInfrastructureFailure($exception);
+
                 throw $exception;
             }
         }
@@ -100,31 +120,42 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
         });
     }
 
-    private function claim(): ?OvertimeDecisionBatchItem
+    /** @return Collection<int, OvertimeDecisionBatchItem> */
+    private function claimChunk(): Collection
     {
-        return DB::transaction(function (): ?OvertimeDecisionBatchItem {
+        return DB::transaction(function (): Collection {
             $batch = OvertimeDecisionBatch::withoutCompanyScope()->lockForUpdate()->find($this->batchId);
             if ($batch === null || in_array($batch->status, [OvertimeDecisionBatch::COMPLETED, OvertimeDecisionBatch::COMPLETED_WITH_ERRORS, 'failed'], true)) {
-                return null;
+                return new Collection;
             }
             $batch->update([
                 'status' => OvertimeDecisionBatch::PROCESSING,
                 'started_at' => $batch->started_at ?? now(),
                 'last_error' => null,
             ]);
-            $item = $batch->items()->whereIn('status', [
+            $items = $batch->items()->whereIn('status', [
                 OvertimeDecisionBatchItem::PROCESSING, OvertimeDecisionBatchItem::PENDING,
-            ])->orderByRaw("case when status = 'processing' then 0 else 1 end")->orderBy('id')->lockForUpdate()->first();
-            if ($item !== null) {
-                $item->update([
+            ])->orderByRaw("case when status = 'processing' then 0 else 1 end")
+                ->orderBy('id')
+                ->limit(self::CHUNK_SIZE)
+                ->lockForUpdate()
+                ->get();
+            if ($items->isNotEmpty()) {
+                OvertimeDecisionBatchItem::query()->whereKey($items->modelKeys())->update([
                     'status' => OvertimeDecisionBatchItem::PROCESSING,
-                    'attempts' => $item->attempts + 1,
+                    'attempts' => DB::raw('attempts + 1'),
                     'last_error' => null,
                 ]);
             }
 
-            return $item;
+            return $items;
         });
+    }
+
+    private function recordInfrastructureFailure(Throwable $exception): void
+    {
+        OvertimeDecisionBatch::withoutCompanyScope()->whereKey($this->batchId)
+            ->update(['last_error' => $exception->getMessage()]);
     }
 
     private function finishItem(int $itemId, string $status, ?string $error = null): void
