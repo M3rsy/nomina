@@ -263,6 +263,7 @@ class Revisar extends Component
     }
 
     #[On('overtime-batch-terminal')]
+    #[Renderless]
     public function refreshAfterOvertimeBatch(int $batchId): void
     {
         if ($this->activeOvertimeBatchId !== $batchId || $this->refreshedOvertimeBatchId === $batchId) {
@@ -959,7 +960,7 @@ class Revisar extends Component
         $this->activeOvertimeBatchId = $batch->id;
         $this->refreshedOvertimeBatchId = null;
         $this->dispatch('overtime-batch-started', batchId: $batch->id)->to(OvertimeBatchProgress::class);
-        $this->dispatch('overtime-batch-recorded')->to(OvertimeReviewPanel::class);
+        $this->dispatch('overtime-batch-accepted')->to(OvertimeReviewPanel::class);
         session()->flash('success', 'El lote fue enviado y se procesará en segundo plano.');
     }
 

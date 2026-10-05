@@ -232,10 +232,16 @@ class OvertimeReviewPanel extends Component
         $this->resetPanelState();
     }
 
+    #[On('overtime-batch-accepted')]
+    public function acceptOvertimeBatch(): void
+    {
+        $this->closeOvertimeBatchModal();
+        $this->clearOvertimeSelection();
+    }
+
     #[On('overtime-batch-recorded')]
     public function refreshAfterOvertimeBatch(): void
     {
-        $this->closeOvertimeBatchModal();
         $this->resetPanelState();
     }
 

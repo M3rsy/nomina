@@ -244,7 +244,7 @@ test('releases a recovered job until the expired worker overlap lock clears', fu
     expect($nextWasCalled)->toBeFalse()
         ->and($middleware->releaseAfter)->toBe(300);
 });
-test('releases the same queued job between bounded chunks until terminal', function () {
+test('immediately releases the same queued job between bounded chunks until terminal', function () {
     $context = batchRequestFixture();
     $targets = [batchTarget($context)];
     foreach (range(2, 21) as $_) {
@@ -253,10 +253,11 @@ test('releases the same queued job between bounded chunks until terminal', funct
     $batch = requestBatch($context, ['targets' => $targets]);
     $job = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
     $job->handle(app(OvertimeDecisionRecorder::class));
-    $job->assertReleased(10);
+    $job->assertReleased(0);
     expect($batch->items()->where('status', 'succeeded')->count())->toBe(20)
         ->and($batch->items()->where('status', 'pending')->count())->toBe(1)
-        ->and($job->tries)->toBe(30);
+        ->and($job->tries)->toBe(30)
+        ->and($job->backoff)->toBe(10);
     Queue::assertPushed(ProcessOvertimeDecisionBatch::class, 1);
 
     $retry = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
@@ -264,6 +265,64 @@ test('releases the same queued job between bounded chunks until terminal', funct
     $retry->assertNotReleased();
     expect($batch->fresh()->status)->toBe('completed')
         ->and($batch->items()->where('status', 'succeeded')->count())->toBe(21);
+});
+test('reports deterministic progress across three immediate chunks with a validation failure', function () {
+    $context = batchRequestFixture();
+    $candidates = collect([$context]);
+    foreach (range(2, 41) as $_) {
+        $candidates->push(addBatchCandidate($context));
+    }
+    $batch = requestBatch($context, [
+        'targets' => $candidates->map(fn (array $candidate): array => batchTarget($candidate))->all(),
+    ]);
+    $failingCandidate = $candidates->last();
+    $failingCandidate['exit_mark']->update(['event_at' => '2026-07-20 14:45:00', 'status' => 'corrected']);
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $progress = Livewire::test(OvertimeBatchProgress::class, [
+        'payPeriod' => $context['period'], 'batchId' => $batch->id,
+    ]);
+
+    $firstChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $firstChunk->handle(app(OvertimeDecisionRecorder::class));
+    $firstChunk->assertReleased(0);
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::PROCESSING)
+        ->assertSet('progress.completed', 20)
+        ->assertSet('progress.remaining', 21)
+        ->assertSet('progress.percentage', 49);
+
+    $secondChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $secondChunk->handle(app(OvertimeDecisionRecorder::class));
+    $secondChunk->assertReleased(0);
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::PROCESSING)
+        ->assertSet('progress.completed', 40)
+        ->assertSet('progress.remaining', 1)
+        ->assertSet('progress.percentage', 98);
+
+    $finalChunk = (new ProcessOvertimeDecisionBatch($batch->id))->withFakeQueueInteractions();
+    $finalChunk->handle(app(OvertimeDecisionRecorder::class));
+    $finalChunk->assertNotReleased();
+    $progress->call('poll')
+        ->assertSet('progress.status', OvertimeDecisionBatch::COMPLETED_WITH_ERRORS)
+        ->assertSet('progress.succeeded', 40)
+        ->assertSet('progress.failed', 1)
+        ->assertSet('progress.completed', 41)
+        ->assertSet('progress.pending', 0)
+        ->assertSet('progress.processing', 0)
+        ->assertSet('progress.remaining', 0)
+        ->assertSet('progress.percentage', 100)
+        ->assertSet('progress.terminal', true);
+
+    $batch->refresh();
+    expect($batch->status)->toBe(OvertimeDecisionBatch::COMPLETED_WITH_ERRORS)
+        ->and($batch->finished_at)->not->toBeNull()
+        ->and($batch->items()->where('status', 'succeeded')->count())->toBe(40)
+        ->and($batch->items()->where('status', 'failed')->count())->toBe(1)
+        ->and($batch->items()->whereIn('status', ['pending', 'processing'])->count())->toBe(0)
+        ->and($batch->items()->whereIn('status', ['succeeded', 'failed'])->count())->toBe($batch->total_items)
+        ->and($batch->items()->where('status', 'failed')->sole()->last_error)->not->toBeNull();
 });
 test('returns the original batch for an exact idempotent retry', function () {
     $context = batchRequestFixture();
@@ -385,6 +444,37 @@ test('validated modal submission dispatches its stored batch intent without rend
     expect($component->effects)->not->toHaveKey('html')
         ->and(OvertimeDecisionBatch::query()->count())->toBe(0);
 })->with([OvertimeDecision::APPROVED, OvertimeDecision::REJECTED]);
+test('accepted batches close their modal while recorded batches refresh terminal data', function () {
+    $context = batchRequestFixture();
+    app(CurrentCompany::class)->set($context['company']);
+    overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
+    $token = implode('|', [$context['employee']->id, '2026-07-20', $context['candidate']->key]);
+    $component = Livewire::test(OvertimeReviewPanel::class, ['payPeriod' => $context['period']])
+        ->call('selectCurrentOvertimePage')
+        ->call('openOvertimeBatch', OvertimeDecision::APPROVED)
+        ->set('overtimeBatchReason', 'Cobertura extraordinaria confirmada')
+        ->assertSet('showOvertimeBatchModal', true)
+        ->assertSet('selectedOvertimeCandidates', [$token]);
+
+    $component->dispatch('overtime-batch-accepted')
+        ->assertSet('showOvertimeBatchModal', false)
+        ->assertSet('selectedOvertimeCandidates', [])
+        ->assertSet('allFilteredOvertimeSelected', false)
+        ->assertSet('overtimeBatchDecision', '')
+        ->assertSet('overtimeBatchReason', '')
+        ->assertSet('overtimeBatchRequestKey', '');
+
+    expect($component->effects)->toHaveKey('html');
+
+    $component
+        ->set('paginators.overtimePage', 2)
+        ->set('selectedOvertimeCandidates', [$token])
+        ->dispatch('overtime-batch-recorded')
+        ->assertSet('paginators.overtimePage', 1)
+        ->assertSet('selectedOvertimeCandidates', []);
+
+    expect($component->effects)->toHaveKey('html');
+});
 test('selects every filtered overtime match across pages with compact public state', function () {
     $context = batchRequestFixture();
     foreach (range(1, 25) as $_) {
@@ -738,18 +828,30 @@ test('stops isolated polling and notifies the parent when the batch becomes term
         ->assertDontSeeHtml('wire:poll.3s="poll"')
         ->assertDispatched('overtime-batch-terminal', batchId: $batch->id);
 });
-test('refreshes the parent once only after a verified terminal child event', function () {
+test('refreshes the panel once only after the exact active batch is verified terminal without rendering the parent', function () {
     $context = batchRequestFixture();
     $batch = requestBatch($context);
     $batch->update(['status' => 'processing']);
     app(CurrentCompany::class)->set($context['company']);
     overtimeDecisionBatchRequesterTestCase()->actingAs($context['actor']);
-    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
-        ->dispatch('overtime-batch-terminal', batchId: $batch->id);
-    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']]);
+
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id + 1)
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
 
     $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
-        ->assertDispatched('overtime-batch-recorded');
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
+
+    $batch->update(['status' => 'completed', 'finished_at' => now()]);
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertDispatchedTo(OvertimeReviewPanel::class, 'overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
+
+    $component->dispatch('overtime-batch-terminal', batchId: $batch->id)
+        ->assertNotDispatched('overtime-batch-recorded');
+    expect($component->effects)->not->toHaveKey('html');
 });
 test('clears only a verified unavailable active batch from the parent', function () {
     $context = batchRequestFixture();

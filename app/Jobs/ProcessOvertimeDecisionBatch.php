@@ -143,7 +143,7 @@ class ProcessOvertimeDecisionBatch implements ShouldQueue
                 return;
             }
             if ($batch->items()->whereIn('status', [OvertimeDecisionBatchItem::PENDING, OvertimeDecisionBatchItem::PROCESSING])->exists()) {
-                DB::afterCommit(fn () => $this->release($this->backoff));
+                DB::afterCommit(fn () => $this->release(0));
 
                 return;
             }
