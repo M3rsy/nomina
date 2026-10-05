@@ -4,6 +4,8 @@ namespace App\Livewire\Nomina;
 
 use App\Models\OvertimeDecisionBatch;
 use App\Models\PayPeriod;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Locked;
@@ -64,14 +66,34 @@ class OvertimeBatchProgress extends Component
             return;
         }
 
-        $counts = $batch->items()->selectRaw('status, count(*) as total')->groupBy('status')
-            ->pluck('total', 'status');
-        $pending = (int) ($counts['pending'] ?? 0);
-        $processing = (int) ($counts['processing'] ?? 0);
-        $succeeded = (int) ($counts['succeeded'] ?? 0);
-        $failed = (int) ($counts['failed'] ?? 0);
+        $statusRows = $batch->items()
+            ->selectRaw('status, count(*) as total, max(updated_at) as latest_activity_at')
+            ->groupBy('status')
+            ->get()
+            ->keyBy('status');
+        $pending = (int) ($statusRows->get('pending')?->total ?? 0);
+        $processing = (int) ($statusRows->get('processing')?->total ?? 0);
+        $succeeded = (int) ($statusRows->get('succeeded')?->total ?? 0);
+        $failed = (int) ($statusRows->get('failed')?->total ?? 0);
         $total = (int) $batch->total_items;
         $completed = $succeeded + $failed;
+        $terminal = in_array($batch->status, [
+            OvertimeDecisionBatch::COMPLETED,
+            OvertimeDecisionBatch::COMPLETED_WITH_ERRORS,
+            'failed',
+        ], true);
+        $latestActivity = collect([
+            $batch->created_at,
+            $batch->updated_at,
+            $batch->started_at,
+            $batch->finished_at,
+            ...$statusRows->pluck('latest_activity_at')->filter()->map(
+                fn (string $timestamp): Carbon => Carbon::parse($timestamp),
+            ),
+        ])->filter()->sortByDesc(fn (CarbonInterface $timestamp): int => $timestamp->getTimestamp())->first();
+        $delayed = ! $terminal
+            && $latestActivity instanceof CarbonInterface
+            && $latestActivity->lt(now()->subSeconds(30));
 
         $this->progress = [
             'status' => $batch->status,
@@ -83,11 +105,18 @@ class OvertimeBatchProgress extends Component
             'completed' => $completed,
             'remaining' => max(0, $total - $completed),
             'percentage' => $total > 0 ? min(100, max(0, (int) round(($completed / $total) * 100))) : null,
-            'terminal' => in_array($batch->status, [
-                OvertimeDecisionBatch::COMPLETED,
-                OvertimeDecisionBatch::COMPLETED_WITH_ERRORS,
-                'failed',
-            ], true),
+            'terminal' => $terminal,
+            'delayed' => $delayed,
+            'delay_reason' => $delayed ? match ($batch->status) {
+                OvertimeDecisionBatch::QUEUED => 'queued_without_recent_activity',
+                OvertimeDecisionBatch::PROCESSING => 'processing_without_recent_activity',
+                default => 'nonterminal_without_recent_activity',
+            } : null,
+            'created_at' => $batch->created_at?->toIso8601String(),
+            'started_at' => $batch->started_at?->toIso8601String(),
+            'finished_at' => $batch->finished_at?->toIso8601String(),
+            'latest_activity_at' => $latestActivity?->toIso8601String(),
+            'last_error' => $batch->last_error,
         ];
         $this->batchErrors = $batch->items()->where('status', 'failed')
             ->whereNotNull('last_error')->limit(5)->pluck('last_error')->all();
