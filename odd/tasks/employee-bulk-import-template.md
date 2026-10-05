@@ -38,4 +38,4 @@ Add an official Excel template and bulk employee upload flow to the Employees mo
 - Historical passed: `lerd php artisan test tests/Feature/Empleados/EmployeeCrudTest.php` — 21 passed, 107 assertions.
 
 ## Work-unit commits
-- `72085d4` — `fix(employees): preserve template date columns as text`.
+- `f0338c7` — `fix(employees): preserve template date columns as text`.
