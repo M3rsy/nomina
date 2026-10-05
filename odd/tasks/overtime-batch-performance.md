@@ -83,7 +83,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - [x] Reduce duplicate candidate resolution to one authoritative path.
 - [x] Shorten the requester critical transaction and evaluate safe bulk item insertion; retain the authoritative scan under the period lock until every candidate dependency has a shared revision contract.
 - [x] Remove safe worker N+1 queries and validate lock-aware chunk processing.
-- [ ] Improve progress/error/worker-stalled observability and loading target isolation.
+- [x] Improve progress/error/worker-stalled observability and loading target isolation.
 - [x] Evaluate SQL projection semantics for `uploaded_file_id` and prove index needs; retain canonical mixed-file resolution and make no unsupported index change.
 - [ ] Add functional and scale coverage for 249 candidates plus documented 500/501 boundaries.
 - [ ] Run related SQLite/PostgreSQL suites, manual QA, review each work unit, and open the linked PR.
@@ -97,6 +97,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - Keep `payroll_review_entries` as a UI/cache source, not the authoritative batch-request source. Its generation/build/read steps are not one atomic revision and omit snapshot dependencies such as fact generations and vacation inputs.
 - Do not project `uploaded_file_id` by candidate ownership. Current semantics retain an entire shift occurrence when any contributing mark came from the file, including every candidate in a mixed-file occurrence. Exact projection support would require generation-owned occurrence/upload membership (for example, an entry-to-upload link table) plus complete freshness coverage.
 - Add or remove no PostgreSQL index for this issue: measured snapshot SELECTs are milliseconds while candidate evaluation is seconds. The standalone `raw_marks(uploaded_file_id)` index may be structurally redundant with the unique `(uploaded_file_id, row_number)` prefix, but its cleanup is unrelated and unproven here.
+- Treat 30 seconds without batch or item activity as an observability heuristic only. The payload distinguishes queued and processing delay reasons, keeps the durable batch status authoritative, and continues polling every nonterminal batch.
 
 ## Verification
 - Reversible local PostgreSQL measurements restored batch/item/decision row counts after each harness.
@@ -142,6 +143,12 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `vendor/bin/pint app/Services/Attendance/OvertimeDecisionBatchRequester.php tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php` passed.
 - Reversible PostgreSQL 249-candidate verification reduced item persistence from 249 INSERTs to one. Requester wall time was 50.564ms versus the 210.2ms `createMany()` baseline; item INSERT listener time was 15.370ms versus 83.42ms. The insert ran at the nested requester transaction level and relation hydration ran only after returning to the outer baseline transaction. All 249 rows were pending with zero attempts, matching fingerprints, and timestamps. Rollback restored 7 batches, 367 items, 367 decisions, zero jobs, and both affected sequence states exactly.
 - Read-only PostgreSQL period-35 evidence located the remaining canonical-read cost in PHP: 6,670.55ms wall and 15 queries/33.34ms DB time, with `forEachReview` alone taking 6,513.73ms and zero queries while producing 552 reviews, 249 overtime candidates, and 164 deficits. Five representative snapshot SELECTs totaled 2.887ms. Raw marks used bitmap scans on existing company and event-time indexes (1,191 rows, 2.173ms); decisions used rational sequential scans/hash anti-join over 367 rows (349 returned, 0.601ms). No index change is justified for the measured 7–16s path.
+- Progress observability RED: `php artisan test tests/Feature/Nomina/OvertimeBatchProgressTest.php` failed 5 new tests because lifecycle timestamps, latest activity, delay metadata, and batch `last_error` were absent.
+- Loading-target RED: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` failed because approved/rejected open actions and batch cancellation were not scoped to their intended Livewire methods.
+- Progress observability GREEN: `php artisan test tests/Feature/Nomina/OvertimeBatchProgressTest.php` passed with 8 tests and 52 assertions, including once-only terminal notification, non-duplicated batch-error feedback, and grouped-query latest-activity coverage.
+- Loading-target GREEN: `php artisan test tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed with 1 test and 21 assertions.
+- Progress integration triangulation: `php artisan test tests/Feature/Attendance/OvertimeDecisionBatchRequesterTest.php --filter='reports deterministic progress|renders actor scoped batch progress|stops isolated polling'` passed with 3 tests and 47 assertions.
+- `vendor/bin/pint --test app/Livewire/Nomina/OvertimeBatchProgress.php resources/views/livewire/nomina/overtime-batch-progress.blade.php resources/views/livewire/nomina/overtime-review-panel.blade.php tests/Feature/Nomina/OvertimeBatchProgressTest.php tests/Feature/Ui/PayrollDecisionLoadingFeedbackTest.php` passed after fixing test import ordering.
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -182,4 +189,6 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - The deterministic SQLite `handle()` seam regression reduced a full mocked-recorder chunk from 165 to 32 queries, with batch SELECTs reduced from 41 to 3 and actor, period, and employee SELECTs reduced from 20 each to 1 each.
 - `OvertimeDecisionBatchRequester` now owns the authoritative filtered pending-target resolution through a typed request value; the parent validates only the untrusted intent shape and no longer scans candidates or computes confirmation hashes.
 - The public renderless submit action now captures raw marks once instead of twice and preserves accepted/started event semantics without an HTML effect.
+- Overtime progress now exposes lifecycle timestamps, latest batch/item activity, batch errors, and queued-versus-processing delay reasons. Spanish UI labels and warnings remain truthful: inactivity suggests checking the queue worker if unchanged but does not claim it stopped.
+- Batch approve/reject open controls target only their exact action; confirmation and cancellation target only `submitOvertimeBatch`, while selection controls remain untargeted.
 - Idempotency payload validation remains ahead of candidate resolution. Exact retries after completed decisions recover with zero raw-mark captures, while every selection input is bound to the stored payload hash.

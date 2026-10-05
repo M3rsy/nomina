@@ -24,9 +24,13 @@ test('payroll decisions expose scoped loading feedback without targeting selecti
 
     expect($panel)
         ->toContain('wire:click="openOvertimeDecision(')
-        ->toContain('wire:click="openOvertimeBatch(')
+        ->toContain('wire:click="openOvertimeBatch(\'approved\')" loading-label="Abriendo…" target="openOvertimeBatch(\'approved\')"')
+        ->toContain('wire:click="openOvertimeBatch(\'rejected\')" loading-label="Abriendo…" target="openOvertimeBatch(\'rejected\')"')
         ->toContain('target="submitOvertimeBatch"')
         ->toContain('target="submitOvertimeDecision"')
+        ->toMatch('/<button(?=[^>]*wire:click="closeOvertimeBatchModal")(?=[^>]*wire:loading\.attr="disabled")(?=[^>]*wire:target="submitOvertimeBatch")[^>]*>/')
+        ->not->toContain('target="openOvertimeBatch"')
+        ->not->toContain('target="closeOvertimeBatchModal"')
         ->not->toContain('target="selectCurrentOvertimePage"')
         ->not->toContain('target="selectAllFilteredOvertime"')
         ->not->toContain('target="clearOvertimeSelection"');
