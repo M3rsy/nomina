@@ -193,7 +193,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 | 6 | #402 | `perf/overtime-single-resolution` | `perf/overtime-bulk-insert` | 97 | `type:feature` | Draft |
 | 7 | #403 | `perf/overtime-bulk-insert` | `feat/overtime-batch-observability` | 286 | `type:feature` | Draft |
 | 8 | #404 | `feat/overtime-batch-observability` | `test/overtime-batch-scale` | 194 | `type:chore` | Draft |
-| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 58 | `type:bug` | Draft |
+| 9 | #405 | `test/overtime-batch-scale` | `fix/overtime-accepted-modal` | 83 | `type:bug` | Draft |
 
 ## Work-unit commits
 - Prerequisite local follow-up commits are documented in the inherited ODD files.
@@ -218,6 +218,7 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `c9a88c4 docs(odd): link batch scale work unit`
 - `92ba44d fix(nomina): close accepted batch modal`
 - `59b4477 docs(odd): link accepted modal work unit`
+- `43b8ff3 docs(odd): record stacked pull requests`
 
 ## QA plan
 1. Load a representative payroll and open Review.
