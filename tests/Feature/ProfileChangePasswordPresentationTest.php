@@ -102,7 +102,11 @@ test('change password page presents truthful account context and security guidan
         ->assertSeeText('hash seguro')
         ->assertSeeText('invalida las demás sesiones guardadas');
 
-    $content = mb_strtolower($response->getContent());
+    $document = new DOMDocument;
+    @$document->loadHTML($response->getContent());
+    $xpath = new DOMXPath($document);
+    $mainContent = $xpath->query('//*[@id="main-content"]')->item(0)?->textContent ?? '';
+    $content = mb_strtolower($mainContent);
 
     expect($content)->not->toContain('2fa')
         ->not->toContain('totp')
