@@ -249,16 +249,19 @@
         </div>
     </section>
 
-    @if ($activeOvertimeBatchId)
-        <livewire:nomina.overtime-batch-progress
-            :pay-period="$payPeriod"
-            :batch-id="$activeOvertimeBatchId"
-            :key="'overtime-batch-'.$activeOvertimeBatchId"
-        />
-    @endif
+    <livewire:nomina.overtime-batch-progress
+        :pay-period="$payPeriod"
+        :batch-id="$activeOvertimeBatchId"
+        :key="'overtime-batch-progress-'.$payPeriod->id"
+    />
 
     @if ($status !== 'justified')
-        <livewire:nomina.overtime-review-panel :pay-period="$payPeriod" :uploaded-file-id="$uploaded_file_id" :is-blocked="$isBlocked" />
+        <livewire:nomina.overtime-review-panel
+            :pay-period="$payPeriod"
+            :uploaded-file-id="$uploaded_file_id"
+            :is-blocked="$isBlocked"
+            lazy="on-load"
+        />
     @endif
 
 

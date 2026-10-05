@@ -910,6 +910,7 @@ class Revisar extends Component
     }
 
     #[On('overtime-batch-submitted')]
+    #[Renderless]
     public function requestOvertimeBatchFromPanel(array $intent): void
     {
         if ($this->isBlocked()) {
@@ -957,6 +958,7 @@ class Revisar extends Component
         );
         $this->activeOvertimeBatchId = $batch->id;
         $this->refreshedOvertimeBatchId = null;
+        $this->dispatch('overtime-batch-started', batchId: $batch->id)->to(OvertimeBatchProgress::class);
         $this->dispatch('overtime-batch-recorded')->to(OvertimeReviewPanel::class);
         session()->flash('success', 'El lote fue enviado y se procesará en segundo plano.');
     }
@@ -1623,7 +1625,6 @@ class Revisar extends Component
             $recorder->decide($this->payPeriod, $employee, $validated['overtimeDecisionWorkDate'], $validated['overtimeCandidateKey'], $validated['overtimeDecision'], $validated['overtimeDecisionReason'], Auth::user());
         }
 
-        $this->loadReadinessBlockers();
         session()->flash('success', $validated['overtimeDecision'] === OvertimeDecision::PARTIAL
             ? 'Tramo parcial aprobado y complemento rechazado.'
             : 'Tramo completo '.($validated['overtimeDecision'] === OvertimeDecision::APPROVED ? 'aprobado' : 'rechazado').' y registrado en el historial.');

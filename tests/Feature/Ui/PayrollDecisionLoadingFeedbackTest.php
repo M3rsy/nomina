@@ -13,6 +13,15 @@ test('payroll decisions expose scoped loading feedback without targeting selecti
         ->not->toContain('target="saveOvertimeBatch"')
         ->not->toContain('target="saveOvertimeDecision"');
 
+    expect($review)
+        ->toMatch(
+            '/<livewire:nomina\.overtime-review-panel(?=[^>]*:pay-period="\$payPeriod")(?=[^>]*:uploaded-file-id="\$uploaded_file_id")(?=[^>]*:is-blocked="\$isBlocked")(?=[^>]*lazy="on-load")[^>]*\/>/s',
+        )
+        ->toMatch(
+            '/<livewire:nomina\.overtime-batch-progress\s+:pay-period="\$payPeriod"\s+:batch-id="\$activeOvertimeBatchId"\s+:key="\'overtime-batch-progress-\'\.\$payPeriod->id"\s*\/>/s',
+        )
+        ->not->toContain('@if ($activeOvertimeBatchId)');
+
     expect($panel)
         ->toContain('wire:click="openOvertimeDecision(')
         ->toContain('wire:click="openOvertimeBatch(')
