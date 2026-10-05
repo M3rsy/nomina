@@ -198,6 +198,8 @@ The real local batch #10 provides end-to-end observational evidence: 249 items a
 - `cda04ff feat(nomina): surface overtime batch activity`
 - `ee538d1 docs(odd): link batch activity work unit`
 - `57241e8 test(attendance): cover overtime batch scale`
+- `c9a88c4 docs(odd): link batch scale work unit`
+- `92ba44d fix(nomina): close accepted batch modal`
 
 ## QA plan
 1. Load a representative payroll and open Review.
