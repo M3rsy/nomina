@@ -6,6 +6,12 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
 {
     private const ORDINARY_QUOTA_MINUTES = 8 * 60;
 
+    private const SATURDAY = 6;
+
+    private const SATURDAY_PHYSICAL_QUOTA_MINUTES = 4 * 60;
+
+    private const SATURDAY_RECOGNIZED_MINUTES = 4 * 60;
+
     private const SUNDAY = 0;
 
     private const OVERRIDE_BUCKET = 'extra100';
@@ -37,6 +43,9 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
             $this->calculationMode,
             parent::SECONDS_PER_MINUTE,
             self::ORDINARY_QUOTA_MINUTES,
+            self::SATURDAY,
+            self::SATURDAY_PHYSICAL_QUOTA_MINUTES,
+            self::SATURDAY_RECOGNIZED_MINUTES,
             self::SUNDAY,
             self::OVERRIDE_BUCKET,
             self::OVERTIME_BANDS,
@@ -48,9 +57,25 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
 
     public function ordinaryMinutes(int $workedMinutes, bool $isHoliday, int $dayOfWeek): int
     {
-        return $this->isHolidayOrSunday($isHoliday, $dayOfWeek)
-            ? 0
-            : min($workedMinutes, self::ORDINARY_QUOTA_MINUTES);
+        if ($this->isHolidayOrSunday($isHoliday, $dayOfWeek)) {
+            return 0;
+        }
+
+        if ($dayOfWeek === self::SATURDAY) {
+            return min($workedMinutes, self::SATURDAY_PHYSICAL_QUOTA_MINUTES)
+                + self::SATURDAY_RECOGNIZED_MINUTES;
+        }
+
+        return min($workedMinutes, self::ORDINARY_QUOTA_MINUTES);
+    }
+
+    public function overtimeStartMinutes(int $workedMinutes, bool $isHoliday, int $dayOfWeek): int
+    {
+        if ($this->isHolidayOrSunday($isHoliday, $dayOfWeek)) {
+            return 0;
+        }
+
+        return min($workedMinutes, $this->overtimeQuotaMinutes($dayOfWeek));
     }
 
     public function overrideRateBucket(bool $isHoliday, int $dayOfWeek): ?string
@@ -75,7 +100,7 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
             return 0;
         }
 
-        return max(0, self::ORDINARY_QUOTA_MINUTES - $workedMinutes);
+        return max(0, $this->overtimeQuotaMinutes($dayOfWeek) - $workedMinutes);
     }
 
     public function shouldCreateOvertimeCandidate(
@@ -84,7 +109,7 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
         int $dayOfWeek,
     ): bool {
         return ! $this->isHolidayOrSunday($isHoliday, $dayOfWeek)
-            && $workedMinutes > self::ORDINARY_QUOTA_MINUTES;
+            && $workedMinutes > $this->overtimeQuotaMinutes($dayOfWeek);
     }
 
     public function excludedTransferMinutes(
@@ -96,7 +121,7 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
             return 0;
         }
 
-        $overtimeMinutes = max(0, $workedMinutes - self::ORDINARY_QUOTA_MINUTES);
+        $overtimeMinutes = max(0, $workedMinutes - $this->overtimeQuotaMinutes($dayOfWeek));
         $residualMinutes = $overtimeMinutes % 60;
 
         return $overtimeMinutes >= self::TRANSFER_MINIMUM_OVERTIME_MINUTES
@@ -115,7 +140,7 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
             return 0;
         }
 
-        return $workedMinutes - self::ORDINARY_QUOTA_MINUTES
+        return $workedMinutes - $this->overtimeQuotaMinutes($dayOfWeek)
             - $this->excludedTransferMinutes($workedMinutes, $isHoliday, $dayOfWeek);
     }
 
@@ -137,9 +162,16 @@ final readonly class DurationFirstPolicyDefinition extends PayrollPolicyDefiniti
         int $dayOfWeek,
     ): bool {
         return ! $this->isHolidayOrSunday($isHoliday, $dayOfWeek)
-            && $workedMinutes >= self::ORDINARY_QUOTA_MINUTES
+            && $workedMinutes >= $this->overtimeQuotaMinutes($dayOfWeek)
             && $minutesAfterScheduledStart !== null
             && $minutesAfterScheduledStart > self::ENTRY_VARIATION_GRACE_MINUTES;
+    }
+
+    private function overtimeQuotaMinutes(int $dayOfWeek): int
+    {
+        return $dayOfWeek === self::SATURDAY
+            ? self::SATURDAY_PHYSICAL_QUOTA_MINUTES
+            : self::ORDINARY_QUOTA_MINUTES;
     }
 
     private function isHolidayOrSunday(bool $isHoliday, int $dayOfWeek): bool

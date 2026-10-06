@@ -12,6 +12,9 @@ use App\Models\RawMark;
 use App\Models\WorkScheduleProfile;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
+use App\Services\Attendance\AttendanceReviewSummaryReader;
+use App\Services\Attendance\DuplicateRawMarkGroupReader;
+use App\Services\Attendance\DuplicateRawMarkResolver;
 use App\Services\Attendance\HolidayCalendarContext;
 use App\Services\Attendance\ManualRawMarkRecorder;
 use App\Services\Attendance\OvertimeDecisionBatchRequest;
@@ -81,6 +84,19 @@ class Revisar extends Component
     public ?int $deleteRawMarkId = null;
 
     public string $deleteReason = '';
+
+    public bool $showDuplicateResolutionModal = false;
+
+    public bool $duplicateResolutionBulk = false;
+
+    public ?string $duplicateResolutionKey = null;
+
+    public ?int $duplicateResolutionKeptRawMarkId = null;
+
+    public string $duplicateResolutionReason = '';
+
+    /** @var list<array<string, mixed>> */
+    public array $duplicateResolutionPreview = [];
 
     public bool $showCorrectModal = false;
 
@@ -219,9 +235,18 @@ class Revisar extends Component
             ->orderBy('name')
             ->get();
         $snapshot = $this->periodReviewSnapshot();
+        $this->readinessBlockers = app(PayrollReadinessChecker::class)
+            ->blockers($this->payPeriod, null, $snapshot)
+            ->values()
+            ->all();
+        $criticalReadiness = $this->criticalReadiness();
+        $attendanceSummary = app(AttendanceReviewSummaryReader::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id, $snapshot);
         $allFaltas = $this->detectFaltas($snapshot);
         $faltas = $this->filterFaltasByStatus($allFaltas);
         $summary = $this->summaryCounts($allFaltas);
+        $duplicateSummary = app(DuplicateRawMarkGroupReader::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
         $isBlocked = $this->isBlocked();
         $uploadedFiles = $this->payPeriod->uploadedFiles()->orderBy('created_at', 'desc')->get();
         $attendanceReviews = app(AttendanceReviewQuery::class)
@@ -234,6 +259,9 @@ class Revisar extends Component
         return view('livewire.nomina.revisar', [
             'records' => $records,
             'summary' => $summary,
+            'attendanceSummary' => $attendanceSummary,
+            'duplicateSummary' => $duplicateSummary,
+            'criticalReadiness' => $criticalReadiness,
             'employees' => $employees,
             'scheduleProfiles' => $scheduleProfiles,
             'faltas' => $faltas,
@@ -510,6 +538,113 @@ class Revisar extends Component
         });
 
         $this->closeDeleteModal();
+    }
+
+    public function openDuplicateResolution(string $duplicateKey): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $summary = app(DuplicateRawMarkGroupReader::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
+        $group = $summary['groups']->firstWhere('key', $duplicateKey);
+
+        if ($group === null) {
+            $this->addError('duplicateResolution', 'El grupo duplicado ya fue resuelto. Actualice la revisión.');
+
+            return;
+        }
+
+        $this->duplicateResolutionBulk = false;
+        $this->duplicateResolutionKey = $group['key'];
+        $this->duplicateResolutionKeptRawMarkId = $group['kept_candidate']['id'];
+        $this->duplicateResolutionPreview = [$group];
+        $this->duplicateResolutionReason = '';
+        $this->resetErrorBag();
+        $this->showDuplicateResolutionModal = true;
+    }
+
+    public function openBulkDuplicateResolution(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        $summary = app(DuplicateRawMarkGroupReader::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
+        if ($summary['groups']->isEmpty()) {
+            return;
+        }
+
+        $this->duplicateResolutionBulk = true;
+        $this->duplicateResolutionKey = null;
+        $this->duplicateResolutionKeptRawMarkId = null;
+        $this->duplicateResolutionPreview = $summary['groups']->all();
+        $this->duplicateResolutionReason = '';
+        $this->resetErrorBag();
+        $this->showDuplicateResolutionModal = true;
+    }
+
+    public function closeDuplicateResolutionModal(): void
+    {
+        $this->showDuplicateResolutionModal = false;
+        $this->duplicateResolutionBulk = false;
+        $this->duplicateResolutionKey = null;
+        $this->duplicateResolutionKeptRawMarkId = null;
+        $this->duplicateResolutionReason = '';
+        $this->duplicateResolutionPreview = [];
+        $this->resetErrorBag();
+    }
+
+    public function confirmDuplicateResolution(): void
+    {
+        if ($this->isBlocked()) {
+            return;
+        }
+
+        Gate::authorize('marks.manage');
+        $this->duplicateResolutionReason = trim($this->duplicateResolutionReason);
+        $validated = $this->validate([
+            'duplicateResolutionReason' => ['required', 'string', 'max:500'],
+        ], [
+            'duplicateResolutionReason.required' => 'Debe indicar el motivo de la resolución.',
+        ]);
+
+        $summary = app(DuplicateRawMarkGroupReader::class)
+            ->forPeriod($this->payPeriod, $this->uploaded_file_id);
+        $groups = $this->duplicateResolutionBulk
+            ? $summary['groups']
+            : $summary['groups']->filter(fn (array $group): bool => $group['key'] === $this->duplicateResolutionKey);
+
+        if ($groups->isEmpty()) {
+            $this->addError('duplicateResolution', 'El grupo duplicado ya fue resuelto. Actualice la revisión.');
+
+            return;
+        }
+
+        $resolved = DB::transaction(function () use ($groups, $validated): int {
+            $resolved = 0;
+
+            foreach ($groups as $group) {
+                $resolved += app(DuplicateRawMarkResolver::class)->resolve(
+                    $this->payPeriod,
+                    $group['key'],
+                    (int) $group['kept_candidate']['id'],
+                    $validated['duplicateResolutionReason'],
+                    (int) Auth::id(),
+                    $this->uploaded_file_id,
+                );
+            }
+
+            return $resolved;
+        });
+
+        $this->periodReviewSnapshot = null;
+        $this->loadReadinessBlockers();
+        $this->resetPage();
+        $this->closeDuplicateResolutionModal();
+        session()->flash('success', "Se resolvieron {$resolved} registros duplicados sin eliminar la evidencia original.");
     }
 
     public function openAssignModal(int $id): void
@@ -886,6 +1021,11 @@ class Revisar extends Component
     {
         $this->authorize('view', $this->payPeriod);
         Gate::authorize('payroll.process');
+        $this->loadReadinessBlockers();
+        if ($this->setCriticalReadinessMessage()) {
+            return;
+        }
+
         $this->payrollRunRequestKey = (string) Str::uuid();
         $run = app(StartPayrollProcessing::class)->start(
             $this->payPeriod,
@@ -1209,7 +1349,8 @@ class Revisar extends Component
             return;
         }
 
-        if ($this->loadReadinessBlockers()) {
+        $this->loadReadinessBlockers();
+        if ($this->setCriticalReadinessMessage()) {
             return;
         }
 
@@ -1265,6 +1406,11 @@ class Revisar extends Component
     public function confirmContinueToReady(): void
     {
         if ($this->isBlocked()) {
+            return;
+        }
+
+        $this->loadReadinessBlockers();
+        if ($this->setCriticalReadinessMessage()) {
             return;
         }
 
@@ -1350,6 +1496,8 @@ class Revisar extends Component
             'duplicate' => 'bg-yellow-100 text-yellow-800',
             'out_of_period' => 'bg-orange-100 text-orange-800',
             'unknown_employee' => 'bg-red-100 text-red-800',
+            'invalid' => 'bg-red-100 text-red-800',
+            'pending' => 'bg-slate-100 text-slate-800',
             'corrected' => 'bg-blue-100 text-blue-800',
             'deleted' => 'bg-gray-100 text-gray-800',
             'justified' => 'bg-purple-100 text-purple-800',
@@ -1364,6 +1512,8 @@ class Revisar extends Component
             'duplicate' => 'Duplicado',
             'out_of_period' => 'Fuera de período',
             'unknown_employee' => 'Empleado desconocido',
+            'invalid' => 'Inválido',
+            'pending' => 'Pendiente',
             'corrected' => 'Corregido',
             'deleted' => 'Eliminado',
             'justified' => 'Justificado',
@@ -1374,7 +1524,7 @@ class Revisar extends Component
     private function queryRawMarks()
     {
         return RawMark::query()
-            ->activeForAttendance()
+            ->when($this->status !== 'deleted', fn ($query) => $query->activeForAttendance())
             ->where('pay_period_id', $this->payPeriod->id)
             ->with(['employee', 'uploadedFile'])
             ->when($this->search, function ($query) {
@@ -1410,8 +1560,11 @@ class Revisar extends Component
     private function summaryCounts(Collection $faltas): array
     {
         $counts = RawMark::query()
-            ->activeForAttendance()
             ->where('pay_period_id', $this->payPeriod->id)
+            ->where(function ($query): void {
+                $query->where('status', 'deleted')
+                    ->orWhere(fn ($active) => $active->activeForAttendance());
+            })
             ->selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
@@ -1423,6 +1576,8 @@ class Revisar extends Component
             'duplicate' => $counts['duplicate'] ?? 0,
             'out_of_period' => $counts['out_of_period'] ?? 0,
             'unknown_employee' => $counts['unknown_employee'] ?? 0,
+            'invalid' => $counts['invalid'] ?? 0,
+            'pending' => $counts['pending'] ?? 0,
             'corrected' => $counts['corrected'] ?? 0,
             'deleted' => $counts['deleted'] ?? 0,
             'justified' => $faltas->whereNotNull('attendance_exception')->count(),
@@ -1467,17 +1622,66 @@ class Revisar extends Component
 
     private function readinessMessage(): ?string
     {
-        $invalidStatuses = RawMark::query()
-            ->activeForAttendance()
-            ->where('pay_period_id', $this->payPeriod->id)
-            ->whereIn('status', ['pending', 'unknown_employee', 'out_of_period', 'duplicate'])
-            ->exists();
-
-        if ($invalidStatuses) {
-            return 'Aún existen marcas pendientes, desconocidas, fuera de período o duplicadas. ¿Desea continuar de todas formas?';
+        if ($this->payPeriod->uploadedFiles()->where('status', 'valid_with_warnings')->exists()) {
+            return 'La importación tiene advertencias no críticas. ¿Desea continuar de todas formas?';
         }
 
         return null;
+    }
+
+    /** @return array{has_blockers:bool, incidents:list<string>} */
+    private function criticalReadiness(): array
+    {
+        $counts = RawMark::query()
+            ->activeForAttendance()
+            ->where('pay_period_id', $this->payPeriod->id)
+            ->whereIn('status', ['pending', 'unknown_employee', 'out_of_period', 'invalid', 'duplicate'])
+            ->selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status')
+            ->map(fn ($count): int => (int) $count)
+            ->all();
+        $duplicateSummary = app(DuplicateRawMarkGroupReader::class)
+            ->forPeriod($this->payPeriod);
+        $duplicateGroups = $duplicateSummary['duplicate_groups'];
+        $incidents = [];
+        $labels = [
+            'pending' => 'filas pendientes',
+            'unknown_employee' => 'filas con empleados desconocidos',
+            'out_of_period' => 'filas fuera de período',
+            'invalid' => 'filas inválidas',
+            'duplicate' => 'marcas duplicadas',
+        ];
+
+        foreach ($labels as $status => $label) {
+            if (($counts[$status] ?? 0) > 0) {
+                $incidents[] = sprintf('%s: %d', $label, $counts[$status]);
+            }
+        }
+
+        if ($duplicateGroups > 0) {
+            $incidents[] = sprintf('grupos duplicados sin resolver: %d', $duplicateGroups);
+        }
+
+        if ($this->readinessBlockers !== []) {
+            $incidents[] = sprintf('bloqueos de asistencia o preparación: %d', count($this->readinessBlockers));
+        }
+
+        return ['has_blockers' => $incidents !== [], 'incidents' => $incidents];
+    }
+
+    private function setCriticalReadinessMessage(): bool
+    {
+        $criticalReadiness = $this->criticalReadiness();
+        if (! $criticalReadiness['has_blockers']) {
+            return false;
+        }
+
+        $this->readyMessage = 'No puede continuar al procesamiento. Resuelva primero: '
+            .implode('; ', $criticalReadiness['incidents']).'.';
+        $this->showReadyConfirm = false;
+
+        return true;
     }
 
     private function startProcessing(): void

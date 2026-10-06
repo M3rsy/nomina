@@ -386,7 +386,7 @@ class AttendanceShiftAnalyzer
         $dayOfWeek = $occurrence->workDate->dayOfWeek;
 
         if ($policy->overrideRateBucket($isHoliday, $dayOfWeek) !== null) {
-            return $this->durationFirstOverride($occurrence, $policy, $entry, $exit, $workedMinutes, $isHoliday);
+            return $this->durationFirstOverride($occurrence, $policy, $entry, $exit, $workedMinutes, $isHoliday, $calendarGeneration);
         }
 
         $ordinaryMinutes = $policy->ordinaryMinutes($workedMinutes, $isHoliday, $dayOfWeek);
@@ -427,7 +427,11 @@ class AttendanceShiftAnalyzer
         }
 
         if ($policy->shouldCreateOvertimeCandidate($workedMinutes, $isHoliday, $dayOfWeek)) {
-            $candidateStart = $entry->addMinutes($ordinaryMinutes);
+            $candidateStart = $entry->addMinutes($policy->overtimeStartMinutes(
+                $workedMinutes,
+                $isHoliday,
+                $dayOfWeek,
+            ));
             $overtimeCandidates->push($this->durationFirstOvertimeCandidate(
                 $occurrence,
                 $policy,
@@ -464,12 +468,28 @@ class AttendanceShiftAnalyzer
         CarbonImmutable $exit,
         int $workedMinutes,
         bool $isHoliday,
+        int $calendarGeneration,
     ): AttendanceShiftAnalysis {
         $overrideMinutes = $policy->extra100Minutes(
             $workedMinutes,
             $isHoliday,
             $occurrence->workDate->dayOfWeek,
         );
+        $overtimeCandidates = collect();
+        $scheduledRates = new BandSplit(extra100Minutes: $overrideMinutes);
+        $scheduledMinutes = $overrideMinutes;
+
+        if (! $isHoliday && $occurrence->workDate->dayOfWeek === PayrollRules::DAY_SUNDAY && $overrideMinutes > 0) {
+            $scheduledRates = new BandSplit;
+            $scheduledMinutes = 0;
+            $overtimeCandidates->push($this->withLegacyIdentity(new AttendanceSegment(
+                'non_working',
+                $entry,
+                $entry->addMinutes($workedMinutes),
+                $this->fingerprint($occurrence, $isHoliday, $calendarGeneration),
+                new BandSplit(extra100Minutes: $overrideMinutes),
+            ), $this->legacyFingerprint($occurrence, $isHoliday, $calendarGeneration)));
+        }
 
         return new AttendanceShiftAnalysis(
             status: $occurrence->status,
@@ -477,10 +497,10 @@ class AttendanceShiftAnalyzer
             entryAt: $entry,
             exitAt: $exit,
             workedMinutes: $workedMinutes,
-            scheduledMinutes: $overrideMinutes,
-            scheduledRates: new BandSplit(extra100Minutes: $overrideMinutes),
+            scheduledMinutes: $scheduledMinutes,
+            scheduledRates: $scheduledRates,
             deficits: collect(),
-            overtimeCandidates: collect(),
+            overtimeCandidates: $overtimeCandidates,
             isHoliday: $isHoliday,
             publicationId: $occurrence->publicationId,
             payrollPolicyKey: $occurrence->payrollPolicyKey,

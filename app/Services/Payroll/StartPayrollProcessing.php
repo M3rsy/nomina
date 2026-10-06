@@ -73,15 +73,15 @@ final readonly class StartPayrollProcessing
                     ]);
                 }
 
-                if ($lockedPeriod->status !== 'ready') {
-                    $snapshot = $this->reviewSnapshot->captureForPeriod($lockedPeriod, $calendar);
-                    $blockers = $this->readinessChecker->blockers($lockedPeriod, $calendar, $snapshot);
-                    if ($blockers->isNotEmpty()) {
-                        throw ValidationException::withMessages([
-                            'pay_period' => 'El período todavía tiene revisiones obligatorias pendientes.',
-                        ]);
-                    }
+                $snapshot = $this->reviewSnapshot->captureForPeriod($lockedPeriod, $calendar);
+                $blockers = $this->readinessChecker->blockers($lockedPeriod, $calendar, $snapshot);
+                if ($blockers->isNotEmpty()) {
+                    throw ValidationException::withMessages([
+                        'pay_period' => 'El período todavía tiene revisiones obligatorias pendientes.',
+                    ]);
+                }
 
+                if ($lockedPeriod->status !== 'ready') {
                     $lockedPeriod->update(['status' => 'ready']);
                 }
 

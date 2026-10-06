@@ -7,17 +7,24 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDecision;
 use App\Models\PayPeriod;
+use App\Models\PayrollRun;
 use App\Models\RawMark;
 use App\Models\UploadedFile;
 use App\Models\User;
 use App\Models\WorkSchedule;
 use App\Models\WorkScheduleProfile;
+use App\Models\WorkScheduleProfilePublication;
 use App\Services\Attendance\AttendanceExceptionRecorder;
 use App\Services\Attendance\AttendanceReviewQuery;
+use App\Services\Attendance\AttendanceReviewSummaryReader;
+use App\Services\Attendance\DuplicateRawMarkResolver;
 use App\Services\Attendance\EmployeeScheduleAssigner;
 use App\Services\Attendance\OvertimeDecisionRecorder;
 use App\Services\CurrentCompany;
+use App\Services\Payroll\StartPayrollProcessing;
 use Database\Seeders\PermissionRoleSeeder;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -55,6 +62,297 @@ test('shows exact server-calculated overtime candidates beside attendance and sc
         ->assertSee('Pendiente de decisión')
         ->assertSee('Aprobar completo')
         ->assertSee('Rechazar completo');
+});
+
+test('shows grouped duplicate rows with a kept and removable preview', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('duplicateSummary', fn (array $summary): bool => $summary['duplicate_groups'] === 1
+            && $summary['duplicate_records_to_resolve'] === 1
+            && $summary['employee_count_with_duplicates'] === 1
+            && $summary['groups']->sole()['removable_records'][0]['row_number'] !== null)
+        ->assertSee('Registros duplicados')
+        ->assertSee('Conservar fila')
+        ->assertSee('Resolver fila');
+});
+
+test('blocks readiness for every critical raw mark status and cannot be bypassed by confirmation', function (string $status) {
+    $context = attendanceReviewPageFixture('2026-07-20 06:00:00', '2026-07-20 14:00:00');
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->create([
+            'employee_external_id' => 'INC-'.$status,
+            'employee_id' => $status === 'unknown_employee' ? null : $context['employee']->id,
+            'event_at' => '2026-07-20 09:00:00',
+            'status' => $status,
+        ]);
+    $this->actingAs($context['actor']);
+
+    $component = Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('continueToReady')
+        ->assertSet('showReadyConfirm', false)
+        ->assertSet('readyMessage', fn (?string $message): bool => str_contains($message ?? '', 'No puede continuar'))
+        ->assertViewHas('criticalReadiness', fn (array $readiness): bool => $readiness['has_blockers']);
+
+    $component
+        ->set('showReadyConfirm', true)
+        ->call('confirmContinueToReady')
+        ->assertSet('showReadyConfirm', false);
+
+    expect(PayrollRun::query()->where('pay_period_id', $context['period']->id)->count())->toBe(0);
+})->with(['pending', 'unknown_employee', 'out_of_period', 'invalid']);
+
+test('blocks readiness when an unresolved duplicate group remains', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:00:00', '2026-07-20 14:00:00');
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('continueToReady')
+        ->assertSet('showReadyConfirm', false)
+        ->assertSet('readyMessage', fn (?string $message): bool => str_contains($message ?? '', 'grupos duplicados sin resolver'))
+        ->assertViewHas('criticalReadiness', fn (array $readiness): bool => collect($readiness['incidents'])
+            ->contains(fn (string $incident): bool => str_contains($incident, 'grupos duplicados sin resolver')));
+});
+
+test('shows duplicate groups from the filtered upload even when the kept mark is in another file', function () {
+    $context = attendanceReviewPageFixture();
+    $secondFile = UploadedFile::factory()->forCompany($context['company'])->forPayPeriod($context['period'])->create();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($secondFile)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    $this->actingAs($context['actor']);
+
+    Livewire::withQueryParams(['uploaded_file_id' => $secondFile->id])
+        ->test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('duplicateSummary', fn (array $summary): bool => $summary['duplicate_groups'] === 1
+            && $summary['duplicate_records_to_resolve'] === 1
+            && $summary['groups']->sole()['kept_candidate']['file_name'] !== $secondFile->original_name)
+        ->assertSee('Registros duplicados')
+        ->assertSee('Resolver fila');
+});
+
+test('resolving an all-duplicate group promotes the kept mark to corrected', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    RawMark::query()->where('pay_period_id', $context['period']->id)
+        ->where('event_at', '2026-07-20 06:00:00')
+        ->update(['status' => 'duplicate']);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('openDuplicateResolution', $context['employee']->external_id.'|2026-07-20 06:00:00')
+        ->set('duplicateResolutionReason', 'Se conserva una marca verificada')
+        ->call('confirmDuplicateResolution')
+        ->assertHasNoErrors();
+
+    $activeMarks = RawMark::query()
+        ->where('pay_period_id', $context['period']->id)
+        ->where('employee_external_id', $context['employee']->external_id)
+        ->where('event_at', '2026-07-20 06:00:00')
+        ->where('status', '!=', 'deleted')
+        ->get();
+
+    expect($activeMarks)->toHaveCount(1)
+        ->and($activeMarks->sole()->status)->toBe('corrected')
+        ->and($activeMarks->sole()->metadata['revisions'][0]['action'])->toBe('keep_duplicate_as_corrected');
+});
+
+test('refuses to resolve a duplicate group containing a critical non-duplicate mark', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    $kept = RawMark::query()
+        ->where('pay_period_id', $context['period']->id)
+        ->where('event_at', '2026-07-20 06:00:00')
+        ->where('status', 'valid')
+        ->sole();
+    $duplicate = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    $critical = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'pending',
+        ]);
+
+    expect(fn () => app(DuplicateRawMarkResolver::class)->resolve(
+        $context['period'],
+        $context['employee']->external_id.'|2026-07-20 06:00:00',
+        $kept->id,
+        'No debe ocultar una marca crítica',
+        $context['actor']->id,
+        $file->id,
+    ))->toThrow(ValidationException::class);
+
+    expect($kept->fresh()->status)->toBe('valid')
+        ->and($duplicate->fresh()->status)->toBe('duplicate')
+        ->and($critical->fresh()->status)->toBe('pending');
+});
+
+test('refuses to promote an all-duplicate group containing an unassigned mark', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    $kept = RawMark::query()
+        ->where('pay_period_id', $context['period']->id)
+        ->where('event_at', '2026-07-20 06:00:00')
+        ->where('status', 'valid')
+        ->sole();
+    $kept->update(['status' => 'duplicate']);
+    $unassigned = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->create([
+            'employee_id' => null,
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+
+    expect(fn () => app(DuplicateRawMarkResolver::class)->resolve(
+        $context['period'],
+        $context['employee']->external_id.'|2026-07-20 06:00:00',
+        $kept->id,
+        'No debe promover marcas sin empleado',
+        $context['actor']->id,
+        $file->id,
+    ))->toThrow(ValidationException::class);
+
+    expect($kept->fresh()->status)->toBe('duplicate')
+        ->and($unassigned->fresh()->status)->toBe('duplicate');
+});
+
+test('rechecks readiness when a ready period is started directly', function () {
+    $context = attendanceReviewPageFixture();
+    $context['period']->update(['status' => 'ready']);
+
+    expect(fn () => app(StartPayrollProcessing::class)->start(
+        $context['period']->fresh(),
+        $context['actor'],
+        (string) Str::uuid(),
+    ))->toThrow(ValidationException::class, 'El período todavía tiene revisiones obligatorias pendientes.');
+
+    expect(PayrollRun::query()->where('pay_period_id', $context['period']->id)->count())->toBe(0);
+});
+
+test('resolving a cross-period duplicate removes only the current period duplicate', function () {
+    $context = attendanceReviewPageFixture();
+    $currentFile = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    $previousPeriod = PayPeriod::factory()->forCompany($context['company'])->create([
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-19',
+        'status' => 'uploaded',
+    ]);
+    $previousFile = UploadedFile::factory()->forCompany($context['company'])->forPayPeriod($previousPeriod)->create();
+    $kept = RawMark::factory()->forCompany($context['company'])->forPayPeriod($previousPeriod)
+        ->forUploadedFile($previousFile)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 09:00:00',
+            'status' => 'valid',
+        ]);
+    $duplicate = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($currentFile)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 09:00:00',
+            'status' => 'duplicate',
+        ]);
+    $this->actingAs($context['actor']);
+
+    Livewire::withQueryParams(['uploaded_file_id' => $currentFile->id])
+        ->test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('openDuplicateResolution', $context['employee']->external_id.'|2026-07-20 09:00:00')
+        ->assertSet('showDuplicateResolutionModal', true)
+        ->set('duplicateResolutionReason', 'Ya existía una marca válida en otro período')
+        ->call('confirmDuplicateResolution')
+        ->assertHasNoErrors();
+
+    expect($kept->fresh()->status)->toBe('valid')
+        ->and($duplicate->fresh()->status)->toBe('deleted');
+});
+
+test('resolving one duplicate group keeps one active record and audits deleted extras', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    $duplicate = RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+            'employee_external_id' => $context['employee']->external_id,
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'duplicate',
+        ]);
+    $this->actingAs($context['actor']);
+    $key = $context['employee']->external_id.'|2026-07-20 06:00:00';
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('openDuplicateResolution', $key)
+        ->assertSet('showDuplicateResolutionModal', true)
+        ->assertSee('Se conserva')
+        ->assertSee('Pasan a eliminados')
+        ->set('duplicateResolutionReason', 'Se verificó la fila original del reloj')
+        ->call('confirmDuplicateResolution')
+        ->assertHasNoErrors()
+        ->assertSet('showDuplicateResolutionModal', false);
+
+    expect(RawMark::query()->where('pay_period_id', $context['period']->id)
+        ->where('employee_external_id', $context['employee']->external_id)
+        ->where('event_at', '2026-07-20 06:00:00')
+        ->where('status', '!=', 'deleted')->count())->toBe(1)
+        ->and($duplicate->fresh()->status)->toBe('deleted')
+        ->and($duplicate->fresh()->metadata['revisions'][0]['action'])->toBe('resolve_duplicate')
+        ->and($duplicate->fresh()->metadata['revisions'][0]['kept_raw_mark_id'])->not->toBe($duplicate->id);
+});
+
+test('bulk duplicate resolution keeps one active record per group', function () {
+    $context = attendanceReviewPageFixture();
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    foreach (['2026-07-20 06:00:00', '2026-07-20 14:30:00'] as $eventAt) {
+        RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+            ->forUploadedFile($file)->forEmployee($context['employee'])->create([
+                'employee_external_id' => $context['employee']->external_id,
+                'event_at' => $eventAt,
+                'status' => 'duplicate',
+            ]);
+    }
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->call('openBulkDuplicateResolution')
+        ->assertSet('showDuplicateResolutionModal', true)
+        ->assertSet('duplicateResolutionBulk', true)
+        ->set('duplicateResolutionReason', 'Se conservaron las primeras filas verificadas')
+        ->call('confirmDuplicateResolution')
+        ->assertHasNoErrors();
+
+    foreach (['2026-07-20 06:00:00', '2026-07-20 14:30:00'] as $eventAt) {
+        expect(RawMark::query()->where('pay_period_id', $context['period']->id)
+            ->where('employee_external_id', $context['employee']->external_id)
+            ->where('event_at', $eventAt)
+            ->where('status', '!=', 'deleted')->count())->toBe(1);
+    }
 });
 
 test('groups the current overtime page by employee in collapsed sections', function () {
@@ -499,6 +797,114 @@ test('does not allow overtime decisions while the period is locked', function (s
     expect(OvertimeDecision::query()->count())->toBe(0);
 })->with(['processing', 'processed', 'approved', 'exported', 'cancelled']);
 
+test('exposes employee attendance summaries with detected overtime', function () {
+    $context = attendanceReviewPageFixture();
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('attendanceSummary', fn ($summaries): bool => $summaries->count() === 1
+            && $summaries->sole()['employee_id'] === $context['employee']->id
+            && $summaries->sole()['worked_minutes'] === 510
+            && $summaries->sole()['required_minutes'] === 480
+            && $summaries->sole()['overtime_minutes'] === 30
+            && $summaries->sole()['status'] === 'overtime')
+        ->assertSee('Jornada laboral')
+        ->assertSee('Horas extra')
+        ->assertSee('María Guardia');
+});
+
+test('exposes employee shortfall in the attendance summary', function () {
+    $context = attendanceReviewPageFixture('2026-07-20 06:15:00', '2026-07-20 14:00:00');
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('attendanceSummary', fn ($summaries): bool => $summaries->sole()['missing_minutes'] === 15
+            && $summaries->sole()['status'] === 'shortfall')
+        ->assertSee('Déficit');
+});
+
+test('uses 480 required minutes for duration-first Saturday no-mark and incomplete rows', function (bool $incomplete, int $missingMinutes) {
+    $context = durationFirstSaturdayAttendanceReviewFixture($incomplete);
+    $summary = app(AttendanceReviewSummaryReader::class)->forPeriod($context['period']);
+
+    expect($summary->sole()['required_minutes'])->toBe(480)
+        ->and($summary->sole()['missing_minutes'])->toBe($missingMinutes);
+})->with([
+    'no mark' => [false, 240],
+    'incomplete pair' => [true, 0],
+]);
+
+test('identifies an incomplete attendance pair in the employee summary', function () {
+    $context = attendanceReviewPageFixture();
+    $incomplete = Employee::factory()->forCompany($context['company'])->create([
+        'first_name' => 'Ana',
+        'last_name' => 'Incompleta',
+        'external_id' => 'SEG-102',
+        'hired_at' => '2026-07-01',
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign(
+        $incomplete,
+        WorkScheduleProfile::query()->where('company_id', $context['company']->id)->sole(),
+        '2026-07-01',
+        'Jornada diurna',
+    );
+    $file = UploadedFile::query()->where('pay_period_id', $context['period']->id)->sole();
+    RawMark::factory()->forCompany($context['company'])->forPayPeriod($context['period'])
+        ->forUploadedFile($file)->forEmployee($incomplete)->create([
+            'event_at' => '2026-07-20 06:00:00',
+            'status' => 'valid',
+        ]);
+    $this->actingAs($context['actor']);
+
+    Livewire::test(Revisar::class, ['payPeriod' => $context['period']])
+        ->assertViewHas('attendanceSummary', fn ($summaries): bool => $summaries->firstWhere('employee_id', $incomplete->id)['status'] === 'incomplete'
+            && $summaries->firstWhere('employee_id', $incomplete->id)['incomplete_count'] === 1)
+        ->assertSee('Incompleta');
+});
+
+function durationFirstSaturdayAttendanceReviewFixture(bool $incomplete): array
+{
+    $company = Company::factory()->create();
+    $profile = WorkScheduleProfile::factory()->forCompany($company)->create();
+    WorkSchedule::factory()->forProfile($profile)->create([
+        'day_of_week' => 6,
+        'start_time' => '08:00',
+        'end_time' => '12:00',
+        'base_ordinary_hours' => 4,
+        'is_working_day' => true,
+    ]);
+    $employee = Employee::factory()->forCompany($company)->create([
+        'first_name' => 'Sábado',
+        'last_name' => 'Revisión',
+        'external_id' => 'SEG-SAT',
+        'hired_at' => '2026-07-01',
+    ]);
+    app(EmployeeScheduleAssigner::class)->assign($employee, $profile, '2026-07-01', 'Jornada sábado');
+    $period = PayPeriod::factory()->forCompany($company)->create([
+        'start_date' => '2026-07-18',
+        'end_date' => '2026-07-18',
+        'status' => 'uploaded',
+    ]);
+    $file = UploadedFile::factory()->forCompany($company)->forPayPeriod($period)->create();
+    if ($incomplete) {
+        RawMark::factory()->forCompany($company)->forPayPeriod($period)
+            ->forUploadedFile($file)->forEmployee($employee)->create([
+                'event_at' => '2026-07-18 08:00:00',
+                'status' => 'valid',
+            ]);
+    }
+
+    WorkScheduleProfilePublication::withoutCompanyScope()
+        ->where('profile_id', $profile->id)
+        ->sole()
+        ->update(['payroll_policy_key' => WorkScheduleProfilePublication::DURATION_FIRST_V2]);
+
+    $actor = User::factory()->forCompany($company)->create()->assignRole('company_admin');
+    app(CurrentCompany::class)->set($company);
+
+    return compact('company', 'employee', 'period', 'actor');
+}
+
 function attendanceReviewPageFixture(
     string $entryAt = '2026-07-20 06:00:00',
     string $exitAt = '2026-07-20 14:30:00',
@@ -528,6 +934,7 @@ function attendanceReviewPageFixture(
     foreach ([$entryAt, $exitAt] as $eventAt) {
         RawMark::factory()->forCompany($company)->forPayPeriod($period)
             ->forUploadedFile($file)->forEmployee($employee)->create([
+                'employee_external_id' => $employee->external_id,
                 'event_at' => $eventAt,
                 'status' => 'valid',
             ]);
