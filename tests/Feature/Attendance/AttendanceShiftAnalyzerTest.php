@@ -511,6 +511,88 @@ test('keeps shifted duration-first eight-hour days at 480 ordinary minutes', fun
     '12:00-20:00' => ['2026-07-20 12:00:00', '2026-07-20 20:00:00'],
 ]);
 
+test('duration-first weekdays use total worked duration when entry starts late', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 10:00:00', '2026-07-20 18:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->workedMinutes)->toBe(480)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('duration-first weekdays create only a sixty-minute shortfall after seven hours', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 10:00:00', '2026-07-20 17:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $deficit = $analysis->deficits->sole();
+
+    expect($analysis->workedMinutes)->toBe(420)
+        ->and($analysis->scheduledMinutes)->toBe(420)
+        ->and($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(60)
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('duration-first weekdays create only excess overtime after nine hours', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-20', '2026-07-20 10:00:00', '2026-07-20 19:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(540)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($candidate->minutes)->toBe(60);
+});
+
+test('duration-first saturday recognizes four physical hours plus four legal hours', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 08:00:00', '2026-07-18 12:00:00', '08:00', '12:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+
+    expect($analysis->workedMinutes)->toBe(240)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('duration-first saturday shortfall is limited to missing physical hours', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 08:00:00', '2026-07-18 11:00:00', '08:00', '12:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $deficit = $analysis->deficits->sole();
+
+    expect($analysis->workedMinutes)->toBe(180)
+        ->and($analysis->scheduledMinutes)->toBe(420)
+        ->and($deficit->kind)->toBe('daily_shortfall')
+        ->and($deficit->minutes)->toBe(60)
+        ->and($analysis->overtimeCandidates)->toBeEmpty();
+});
+
+test('duration-first saturday creates overtime only above four physical hours', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        '2026-07-18', '2026-07-18 08:00:00', '2026-07-18 14:00:00', '08:00', '12:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(360)
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($candidate->kind)->toBe('post_quota_overtime')
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-18 12:00:00')
+        ->and($candidate->minutes)->toBe(120);
+});
+
 test('allocates each duration-first post-quota worked example by wall clock', function (
     string $entryAt,
     string $exitAt,
@@ -596,22 +678,20 @@ test('duration-first incomplete quota emits no entry variation', function () {
         ->and($analysis->variations)->toBeEmpty();
 });
 
-test('duration-first keeps an overnight daily shortfall on its starting work date', function () {
+test('duration-first recognizes saturday physical time across midnight from its starting work date', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
         '2026-07-18', '2026-07-18 18:00:00', '2026-07-19 01:00:00', '18:00', '02:00',
         payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
     ));
-    $deficit = $analysis->deficits->sole();
+    $candidate = $analysis->overtimeCandidates->sole();
 
     expect($analysis->workDate->toDateString())->toBe('2026-07-18')
         ->and($analysis->workedMinutes)->toBe(420)
-        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(420)
-        ->and($analysis->scheduledRates->extra100Minutes)->toBe(0)
-        ->and($deficit->kind)->toBe('daily_shortfall')
-        ->and($deficit->minutes)->toBe(60)
-        ->and($deficit->start)->toBeNull()
-        ->and($deficit->end)->toBeNull()
-        ->and($deficit->rateMinutes->ordinaryMinutes)->toBe(60);
+        ->and($analysis->scheduledMinutes)->toBe(480)
+        ->and($analysis->scheduledRates->ordinaryMinutes)->toBe(480)
+        ->and($analysis->deficits)->toBeEmpty()
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-18 22:00:00')
+        ->and($candidate->minutes)->toBe(180);
 });
 
 test('duration-first completed overtime hour has zero transfer residual', function () {
@@ -645,9 +725,11 @@ test('duration-first aligns transfer exclusion to a Saturday overnight work date
     expect($analysis->workDate->toDateString())->toBe('2026-07-18')
         ->and($analysis->exitAt?->toDateTimeString())->toBe('2026-07-19 03:20:00')
         ->and($analysis->excludedTransferMinutes)->toBe(20)
-        ->and($candidate->start->toDateTimeString())->toBe('2026-07-19 02:00:00')
+        ->and($candidate->start->toDateTimeString())->toBe('2026-07-18 22:00:00')
         ->and($candidate->end->toDateTimeString())->toBe('2026-07-19 03:00:00')
-        ->and($candidate->rateMinutes->extra75Minutes)->toBe(60);
+        ->and($candidate->minutes)->toBe(300)
+        ->and($candidate->rateMinutes->extra50Minutes)->toBe(120)
+        ->and($candidate->rateMinutes->extra75Minutes)->toBe(180);
 });
 
 test('duration-first excludes a 25-minute transfer residual exactly', function () {
@@ -697,16 +779,30 @@ test('duration-first keeps residual when no overtime hour is complete', function
         ->and($analysis->overtimeCandidates->sole()->minutes)->toBe(25);
 });
 
-test('overrides the entire duration-first interval on a Sunday or holiday', function (
-    string $workDate,
-    bool $isHoliday,
-) {
+test('duration-first exposes Sunday work as one extra hundred overtime candidate', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
-        workDate: $workDate,
-        entryAt: "{$workDate} 06:00:00",
-        exitAt: "{$workDate} 16:00:00",
+        workDate: '2026-07-19',
+        entryAt: '2026-07-19 06:00:00',
+        exitAt: '2026-07-19 16:00:00',
         payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
-    ), isHoliday: $isHoliday);
+    ));
+    $candidate = $analysis->overtimeCandidates->sole();
+
+    expect($analysis->workedMinutes)->toBe(600)
+        ->and($analysis->scheduledMinutes)->toBe(0)
+        ->and($analysis->scheduledRates->totalMinutes())->toBe(0)
+        ->and($candidate->kind)->toBe('non_working')
+        ->and($candidate->minutes)->toBe(600)
+        ->and($candidate->rateMinutes->extra100Minutes)->toBe(600);
+});
+
+test('duration-first keeps configured holidays directly payable at extra hundred', function () {
+    $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(
+        workDate: '2026-07-20',
+        entryAt: '2026-07-20 06:00:00',
+        exitAt: '2026-07-20 16:00:00',
+        payrollPolicyKey: WorkScheduleProfilePublication::DURATION_FIRST_V2,
+    ), isHoliday: true);
 
     expect($analysis->workedMinutes)->toBe(600)
         ->and($analysis->scheduledMinutes)->toBe(600)
@@ -716,10 +812,7 @@ test('overrides the entire duration-first interval on a Sunday or holiday', func
         ->and($analysis->scheduledRates->extra75Minutes)->toBe(0)
         ->and($analysis->scheduledRates->extra100Minutes)->toBe(600)
         ->and($analysis->overtimeCandidates)->toBeEmpty();
-})->with([
-    'Sunday work date' => ['2026-07-19', false],
-    'configured holiday work date' => ['2026-07-20', true],
-]);
+});
 
 test('rejects a resolved occurrence with an unsupported immutable payroll policy key', function () {
     $analysis = app(AttendanceShiftAnalyzer::class)->analyze(attendanceOccurrence(

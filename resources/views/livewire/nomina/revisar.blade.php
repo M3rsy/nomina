@@ -19,6 +19,11 @@
         $summaryCorrected = (int) ($summary['corrected'] ?? 0);
         $summaryDeleted = (int) ($summary['deleted'] ?? 0);
         $summaryJustified = (int) ($summary['justified'] ?? 0);
+        $attendanceEmployeeCount = $attendanceSummary->count();
+        $attendanceMissingMinutes = $attendanceSummary->sum(fn ($employee) => (int) $employee['missing_minutes']);
+        $attendanceAbsenceCount = $attendanceSummary->sum(fn ($employee) => (int) $employee['absence_count']);
+        $attendanceOvertimeMinutes = $attendanceSummary->sum(fn ($employee) => (int) $employee['overtime_minutes']);
+        $attendanceIncompleteCount = $attendanceSummary->sum(fn ($employee) => (int) $employee['incomplete_count'] + (int) $employee['ambiguous_count']);
 
         $statusOptions = [
             '' => 'Todos',
@@ -27,6 +32,7 @@
             'duplicate' => 'Duplicados',
             'out_of_period' => 'Fuera de período',
             'unknown_employee' => 'Empleados desconocidos',
+            'invalid' => 'Inválidos',
             'corrected' => 'Corregidos',
             'deleted' => 'Eliminados',
             'justified' => 'Justificados',
@@ -116,6 +122,21 @@
             </div>
         @endif
 
+        @if ($criticalReadiness['has_blockers'])
+            <div class="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-950" role="alert">
+                <p class="font-bold">No se puede procesar la nómina todavía.</p>
+                <p class="mt-1 text-rose-800">Resuelva estos incidentes críticos antes de continuar:</p>
+                <ul class="mt-2 list-disc space-y-1 pl-5 text-rose-900">
+                    @foreach ($criticalReadiness['incidents'] as $incident)
+                        <li>{{ $incident }}</li>
+                    @endforeach
+                </ul>
+                @if ($readyMessage && ! $showReadyConfirm)
+                    <p class="mt-3 rounded-lg border border-rose-200 bg-white/70 px-3 py-2 font-semibold">{{ $readyMessage }}</p>
+                @endif
+            </div>
+        @endif
+
         @if ($readinessBlockers !== [])
             <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950" role="alert">
                 <p class="font-bold">Revisión obligatoria pendiente: {{ count($readinessBlockers) }} {{ count($readinessBlockers) === 1 ? 'caso' : 'casos' }}</p>
@@ -157,23 +178,170 @@
         @endif
     @endcan
 
-    <section class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <section class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</p>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Registros</p>
             <p class="mt-2 text-3xl font-black text-slate-900">{{ number_format($summaryTotal) }}</p>
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Válidos</p>
-            <p class="mt-2 text-3xl font-black text-emerald-700">{{ number_format($summaryValid) }}</p>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Empleados</p>
+            <p class="mt-2 text-3xl font-black text-slate-900">{{ number_format($attendanceEmployeeCount) }}</p>
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Desconocidos</p>
-            <p class="mt-2 text-3xl font-black text-rose-700">{{ number_format($summaryUnknown) }}</p>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Duplicados</p>
+            <p class="mt-2 text-3xl font-black text-amber-700">{{ number_format($duplicateSummary['duplicate_records_to_resolve']) }}</p>
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Justificados</p>
-            <p class="mt-2 text-3xl font-black text-violet-700">{{ number_format($summaryJustified) }}</p>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Horas faltantes</p>
+            <p class="mt-2 text-3xl font-black text-rose-700">{{ number_format($attendanceMissingMinutes / 60, 2, ',', '.') }}</p>
         </article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Faltas</p>
+            <p class="mt-2 text-3xl font-black text-rose-700">{{ number_format($attendanceAbsenceCount) }}</p>
+        </article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Horas extra</p>
+            <p class="mt-2 text-3xl font-black text-sky-700">{{ number_format($attendanceOvertimeMinutes / 60, 2, ',', '.') }}</p>
+        </article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Incompletas</p>
+            <p class="mt-2 text-3xl font-black text-orange-700">{{ number_format($attendanceIncompleteCount) }}</p>
+        </article>
+    </section>
+
+    <section class="mt-6 rounded-2xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Control de identidad</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Registros duplicados</h2>
+                <p class="mt-1 text-sm text-slate-600">Cada grupo comparte empleado y fecha/hora. Se conserva una marca y las demás pasan a estado eliminado lógico.</p>
+            </div>
+            @if ($duplicateSummary['duplicate_groups'] > 0 && ! $isBlocked)
+                <x-ui.loading-button
+                    type="button"
+                    wire:click="openBulkDuplicateResolution"
+                    target="openBulkDuplicateResolution"
+                    loading-label="Abriendo…"
+                    class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700"
+                >
+                    Resolver todos
+                </x-ui.loading-button>
+            @endif
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-3">
+            <div class="rounded-xl border border-amber-200 bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Grupos</p>
+                <p class="mt-1 text-2xl font-black text-slate-900">{{ number_format($duplicateSummary['duplicate_groups']) }}</p>
+            </div>
+            <div class="rounded-xl border border-amber-200 bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Registros a resolver</p>
+                <p class="mt-1 text-2xl font-black text-amber-700">{{ number_format($duplicateSummary['duplicate_records_to_resolve']) }}</p>
+            </div>
+            <div class="rounded-xl border border-amber-200 bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Empleados afectados</p>
+                <p class="mt-1 text-2xl font-black text-slate-900">{{ number_format($duplicateSummary['employee_count_with_duplicates']) }}</p>
+            </div>
+        </div>
+
+        <div class="mt-4 space-y-2">
+            @forelse ($duplicateSummary['groups'] as $group)
+                <article class="rounded-xl border border-amber-200 bg-white px-4 py-3">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $group['employee_name'] ?? 'Empleado no identificado' }}</p>
+                            <p class="text-sm text-slate-600">Código {{ $group['employee_external_id'] }} · {{ \Carbon\CarbonImmutable::parse($group['event_at'])->format('d/m/Y H:i:s') }} · {{ $group['total_records'] }} registros</p>
+                        </div>
+                        <x-ui.loading-button
+                            type="button"
+                            wire:click="openDuplicateResolution('{{ $group['key'] }}')"
+                            target="openDuplicateResolution('{{ $group['key'] }}')"
+                            loading-label="Abriendo…"
+                            :disabled="$isBlocked"
+                            class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-40"
+                        >
+                            Revisar grupo
+                        </x-ui.loading-button>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                        <span class="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">Conservar fila #{{ $group['kept_candidate']['row_number'] ?? '—' }}</span>
+                        @foreach ($group['removable_records'] as $removable)
+                            <span class="rounded-full bg-rose-100 px-2.5 py-1 font-semibold text-rose-800">Resolver fila #{{ $removable['row_number'] ?? '—' }}</span>
+                        @endforeach
+                    </div>
+                </article>
+            @empty
+                <p class="rounded-xl border border-dashed border-amber-300 bg-white px-4 py-5 text-center text-sm text-slate-600">No hay grupos duplicados pendientes.</p>
+            @endforelse
+        </div>
+    </section>
+
+    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Resumen por empleado</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">Jornada laboral</h2>
+                <p class="mt-1 text-sm text-slate-600">Tiempo trabajado, faltantes y horas extra detectadas según la evaluación vigente.</p>
+            </div>
+            <p class="text-sm font-semibold text-slate-700">{{ $attendanceSummary->count() }} empleados</p>
+        </div>
+
+        <div class="mt-5 grid gap-4 xl:grid-cols-2">
+            @forelse ($attendanceSummary as $employeeSummary)
+                @php
+                    $statusClass = match ($employeeSummary['status']) {
+                        'shortfall' => 'bg-amber-100 text-amber-900',
+                        'overtime' => 'bg-sky-100 text-sky-900',
+                        'absence', 'incomplete', 'inconsistent' => 'bg-rose-100 text-rose-900',
+                        default => 'bg-emerald-100 text-emerald-900',
+                    };
+                @endphp
+                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                    <header class="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                        <div>
+                            <p class="font-bold text-slate-950">{{ $employeeSummary['employee_name'] }}</p>
+                            <p class="text-xs text-slate-500">Código {{ $employeeSummary['employee_code'] ?? '—' }}</p>
+                        </div>
+                        <span class="rounded-full px-2.5 py-1 text-xs font-bold {{ $statusClass }}">{{ $employeeSummary['status_label'] }}</span>
+                    </header>
+
+                    <div class="grid grid-cols-2 gap-2 p-4 text-sm sm:grid-cols-4">
+                        <div><p class="text-xs text-slate-500">Requeridos</p><p class="font-bold text-slate-900">{{ $employeeSummary['required_minutes'] }} min</p></div>
+                        <div><p class="text-xs text-slate-500">Trabajados</p><p class="font-bold text-slate-900">{{ $employeeSummary['worked_minutes'] }} min</p></div>
+                        <div><p class="text-xs text-slate-500">Faltantes</p><p class="font-bold text-amber-800">{{ $employeeSummary['missing_minutes'] }} min</p></div>
+                        <div><p class="text-xs text-slate-500">Horas extra</p><p class="font-bold text-sky-800">{{ $employeeSummary['overtime_minutes'] }} min</p></div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2 px-4 pb-4 text-xs text-slate-600">
+                        <span>Faltas: <strong>{{ $employeeSummary['absence_count'] }}</strong></span>
+                        <span>Incompletas: <strong>{{ $employeeSummary['incomplete_count'] }}</strong></span>
+                        <span>Ambiguas: <strong>{{ $employeeSummary['ambiguous_count'] }}</strong></span>
+                    </div>
+
+                    <details class="border-t border-slate-200 bg-white">
+                        <summary class="cursor-pointer px-4 py-3 text-sm font-bold text-indigo-700">Ver detalle diario ({{ $employeeSummary['rows']->count() }})</summary>
+                        <div class="space-y-2 px-4 pb-4">
+                            @foreach ($employeeSummary['rows'] as $day)
+                                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="font-bold text-slate-900">{{ $day['date']->format('d/m/Y') }}</span>
+                                        <span class="font-semibold text-slate-700">{{ $day['status_label'] }}</span>
+                                    </div>
+                                    <div class="mt-2 grid gap-1 text-slate-600 sm:grid-cols-2">
+                                        <span>{{ $day['entry']?->format('H:i') ?? '—' }} → {{ $day['exit']?->format('H:i') ?? '—' }}</span>
+                                        <span>Trabajado {{ $day['worked_minutes'] }} · Requerido {{ $day['required_minutes'] }}</span>
+                                        <span>Diferencia {{ $day['difference_minutes'] }} · Extra {{ $day['overtime_minutes'] }}</span>
+                                        <span class="font-semibold text-slate-700">{{ $day['incident'] }}</span>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </details>
+                </article>
+            @empty
+                <p class="col-span-full rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">No hay jornadas para mostrar con el filtro actual.</p>
+            @endforelse
+        </div>
     </section>
 
     <section class="mt-6 grid gap-4 lg:grid-cols-3">
@@ -843,6 +1011,51 @@
                     <div class="flex justify-end gap-2 sm:col-span-2">
                         <button type="button" wire:click="closeCreateEmployeeModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancelar</button>
                         <x-ui.loading-button type="submit" target="saveCreatedEmployee" loading-label="Creando…" class="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Crear y asignar</x-ui.loading-button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
+
+    @if ($showDuplicateResolutionModal)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Resolución auditada</p>
+                <h2 class="mt-1 text-xl font-black text-slate-950">{{ $duplicateResolutionBulk ? 'Resolver registros duplicados' : 'Resolver grupo duplicado' }}</h2>
+                <p class="mt-2 text-sm text-slate-600">La vista previa conserva una marca activa por grupo y marca las demás como eliminadas lógicamente. No se borra ninguna evidencia.</p>
+
+                <div class="mt-4 space-y-4">
+                    @foreach ($duplicateResolutionPreview as $group)
+                        <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <p class="font-bold text-slate-950">{{ $group['employee_name'] ?? 'Empleado no identificado' }} · {{ $group['employee_external_id'] }}</p>
+                            <p class="mt-1 text-sm text-slate-600">{{ \Carbon\CarbonImmutable::parse($group['event_at'])->format('d/m/Y H:i:s') }}</p>
+                            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                                    <p class="font-bold text-emerald-900">Se conserva</p>
+                                    <p class="mt-1 text-emerald-900">Fila #{{ $group['kept_candidate']['row_number'] ?? '—' }} · {{ $group['kept_candidate']['status'] }}</p>
+                                    <p class="text-xs text-emerald-800">{{ $group['kept_candidate']['file_name'] ?? 'Origen manual' }}</p>
+                                </div>
+                                <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm">
+                                    <p class="font-bold text-rose-900">Pasan a eliminados</p>
+                                    @foreach ($group['removable_records'] as $removable)
+                                        <p class="mt-1 text-rose-900">Fila #{{ $removable['row_number'] ?? '—' }} · {{ $removable['status'] }} · {{ $removable['file_name'] ?? 'Origen manual' }}</p>
+                                    @endforeach
+                                </div>
+                            </div>
+                        </article>
+                    @endforeach
+                </div>
+
+                <form wire:submit.prevent="confirmDuplicateResolution" class="mt-5 space-y-4">
+                    <label for="duplicate_resolution_reason" class="block text-sm">
+                        <span class="font-semibold text-slate-900">Motivo obligatorio</span>
+                        <textarea id="duplicate_resolution_reason" wire:model="duplicateResolutionReason" rows="3" maxlength="500" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Explique cómo se verificó la marca que se conserva"></textarea>
+                    </label>
+                    @error('duplicateResolutionReason') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    @error('duplicateResolution') <p class="text-sm text-rose-700">{{ $message }}</p> @enderror
+                    <div class="flex justify-end gap-2">
+                        <button type="button" wire:click="closeDuplicateResolutionModal" class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                        <x-ui.loading-button type="submit" target="confirmDuplicateResolution" loading-label="Resolviendo…" :disabled="$isBlocked" class="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-40">Confirmar resolución</x-ui.loading-button>
                     </div>
                 </form>
             </div>
